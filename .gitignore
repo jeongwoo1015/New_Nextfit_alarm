@@ -33,3 +33,32 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Android local configuration
+local.properties
+
+# API / Secret keys
+*.jks
+*.keystore
+
+# IDE
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
