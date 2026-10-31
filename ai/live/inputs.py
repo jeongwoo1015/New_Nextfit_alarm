@@ -85,6 +85,7 @@ class BriefingInput:
     events_today: tuple[CalendarEvent, ...] = ()
     weather: Weather | None = None
     night: NightRecordView | None = None
+    strategy_block: str = ""           # 개인화 Agent가 만든 [오늘의 전략] 문장(AgentDecision.briefing_block). 비어 있으면 프롬프트가 달라지지 않는다
 
 
 @dataclass(frozen=True)
@@ -97,3 +98,4 @@ class CoachingInput:
     next_program_name: str = ""        # 이어지는 기본 루틴 프리셋 이름
     resumed: bool = False              # True면 전체 안내를 이미 했으므로 생략
     night: NightRecordView | None = None
+    strategy_block: str = ""           # 개인화 Agent가 만든 [오늘의 전략] 문장(AgentDecision.coaching_block). 비어 있으면 프롬프트가 달라지지 않는다

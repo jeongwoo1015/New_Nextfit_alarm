@@ -1,5 +1,6 @@
 """아침 브리핑 지시문. 먼저 일어났는지 묻고, 일어났다는 답을 들으면 브리핑하고, 다음 세션(콘텐츠 또는 기본 루틴)을 시작할 준비가 됐는지 물어
 답에 따라 넘어간다. 콘텐츠와 기본 루틴의 진행은 각각 별도 세션(단계 세션)에서 한다."""
+from ...personalization.strategy import SHORT_BRIEFING_MARK
 from ..inputs import BriefingInput
 from .common import (SAFETY_RULES, VOICE_RULES, clean, events_block, join_blocks, night_record_block,
                      persona_block, weather_block)
@@ -16,7 +17,7 @@ BRIEFING_RULES = """당신은 사용자의 아침 루틴 시작 전에 브리핑
 3. {closing_item}
 
 규칙:
-- 2번의 브리핑은 4~6문장으로 말하고 그 안에서는 질문하지 않는다. 모든 문장을 평서문으로 끝낸다. 질문은 1번의 기상 확인과 3번의 준비 확인에만 쓴다.
+- 2번의 브리핑은 {length_rule}그 안에서는 질문하지 않는다. 모든 문장을 평서문으로 끝낸다. 질문은 1번의 기상 확인과 3번의 준비 확인에만 쓴다.
 - 어젯밤 컨디션이 좋지 않았다면 활기차게 하라고 강요하지 말고 부담 없는 말로 시작을 권한다. 응원 표현은 한 번만 쓴다.
 - 어젯밤 잘 잤는지, 지금 기분이 어떤지는 알 수 없으니 단정하지 않는다.
 - [어젯밤 대화 기록]의 인사이트와 격려는 어젯밤 정리해 둔 내용이지 사용자가 한 말이 아니다. 사용자가 그렇게 말했다고 하지 않는다.
@@ -29,6 +30,11 @@ CLOSING_NEXT = ("마무리: 브리핑 마지막에 {next}시작할 준비가 됐
                 "아직이라고 하면 재촉하지 말고 준비되면 말해 달라고 한 뒤 기다린다. 콘텐츠나 루틴의 진행은 이 대화에서 하지 않는다(다음 세션에서 한다).")
 CLOSING_NONE = ("마무리: 오늘은 코칭을 하지 않는 날이므로 루틴이나 콘텐츠를 시작하자는 말도, 시작할 준비가 됐는지 묻는 질문도 하지 않는다. "
                 "브리핑의 마지막 문장은 하루를 응원하는 평서문으로 끝내고, 사용자가 끝내겠다고 말할 때까지 대화를 이어 간다(start_routine은 호출하지 않는다).")
+
+# 브리핑 분량 규칙. 전략이 '짧게'인 날에는 4~6문장 규칙 자체를 바꿔 쓴다(규칙 두 개를 겹쳐 두면 AI가 긴 쪽을 따랐다)
+LENGTH_NORMAL = "4~6문장으로 말하고 "
+LENGTH_SHORT = ("오늘은 짧게, 전체 2~3문장으로 말한다. a~d를 모두 말하지 말고 지금 시각, 날씨 한마디, 가장 중요한 일정 하나 정도만 골라 말하며 "
+                "어젯밤 이야기는 한 문장 이하로 줄이거나 건너뛴다. ")
 
 END_RULE = "대화는 사용자가 끝낸다. 사용자가 대화를 끝내겠다고 분명히 말하면(예: 이만 끊을게요) 짧은 작별 인사 뒤 end_session을 호출한다. AI가 먼저 끝내거나 호출하지 않는다."
 
@@ -44,9 +50,10 @@ def briefing_prompt(inp: BriefingInput) -> str:
         closing = CLOSING_NEXT.format(next=routine, example="이제 아침 루틴을 시작할 준비가 됐어요?")
     now = f"[현재 시각]\n- {inp.now_hhmm}" if inp.now_hhmm else ""
     return join_blocks(
-        BRIEFING_RULES.format(closing_item=closing), END_RULE, SAFETY_RULES, VOICE_RULES,
+        BRIEFING_RULES.format(closing_item=closing, length_rule=LENGTH_SHORT if SHORT_BRIEFING_MARK in inp.strategy_block else LENGTH_NORMAL), END_RULE, SAFETY_RULES, VOICE_RULES,
         persona_block(inp.persona), now,
         events_block("오늘 일정", inp.events_today, "없음 (등록된 일정이 없거나 가져오지 못했다)"),
         weather_block(inp.weather) or "[오늘 날씨]\n없음 (날씨를 가져오지 못했다)",
         night_record_block(inp.night),
+        inp.strategy_block,
     )

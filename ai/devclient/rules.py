@@ -126,10 +126,13 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
         add("브리핑: 일어났다는 답 뒤에 브리핑함", HARD, bool(brief.strip()), "브리핑이 없음")
         if brief.strip():
             add("브리핑: 알람 시각·알람 언급 없음", HARD, not ALARM_WORDS.search(brief), brief)
+            short = bool(e.get("short_briefing"))       # 전략이 '짧게'인 날은 2~3문장(+준비 확인 질문)
             if coaching > 0:
-                add("브리핑: 4~7문장(마지막은 준비 확인 질문)", HARD, 4 <= n <= 7 and brief.count("?") == 1 and brief.strip().endswith("?"), f"{n}문장, 물음표 {brief.count('?')}개")
+                lo, hi = (2, 4) if short else (4, 7)
+                add(f"브리핑: {lo}~{hi}문장(마지막은 준비 확인 질문)", HARD, lo <= n <= hi and brief.count("?") == 1 and brief.strip().endswith("?"), f"{n}문장, 물음표 {brief.count('?')}개")
             else:
-                add("브리핑: 코칭 0분이면 4~6문장, 질문 없음", HARD, 4 <= n <= 6 and "?" not in brief, f"{n}문장, 물음표 {brief.count('?')}개")
+                lo, hi = (2, 3) if short else (4, 6)
+                add(f"브리핑: 코칭 0분이면 {lo}~{hi}문장, 질문 없음", HARD, lo <= n <= hi and "?" not in brief, f"{n}문장, 물음표 {brief.count('?')}개")
                 add("브리핑: 코칭 0분이면 시작 권유 없음", HARD, not re.search(r"(루틴|콘텐츠|코칭|퀴즈).{0,10}시작", brief), brief)
             if e.get("now_words"):
                 add("브리핑: 지금 시각 언급", SOFT, any(w in brief for w in e["now_words"]), brief)

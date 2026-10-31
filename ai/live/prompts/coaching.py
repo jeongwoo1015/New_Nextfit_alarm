@@ -68,4 +68,5 @@ def coaching_prompt(inp: CoachingInput) -> str:
         CONTENT_INTRO if content else COACH_INTRO, STEP_RULES.format(label=label, resume_line=RESUME_LINE if inp.resumed else ""), closing,
         SAFETY_RULES, VOICE_RULES, persona_block(inp.persona), steps,
         night_record_block(inp.night) if inp.night else "",
+        inp.strategy_block,
     )

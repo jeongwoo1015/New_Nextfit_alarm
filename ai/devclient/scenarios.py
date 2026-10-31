@@ -1,8 +1,9 @@
 """가상 사용자 시나리오. 사용자 발화는 고정 스크립트라 AI의 말에 따라 바뀌지 않는다."""
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from ..live.inputs import (BriefingInput, CalendarEvent, CoachingInput, NightInput, NightRecordView, Persona,
                            Step, Weather)
+from ..personalization.strategy import Strategy, strategy_block
 from ..tasks.content_steps import fallback_steps
 from ..tasks.routine_changes import RoutineItem
 
@@ -101,3 +102,18 @@ SCENARIOS = {s.name: s for s in [
              expect={"verdicts": {1: "done", 2: "done", 3: "done"}, "step_names": [s.name for s in QUIZ],
                      "answers": ["서울", "열두 달", "세종대왕"], "farewell": True}),
 ]}
+
+
+def _with_strategy(base: str, name: str, strategy: Strategy, kind: str, **expect_extra) -> Scenario:
+    """기존 시나리오에 개인화 전략 블록만 붙인 것. 같은 사용자 발화로 전략이 말하는 방식을 바꾸는지 비교한다."""
+    b = SCENARIOS[base]
+    block = strategy_block(strategy, kind)
+    return Scenario(name, b.kind, replace(b.inp, strategy_block=block), b.utterances, b.tone, {**b.expect, **expect_extra}, b.routine_items)
+
+
+SCENARIOS.update({s.name: s for s in [
+    _with_strategy("briefing_full", "briefing_short", Strategy(briefing_length="short", strategy_id="short"), "briefing", short_briefing=True),
+    _with_strategy("briefing_full", "briefing_cheer", Strategy(encouragement="high", strategy_id="cheer"), "briefing"),
+    _with_strategy("coaching_routine", "coaching_soft", Strategy(coaching_intensity="soft", strategy_id="gentle"), "coaching"),
+    _with_strategy("coaching_routine", "coaching_firm", Strategy(coaching_intensity="firm", strategy_id="push"), "coaching"),
+]})
