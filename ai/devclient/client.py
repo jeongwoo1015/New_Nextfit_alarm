@@ -86,7 +86,7 @@ class DevClient:
                     raise DevClientError("setupComplete가 오지 않았어요")
                 self._turn(ws, log, "시작", text=start_signal(kind))
                 for u in utterances:
-                    if log.ended_by == "end_session":
+                    if log.ended_by in ("end_session", "start_routine"):
                         break
                     self._turn(ws, log, u, audio=u)
         except DevClientError:
@@ -133,8 +133,8 @@ class DevClient:
                 replies = []
                 for c in m["toolCall"].get("functionCalls", []):
                     turn.calls.append({"name": c.get("name"), "args": c.get("args") or {}})
-                    if c.get("name") == "end_session":   # 앱은 응답하지 않고 마무리 음성이 끝나면 연결을 닫는다
-                        log.ended_by = "end_session"
+                    if c.get("name") in ("end_session", "start_routine"):   # 앱은 응답하지 않고 음성이 끝나면 연결을 닫고(다음 세션을 시작하고)
+                        log.ended_by = c.get("name")
                         continue
                     replies.append({"id": c.get("id"), "name": c.get("name"), "response": {"result": "ok"}})
                 if replies:
