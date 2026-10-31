@@ -15,7 +15,7 @@ VOICES = {"FEMALE": "Kore", "MALE": "Puck", "NEUTRAL": "Zephyr"}
 # 앱이 연결 직후 첫 입력으로 보내는 글자. 사용자가 말한 것이 아니라 시작 신호다.
 START_SIGNALS = {
     "night": "대화를 시작해 주세요.",
-    "briefing": "브리핑을 시작해 주세요.",
+    "briefing": "브리핑을 시작해 주세요. 먼저 일어났는지만 묻고, 사용자가 대답할 때까지 멈춰서 기다려 주세요.",
     # 실험 E: 신호가 짧으면 AI가 사용자 답을 듣기 전에 1번 단계를 완료로 기록하고 2번 단계까지 안내했다
     "coaching": "코칭을 시작해 주세요. 1번 단계만 안내하고, 사용자가 대답할 때까지 멈춰서 기다려 주세요. 아직 아무것도 기록하지 마세요.",
 }
@@ -35,7 +35,7 @@ def build_setup(kind: str, inp) -> dict:
             "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": VOICES.get(inp.persona.voice_type, VOICES["FEMALE"])}}},
         },
         "systemInstruction": {"parts": [{"text": prompt}]},
-        "tools": tools_for(kind),
+        "tools": tools_for(kind, inp),
         "inputAudioTranscription": {},
         "outputAudioTranscription": {},
         "sessionResumption": {},

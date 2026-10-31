@@ -75,10 +75,13 @@ class NightInput:
 @dataclass(frozen=True)
 class BriefingInput:
     persona: Persona = Persona()
-    morning_call_type: str = "ROUTINE"  # ROUTINE / CONTENT
-    program_name: str = ""             # 프리셋 이름 또는 콘텐츠 이름 (전환 문장에 사용)
-    coaching_min: int = 20             # 적용 코칭 길이: 10 / 20 / 0(수행 안 함, 하루 한정 변경)
-    target_wake_time: str = ""         # 오늘 적용 기상 시각 "HH:MM"
+    morning_call_type: str = "ROUTINE"  # (지시문에서는 쓰지 않음. 콘텐츠와 기본 루틴이 함께 진행될 수 있어 content_steps / routine_follows로 구분한다)
+    program_name: str = ""             # 기본 루틴 프리셋 이름 (전환 문장에 사용)
+    coaching_min: int = 20             # 적용 코칭 길이: 10 / 20 / 0(수행 안 함, 하루 한정 변경). 0이면 콘텐츠·루틴 모두 진행하지 않는다
+    content_name: str = ""             # 콘텐츠 이름 (예: 퀴즈). 있으면 브리핑 뒤에 콘텐츠 세션이 먼저 이어진다
+    routine_follows: bool = True       # 기본 루틴 세션이 (콘텐츠가 있으면 그 뒤에) 이어지는가. 콘텐츠만 있는 아침이면 False
+    now_hhmm: str = ""                 # 브리핑 시작 시각(KST) "HH:MM" — 이미 일어난 뒤라 알람 시각 대신 현재 시각을 말한다
+    target_wake_time: str = ""         # (지시문에서는 쓰지 않음. 서버 호환용으로 남김)
     events_today: tuple[CalendarEvent, ...] = ()
     weather: Weather | None = None
     night: NightRecordView | None = None
@@ -86,8 +89,11 @@ class BriefingInput:
 
 @dataclass(frozen=True)
 class CoachingInput:
+    """단계를 하나씩 진행하는 세션의 입력. 기본 루틴 세션과 콘텐츠 세션이 같은 형식을 쓴다."""
     persona: Persona = Persona()
-    morning_call_type: str = "ROUTINE"
-    steps: tuple[Step, ...] = ()       # 아직 PENDING인 단계만 (재연결이면 이어서)
+    morning_call_type: str = "ROUTINE"  # ROUTINE(기본 루틴 세션) / CONTENT(콘텐츠 세션) — 지시문의 호칭과 안내문만 달라진다
+    steps: tuple[Step, ...] = ()       # 아직 PENDING인 단계만 (재연결이면 이어서). STEP_ORDER는 세션 전체 번호(콘텐츠가 먼저, 루틴이 이어짐)
+    routine_follows: bool = False      # 콘텐츠 세션 뒤에 기본 루틴 세션이 이어지는가. True면 마지막 단계 뒤에 루틴 시작 준비를 묻고 start_routine을 부른다
+    next_program_name: str = ""        # 이어지는 기본 루틴 프리셋 이름
     resumed: bool = False              # True면 전체 안내를 이미 했으므로 생략
     night: NightRecordView | None = None
