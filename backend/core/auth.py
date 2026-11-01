@@ -12,6 +12,8 @@ from .config import Settings, get_settings
 from .errors import Forbidden, Unauthorized
 
 AUDIENCE = "authenticated"
+# 서버와 Supabase 시계 차이 허용(초). 서버 시계가 조금만 느려도 막 발급된 토큰이 iat "not yet valid"로 거절된다
+CLOCK_SKEW_SEC = 30
 
 
 class TokenVerifier:
@@ -24,10 +26,10 @@ class TokenVerifier:
     def verify(self, token: str) -> str:
         try:
             if self._secret:
-                claims = jwt.decode(token, self._secret, algorithms=["HS256"], audience=AUDIENCE)
+                claims = jwt.decode(token, self._secret, algorithms=["HS256"], audience=AUDIENCE, leeway=CLOCK_SKEW_SEC)
             elif self._jwks:
                 key = self._jwks.get_signing_key_from_jwt(token).key
-                claims = jwt.decode(token, key, algorithms=["ES256", "RS256"], audience=AUDIENCE)
+                claims = jwt.decode(token, key, algorithms=["ES256", "RS256"], audience=AUDIENCE, leeway=CLOCK_SKEW_SEC)
             else:
                 raise Unauthorized("토큰 검증 설정이 없어요 (SUPABASE_URL 또는 SUPABASE_JWT_SECRET)")
         except jwt.PyJWTError as e:
