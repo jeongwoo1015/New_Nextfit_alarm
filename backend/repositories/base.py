@@ -67,6 +67,15 @@ class NightRepository(Protocol):
                            override_alarm_id: str | None) -> NightRecord | None: ...  # 11/01 컬럼 이름의 추출 결과, extract_status = DONE
     def mark_extract_failed(self, user_id: str, night_record_id: str) -> None: ...
     def get_night(self, user_id: str, night_record_id: str) -> NightRecord | None: ...   # 초안에 추가: 저장 직후 응답, 목소리 업로드
+    def get_night_routine(self, user_id: str, night_record_id: str) -> list[AlarmRoutineItem] | None: ...
+    # 내일 진행할 항목 = 대상 알람(override_alarm_id) 설정 + 밤 대화로 내일만 바꾼 시간(rs_night_routine_items).
+    # 남의 기록이면 None, 대상 알람이 없거나 콘텐츠 알람이면 [].
+
+    def replace_night_routine(self, user_id: str, night_record_id: str, overrides: dict[str, int]) -> list[AlarmRoutineItem] | None:
+        """내일만 바꿀 항목 시간 전체 교체 — DB 함수 rs_replace_night_routine_items (0초 = 내일만 빼기).
+        알람 설정과 같은 값과 넘기지 않은 항목은 알람 설정대로(행 없음). 대상 알람이 바뀌면 DB가 지운다. 남의 기록이면 None."""
+        ...
+
     def get_night_raw(self, night_record_id: str) -> NightRaw | None: ...            # 재추출 배치용 (서버 내부)
     def list_failed_extracts(self, limit: int) -> list[tuple[str, str]]: ...         # [(user_id, night_record_id)]
     def get_night_for_morning(self, user_id: str, apply_date: date) -> NightRecord | None: ...
@@ -85,6 +94,8 @@ class SessionRepository(Protocol):
     def create_steps(self, user_id: str, session_id: str, plans: list[StepPlan]) -> list[SessionStep]: ...  # 이미 있으면 만들지 않고 기존 단계
     def list_steps(self, user_id: str, session_id: str) -> list[SessionStep]: ...    # step_order 순
     def save_step(self, user_id: str, step: SessionStep) -> SessionStep: ...         # step_status·checked_at·ai_verdict
+    def update_step_duration(self, user_id: str, session_id: str, step_order: int,
+                             duration_sec: int) -> SessionStep | None: ...          # 오늘 진행 중 변경(코칭 중). 0 이하는 막고 오늘 빼기는 save_step(SKIPPED)
     def recent_records(self, user_id: str, since: date, until: date) -> RecentRecords: ...   # session_date / apply_date 기준, 양 끝 포함
 
 

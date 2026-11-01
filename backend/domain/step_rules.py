@@ -3,7 +3,7 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Iterable
 
-from backend.core.errors import ValidationFailed
+from backend.core.errors import Conflict, ValidationFailed
 
 from . import codes
 from .models import Progress, SessionStep
@@ -45,3 +45,19 @@ def progress(steps: Iterable[SessionStep]) -> Progress:
 def pending_steps(steps: Iterable[SessionStep]) -> list[SessionStep]:
     """재연결 시 이어서 진행할 단계 (정의서: PENDING 단계부터)."""
     return sorted((s for s in steps if s.step_status == "PENDING"), key=lambda s: s.step_order)
+
+
+def today_total(steps: Iterable[SessionStep]) -> int:
+    """오늘 진행할 단계 시간 합계 (오늘만 뺀 SKIPPED 단계 제외)."""
+    return sum(s.planned_duration_sec or 0 for s in steps if s.step_status != "SKIPPED")
+
+
+def check_today_duration(steps: list[SessionStep], step: SessionStep, duration_sec: int, max_sec: int) -> None:
+    """오늘 진행 중 시간 변경 검사: 아직 하지 않은(PENDING) 단계만, 30초 단위, 바꾼 뒤 오늘 합계 ≤ 상한."""
+    if step.step_status != "PENDING":
+        raise Conflict("이미 체크한 단계는 시간을 바꿀 수 없어요", "STEP_ALREADY_CHECKED")
+    if duration_sec < 0 or duration_sec % codes.DURATION_STEP_SEC:
+        raise ValidationFailed(f"단계 시간은 0 이상, {codes.DURATION_STEP_SEC}초 단위예요")
+    total = today_total(replace(s, planned_duration_sec=duration_sec) if s.step_id == step.step_id else s for s in steps)
+    if total > max_sec:
+        raise ValidationFailed(f"오늘 합계 {total}초가 상한 {max_sec}초를 넘어요", "ROUTINE_OVER_LIMIT")

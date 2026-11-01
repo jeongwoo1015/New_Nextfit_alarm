@@ -41,6 +41,7 @@
 | `POST /morning/sessions/{id}/coaching-token` | 루틴·콘텐츠 | `start_routine` 뒤(재연결도) 호출. 처음이면 단계를 PENDING으로 만들고 남은 단계만 토큰에 |
 | `POST /morning/sessions/{id}/steps/{n}/verdict` | 코칭 | Live `report_step_result` 전달 |
 | `PATCH /morning/sessions/{id}/steps/{n}` | 체크리스트 | 직접 체크·건너뛰기·해제 |
+| `PATCH /morning/sessions/{id}/steps/{n}/duration` | 코칭 | 오늘 진행 중 변경("오늘 스트레칭 좀 적게", Live 함수를 앱이 전달). PENDING만, 30초 단위, 오늘 합계 ≤ 상한, 0초 = 오늘만 빼기 |
 | `POST /morning/sessions/{id}/end` | 종료 | `end_session` 또는 통화 종료. 기상 성공 기록 |
 | `GET /morning/sessions/{id}` · `GET /morning/sessions/today` | 루틴 화면 | 세션, 단계, 진행 개수(`finished` = "완료!") |
 | `GET /reports?period=week\|month\|year&date=` | 리포트 | 기간 합계(기상 성공률, 평균 기상 시각, 루틴 완료 52/70), 그래프 칸(주: 월~일, 월: 1주~5주, 연: 1~12월), 현재·최장 연속 달성일 |
@@ -102,11 +103,11 @@ cd .. && backend/.venv/Scripts/python -m uvicorn backend.app.main:app --reload
 추출 결과 `override_coaching_min = 0` → `override_skip_coaching = TRUE`(10은 11/01에 없어 버림), 토큰 입력의 `tomorrow_coaching_min`은 비움.
 
 밤 흐름: 토큰 발급 때 내일 울릴 알람(시각, 루틴이면 지금 쓰는 항목 이름)을 지시문에 넣는다 → 원문 저장 → 백그라운드에서
-`extract_night_record` → 하루 한정 변경 대상 알람 지정 → `parse_routine_changes` → `apply_conversation` → `replace_alarm_routine`.
+`extract_night_record` → 하루 한정 변경 대상 알람 지정 → `parse_routine_changes` → `apply_changes` → 범위별로 `replace_night_routine`(내일만) / `replace_alarm_routine`(앞으로 계속).
 루틴 변경이 실패해도 밤 기록 저장은 유지한다. 추출이 실패하면 `FAILED`로 두고 원문은 남긴다(재추출 배치는 6단계).
 
 아침 흐름: 세션 시작(스냅샷) → 브리핑 토큰(어젯밤 기록, 오늘 일정, 프리셋/콘텐츠 이름, 전략 문장) → `start_routine` →
-코칭 토큰(처음이면 루틴 = 알람 항목 시간 중 0초 초과, 콘텐츠 = AI `compose_content_steps` → 단계 PENDING 생성,
+코칭 토큰(처음이면 루틴 = 어젯밤 내일만 바꾼 값 또는 알람 항목 시간 중 0초 초과, 콘텐츠 = AI `compose_content_steps` → 단계 PENDING 생성,
 `planned_total_sec` 기록) → 판정 반영 → 종료. 개인화는 그날 처음 브리핑 때 `decide()` 한 번, 로그 저장,
 재연결 때는 로그의 `strategy`로 같은 문장(`strategy_blocks`). 개인화가 실패하면 기본 방식으로 진행한다.
 AI 쪽 브리핑 입력의 `coaching_min`은 0(코칭 안 함)/10(진행)으로만 넘긴다(AI는 0인지만 본다). 콘텐츠 구성은 AI가 10/20분만 받아
@@ -135,8 +136,11 @@ DB에 `rs_morning_session.snooze_count`, `wake_checked_at` 컬럼이 필요하�
 - 온보딩: 기본 정보 → 페르소나 → 루틴/콘텐츠 선택 → 프리셋 또는 콘텐츠 종류. 고른 유형으로 07:00 알람 1개를 만든다.
   콘텐츠 세부(`CONTENT_OPTION`)는 알람 세부 설정에서 고른다. 사용자 행은 온보딩 때 만든다(이름·생년월일이 NOT NULL).
 - 콘텐츠 고정 시간은 5분(팀 확정, DB 시드 `content_duration_sec = 300`). 값이 비어 있어도 300초로 진행한다.
-- 밤 대화로 루틴 항목을 빼거나 다시 넣으면 **다음 날 아침에 울릴 알람**(하루 한정 변경과 같은 대상)에만 적용한다.
-  빼기 = 0초, 다시 넣기 = 기본 시간. 규칙(합계 상한·최소 한 항목)에 걸리는 요청은 반영하지 않는다(`routine_rules.apply_conversation`).
+- 루틴 항목 시간을 바꾸는 범위는 셋(정의서 11/01 팀 확정): **앞으로 계속** = 알람 설정(`replace_alarm_routine`),
+  **내일만** = 밤 대화의 기본(`replace_night_routine`, 알람 설정 위에 덮어씀, 대상 알람은 다음 날 아침에 울릴 알람),
+  **오늘 진행 중** = 코칭 중 단계 시간 변경(`update_step_duration`, 0초는 SKIPPED). 내일 울릴 알람이 있으면 밤 기록에
+  `override_alarm_id`를 항상 남긴다. AI가 범위를 주기 전까지는 빼기·다시 넣기를 '내일만'으로 처리한다(`clients.ai_gateway.to_item_changes`).
+  규칙(30초 단위·합계 상한·최소 한 항목)에 걸리는 요청은 반영하지 않는다(`routine_rules.apply_changes`).
 - 밤 대화에서 하루 한정 변경에 동의했는데 다음 날 아침에 울릴 알람이 없으면 변경값을 저장하지 않는다.
 
 - 개인화 Bandit 상태는 전체 합산(`state_key = 'global'`), 최근 7일 기록으로 결정. 보상 기록·학습(`set_reward`, `learn`)은 6단계 하루 끝 배치.

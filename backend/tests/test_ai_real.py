@@ -11,8 +11,8 @@ import pytest
 
 pytest.importorskip("ai.live.config")
 
-from backend.clients.ai_gateway import (BriefingContext, CalendarEvent, CoachingContext, CoachStep, NightContext,  # noqa: E402
-                                        NightView, Persona, RealAIGateway)
+from backend.clients.ai_gateway import (BriefingContext, CalendarEvent, CoachingContext, CoachStep, ItemChange,  # noqa: E402
+                                        NightContext, NightView, Persona, RealAIGateway, to_item_changes)
 from backend.core.timeutil import KST  # noqa: E402
 from backend.domain.models import AlarmRoutineItem, MorningSession, RecentRecords, SessionStep  # noqa: E402
 
@@ -114,7 +114,8 @@ def test_routine_changes_use_item_ids():
     items = [AlarmRoutineItem("i1", 1, "스트레칭 (축소)", 180, 180, "PLAY"), AlarmRoutineItem("i2", 2, "물 한 잔", 60, 0, "QA")]
     gw, _ = gateway(FakeLLM({"remove": [1], "restore": [2]}))
     r = gw.parse_routine_changes(TALK, items)
-    assert (r.remove, r.restore, r.status) == (["i1"], ["i2"], "DONE")         # 0초 항목 = AI에는 '뺀 상태'
+    # 지금 AI 형식(빼기·다시 넣기) → 정의서 기본 범위 '내일만'. 0초 항목 = AI에는 '뺀 상태'
+    assert r.status == "DONE" and r.changes == [ItemChange("i1", 0, "TOMORROW"), ItemChange("i2", None, "TOMORROW")]
 
 
 def test_content_steps_fit_fixed_duration():
@@ -151,3 +152,10 @@ def test_decide_strategy_with_real_records():
     assert set(d.strategy) >= {"coaching_intensity", "briefing_length", "encouragement", "strategy_id"}
     assert d.strategy["coaching_intensity"] != "firm"                           # 피곤한 날·KIND에는 강한 전략 금지
     assert gw.strategy_blocks(d.strategy) == (d.briefing_block, d.coaching_block)   # 재연결 때 같은 문장
+
+
+def test_new_ai_format_with_scope_and_duration():
+    class Res:
+        changes = [{"template_item_id": "i1", "duration_sec": 60, "scope": "always"},
+                   {"template_item_id": "i2", "duration_sec": 0, "scope": "weird"}]
+    assert to_item_changes(Res()) == [ItemChange("i1", 60, "ALWAYS"), ItemChange("i2", 0, "TOMORROW")]

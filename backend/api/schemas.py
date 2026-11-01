@@ -298,6 +298,10 @@ class StepStatusIn(BaseModel):
     step_status: Literal[codes.STEP_STATUSES]
 
 
+class StepDurationIn(BaseModel):
+    duration_sec: int = Field(ge=0, multiple_of=30)   # 0 = 오늘만 빼기
+
+
 class RewakeOut(BaseModel):
     rewake_count: int
 

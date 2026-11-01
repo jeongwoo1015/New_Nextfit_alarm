@@ -2,7 +2,7 @@ from datetime import datetime, time
 
 import pytest
 
-from backend.clients.ai_gateway import NightExtract
+from backend.clients.ai_gateway import ItemChange, NightExtract, RoutineChangeRequest
 from backend.core.errors import ServiceUnavailable
 from backend.core.timeutil import KST
 from backend.repositories.seed import template_id
@@ -214,3 +214,37 @@ def test_today_and_isolation(client, morning):
     assert client.post(url(v, "/snooze"), headers=auth(USER_B)).status_code == 404
     assert client.post(url(v, "/wake-check"), headers=auth(USER_B)).status_code == 404
     assert start(client, morning, user=USER_B).status_code == 404
+
+
+def test_steps_use_last_night_tomorrow_only_changes(client, morning, clock, ai):
+    items = client.get(f"/alarms/{morning['alarm_id']}/routine-items", headers=auth(USER_A)).json()["items"]
+    clock.now = datetime(2026, 11, 5, 23, 30, tzinfo=KST)
+    ai.routine = RoutineChangeRequest([ItemChange(items[3]["template_item_id"], 0), ItemChange(items[0]["template_item_id"], 60)])
+    client.post("/night/transcript", json={"transcript": TALK}, headers=auth(USER_A))
+    clock.now = FRIDAY_7
+    v = start(client, morning).json()
+    steps = client.post(url(v, "/coaching-token"), headers=auth(USER_A)).json()["steps"]
+    assert [s["step_name"] for s in steps] == ["스트레칭 (축소)", "햇빛 보기", "물 한 잔", "세수·양치", "오늘 할 일 3개 말하기"]
+    assert steps[0]["planned_duration_sec"] == 60
+    # 다음 날(토)은 알람 설정 그대로
+    clock.now = datetime(2026, 11, 7, 7, 0, tzinfo=KST)
+    v2 = start(client, morning).json()
+    assert len(client.post(url(v2, "/coaching-token"), headers=auth(USER_A)).json()["steps"]) == 6
+
+
+def test_today_duration_change(client, morning):
+    v = start(client, morning).json()
+    client.post(url(v, "/coaching-token"), headers=auth(USER_A))
+    r = client.patch(url(v, "/steps/1/duration"), json={"duration_sec": 60}, headers=auth(USER_A)).json()
+    assert r["steps"][0]["planned_duration_sec"] == 60 and r["session"]["planned_total_sec"] == 480
+    r = client.patch(url(v, "/steps/4/duration"), json={"duration_sec": 0}, headers=auth(USER_A)).json()   # 오늘만 빼기
+    assert r["steps"][3]["step_status"] == "SKIPPED" and r["session"]["planned_total_sec"] == 420
+    over = client.patch(url(v, "/steps/2/duration"), json={"duration_sec": 600}, headers=auth(USER_A))    # 420-60+600 = 960
+    assert over.status_code == 422 and over.json()["error"]["code"] == "ROUTINE_OVER_LIMIT"
+    assert client.patch(url(v, "/steps/2/duration"), json={"duration_sec": 45}, headers=auth(USER_A)).status_code == 422
+    done = client.patch(url(v, "/steps/4/duration"), json={"duration_sec": 60}, headers=auth(USER_A))     # 이미 체크한 단계
+    assert done.status_code == 409 and done.json()["error"]["code"] == "STEP_ALREADY_CHECKED"
+    assert client.patch(url(v, "/steps/9/duration"), json={"duration_sec": 60}, headers=auth(USER_A)).status_code == 404
+    assert client.patch(url(v, "/steps/1/duration"), json={"duration_sec": 60}, headers=auth(USER_B)).status_code == 404
+    alarm = client.get(f"/alarms/{morning['alarm_id']}/routine-items", headers=auth(USER_A)).json()
+    assert alarm["total_sec"] == 600                                                        # 알람 설정은 그대로

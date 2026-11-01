@@ -7,7 +7,7 @@ from backend.core.auth import current_user_id
 from backend.services.morning_service import MorningService, SessionView
 
 from .schemas import (BriefingTokenIn, CoachingTokenOut, LiveTokenOut, ProgressOut, RewakeOut, SessionOut, SessionStartIn,
-                      SessionViewOut, SnoozeOut, StepOut, StepStatusIn, VerdictIn)
+                      SessionViewOut, SnoozeOut, StepDurationIn, StepOut, StepStatusIn, VerdictIn)
 
 router = APIRouter(prefix="/morning", tags=["morning"])
 
@@ -88,6 +88,14 @@ def mark_step(session_id: str, step_order: int, body: StepStatusIn, user_id: str
               svc: MorningService = Depends(morning_service)):
     """체크리스트에서 직접 체크(DONE)·건너뛰기(SKIPPED)·해제(PENDING)."""
     return _view(svc.mark_step(user_id, session_id, step_order, body.step_status))
+
+
+@router.patch("/sessions/{session_id}/steps/{step_order}/duration", response_model=SessionViewOut)
+def change_step_duration(session_id: str, step_order: int, body: StepDurationIn, user_id: str = Depends(current_user_id),
+                         svc: MorningService = Depends(morning_service)):
+    """오늘 진행 중 변경 — 코칭 중 "오늘 스트레칭 좀 적게"(Live 함수를 앱이 전달). 알람 설정·내일 값은 그대로.
+    PENDING 단계만, 30초 단위, 오늘 합계 ≤ 상한. 0초는 오늘만 빼기(SKIPPED)."""
+    return _view(svc.change_step_duration(user_id, session_id, step_order, body.duration_sec))
 
 
 @router.post("/sessions/{session_id}/end", response_model=SessionViewOut)
