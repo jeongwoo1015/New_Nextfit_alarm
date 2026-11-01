@@ -47,6 +47,8 @@
 | `GET /diary/calendar?month=YYYY-MM` | 한 줄 일기 | 날짜별 사진 URL 또는 루틴 성공률, 세션·밤 기록 여부 |
 | `GET /diary/{date}` | 일기 상세 | 그날 밤 기록(한 줄 일기)·아침 세션과 단계·사진·하루 요약 |
 | `PUT /diary/{date}/photo` | 일기 사진 | jpg를 본문 그대로(`Content-Type: image/jpeg`, 10MB 이하, 미래 날짜 불가). 다시 올리면 덮어씀 |
+| `GET /music/rewake` | 모닝콜 | 재기상 음악(설정의 음악 장르) 서명 URL, 12시간 유효(밤에 미리 받아 두기). 없으면 404 `MUSIC_NOT_FOUND` → 기본 알람음 |
+| `GET /music/sleep?mood=` | 굿나잇콜 | 수면 음악(무드 = 오늘 밤 기록의 컨디션, 없으면 NORMAL) 서명 URL |
 
 오류 응답은 모두 `{"error": {"code", "message", "details?"}}`. 전체 명세는 서버 실행 후 `/docs`(OpenAPI).
 
@@ -141,6 +143,7 @@ DB에 `rs_morning_session.snooze_count`, `wake_checked_at` 컬럼이 필요하�
 - 리포트 월간 그래프는 날짜별이 아니라 주 단위(1주~5주, AI `period_series` 기준) — 앱 화면과 맞출 것.
 - 일기 사진은 오늘 이전 날짜만 받는다.
 - 업로드 Content-Type은 Storage 버킷 허용 형식과 같게 검사한다(목소리 `audio/mp4`·`audio/x-m4a`·`audio/m4a`·`audio/aac`, 사진 `image/jpeg`, 다르면 415).
+- 음악 파일(RS_AI_MUSIC 행 + music 버킷 mp3)은 아직 만든 사람이 없다. AI 파트 `ai/tasks/music.py`의 프롬프트로 생성·업로드할 담당을 정해야 한다.
 - 날씨는 지역 정보가 정의서에 없어 아직 넘기지 않는다(AI 브리핑은 날씨를 건너뜀).
 - 대화 원문 role은 `user` / `assistant`만 받는다(AI CONTRACTS 2-2 권고). 사용자 발화가 없으면 422(`EMPTY_TRANSCRIPT`).
 - `MUSIC_GENRE`는 NOT NULL인데 기본값이 없어 온보딩에서 안 보내면 `POP`.

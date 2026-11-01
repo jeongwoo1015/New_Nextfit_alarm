@@ -5,6 +5,7 @@ from backend.repositories.registry import Repositories
 from backend.services.alarm_service import AlarmService
 from backend.services.history_service import HistoryService
 from backend.services.morning_service import MorningService
+from backend.services.music_service import MusicService
 from backend.services.night_service import NightService
 from backend.services.routine_service import RoutineService
 from backend.services.user_service import UserService
@@ -40,3 +41,7 @@ def morning_service(request: Request, repos: Repositories = Depends(get_repos), 
 
 def history_service(request: Request, repos: Repositories = Depends(get_repos)) -> HistoryService:
     return HistoryService(repos, request.app.state.clock)
+
+
+def music_service(request: Request, repos: Repositories = Depends(get_repos)) -> MusicService:
+    return MusicService(repos, request.app.state.clock)

@@ -358,3 +358,13 @@ class DiaryDayOut(BaseModel):
 class PhotoOut(BaseModel):
     date: date
     photo_url: str | None
+
+
+# ---------- AI 음악 ----------
+class MusicOut(BaseModel):
+    music_id: str
+    music_type: str                     # REWAKE / SLEEP
+    genre: str | None                   # REWAKE일 때
+    mood: str | None                    # SLEEP일 때
+    url: str                            # 서명된 임시 URL (music 버킷, mp3)
+    expires_in: int                     # 초. 재기상 음악은 밤에 미리 받아 둘 수 있게 12시간

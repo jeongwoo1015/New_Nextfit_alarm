@@ -5,7 +5,7 @@ from datetime import date, timedelta
 
 from backend.core.errors import ValidationFailed
 from backend.core.timeutil import apply_date, now_kst, record_date
-from backend.domain.models import (Alarm, AppConfig, DiaryPhoto, MorningSession, NightRaw, NightRecord, RecentRecords,
+from backend.domain.models import (AiMusic, Alarm, AppConfig, DiaryPhoto, MorningSession, NightRaw, NightRecord, RecentRecords,
                                    RoutineTemplate, SessionStep, StrategyLog, TemplateItem, User, UserSetting)
 from backend.domain.routine_rules import build_routine
 
@@ -55,6 +55,7 @@ class MemoryPresetRepository:
         self.templates = {t.template_id: t for t in templates}
         self.items = {i.template_item_id: i for i in items}
         self.config = config or AppConfig()
+        self.music: list[AiMusic] = []                # rs_ai_music (테스트에서 채운다)
 
     def list_templates(self, active_only=True):
         return [t for t in self.templates.values() if t.is_active or not active_only]
@@ -69,7 +70,9 @@ class MemoryPresetRepository:
         return self.config
 
     def pick_music(self, music_type, genre=None, mood=None):
-        return None
+        found = [m for m in self.music if m.music_type == music_type and (genre is None or m.genre == genre)
+                 and (mood is None or m.mood == mood)]
+        return found[0] if found else None             # Supabase 구현은 같은 조건에서 무작위 1개
 
 
 class MemoryAlarmRepository:
