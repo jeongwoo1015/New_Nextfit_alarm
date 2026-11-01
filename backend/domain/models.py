@@ -7,6 +7,44 @@ from datetime import date, datetime, time
 
 
 @dataclass(frozen=True)
+class User:
+    """RS_USER. USER_ID = auth.users(id). 온보딩 1단계 값이 NOT NULL이라 온보딩 완료 때 만든다."""
+    user_id: str
+    user_name: str
+    birth_date: date
+    gender: str = "NONE"
+    onboarding_done: bool = False
+    created_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class UserSetting:
+    """RS_USER_SETTING (알람과 상관없는 사용자 전체 설정)"""
+    user_id: str
+    user_call_name: str
+    music_genre: str
+    tone: str = "FORMAL"
+    speech_style: str = "KIND"
+    voice_type: str = "FEMALE"
+    sleep_alarm_enabled: bool = True
+    sleep_time: time = time(23, 0)
+    theme: str = "SYSTEM"
+    app_language: str = "ko"
+    updated_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class RoutineTemplate:
+    """RS_ROUTINE_TEMPLATE. 사용 중인 프리셋은 지우지 않고 IS_ACTIVE로 비활성화한다."""
+    template_id: str
+    template_name: str
+    target_desc: str | None = None
+    description: str | None = None
+    is_active: bool = True
+    created_at: datetime | None = None
+
+
+@dataclass(frozen=True)
 class Alarm:
     """RS_ALARM"""
     alarm_id: str

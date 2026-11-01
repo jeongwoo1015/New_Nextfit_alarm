@@ -12,6 +12,7 @@ class Settings:
     supabase_service_role_key: str = ""
     supabase_jwt_secret: str = ""   # 비어 있으면 JWKS(비대칭 키)로 검증
     gemini_api_key: str = ""
+    repository_backend: str = "memory"   # memory | supabase
 
     @property
     def jwks_url(self) -> str:
@@ -26,4 +27,5 @@ def get_settings() -> Settings:
         supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
         supabase_jwt_secret=os.getenv("SUPABASE_JWT_SECRET", ""),
         gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+        repository_backend=os.getenv("REPOSITORY_BACKEND", "memory"),
     )
