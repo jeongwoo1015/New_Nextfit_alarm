@@ -299,6 +299,8 @@ create table if not exists rs_morning_session (
   alarm_rang_at      timestamptz,                       -- 알람이 실제로 울린 시각 (반응 시간 계산용)
   first_response_at  timestamptz,
   rewake_count       smallint not null default 0 check (rewake_count >= 0),
+  snooze_count       smallint not null default 0 check (snooze_count >= 0),   -- "5분 뒤 다시 울리기" 횟수
+  wake_checked_at    timestamptz,                       -- 브리핑 전 확인 멘트를 모두 마친 시각 = 기상 성공 판정 시점
   wake_success       boolean not null default false,
   session_end_at     timestamptz,
   unique (alarm_id, session_date),

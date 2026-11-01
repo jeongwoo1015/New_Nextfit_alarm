@@ -17,6 +17,7 @@
 | (7) | `07_trigger_security.sql` | 계정 삭제 오류 수정. 01을 이 변경 전에 실행한 DB에만 적용 (테이블·데이터 유지) |
 | (8) | `08_storage_limits.sql` | Storage 버킷 파일 크기·형식 제한. 02를 이 변경 전에 실행한 DB에만 적용 |
 | (9) | `09_night_routine_item.sql` | 밤 대화로 내일 하루만 항목 시간 바꾸기·빼기. 01·02를 이 변경 전에 실행한 DB에만 적용 |
+| (10) | `10_wake_check.sql` | 기상 성공 판정 칸(snooze_count, wake_checked_at). 01을 이 변경 전에 실행한 DB에만 적용 |
 
 ## 구조 요약
 - 앱은 DB에 직접 접근하지 않고 FastAPI 서버를 거칩니다. 서버는 service_role 키를 쓰고, 로그인 토큰의 user_id를 코드에서 확인합니다.

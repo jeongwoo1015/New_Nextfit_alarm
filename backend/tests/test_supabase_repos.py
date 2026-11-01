@@ -209,8 +209,13 @@ def test_session_and_steps(repos, uid, other, alarm, monkeypatch):
 
     assert repos.sessions.add_rewake(uid, s.session_id) == 1
     assert repos.sessions.add_rewake(uid, s.session_id) == 2
-    s2 = repos.sessions.update_session(uid, s.session_id, {"planned_total_sec": 300, "wake_success": True})
-    assert (s2.planned_total_sec, s2.wake_success) == (300, True)
+    assert repos.sessions.add_snooze(uid, s.session_id) == 1
+    assert repos.sessions.add_snooze(uid, s.session_id) == 2
+    checked = now_kst()
+    s2 = repos.sessions.update_session(uid, s.session_id, {"planned_total_sec": 300, "wake_success": True,
+                                                           "wake_checked_at": checked})
+    assert (s2.planned_total_sec, s2.wake_success, s2.rewake_count, s2.snooze_count) == (300, True, 2, 2)
+    assert abs((s2.wake_checked_at - checked).total_seconds()) < 1
 
     rec = repos.sessions.recent_records(uid, today - timedelta(days=7), today + timedelta(days=1))
     assert len(rec.sessions) == 1 and len(rec.steps) == 2
