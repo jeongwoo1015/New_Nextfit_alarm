@@ -21,14 +21,10 @@ def validate_alarm(a: Alarm) -> None:
         errors.append(f"label은 {LABEL_MAX}자 이내예요")
     if a.alarm_mode not in codes.ALARM_MODES:
         errors.append(f"alarm_mode는 {'/'.join(codes.ALARM_MODES)} 중 하나예요")
-    if a.coaching_min not in codes.ALARM_COACHING_MIN:
-        errors.append("알람의 coaching_min은 10 또는 20이에요")
 
     if a.morning_call_type == "ROUTINE":
         if not a.template_id:
             errors.append("루틴 알람은 template_id가 필요해요")
-        if a.routine_mode not in codes.ROUTINE_MODES:
-            errors.append(f"루틴 알람은 routine_mode({'/'.join(codes.ROUTINE_MODES)})가 필요해요")
         if a.content_type or a.content_option:
             errors.append("루틴 알람은 content_type·content_option을 비워요")
     elif a.morning_call_type == "CONTENT":
@@ -36,8 +32,8 @@ def validate_alarm(a: Alarm) -> None:
             errors.append(f"콘텐츠 알람은 content_type({'/'.join(codes.CONTENT_TYPES)})이 필요해요")
         elif a.content_option is not None and a.content_option not in codes.CONTENT_OPTIONS[a.content_type]:
             errors.append(f"{a.content_type}의 content_option은 {'/'.join(codes.CONTENT_OPTIONS[a.content_type])} 중 하나예요")
-        if a.template_id or a.routine_mode:
-            errors.append("콘텐츠 알람은 template_id·routine_mode를 비워요")
+        if a.template_id:
+            errors.append("콘텐츠 알람은 template_id를 비워요")
     else:
         errors.append(f"morning_call_type은 {'/'.join(codes.MORNING_CALL_TYPES)} 중 하나예요")
 
@@ -70,7 +66,7 @@ def next_ring(alarms: list[Alarm], after: datetime) -> tuple[Alarm, datetime] | 
 
 
 def pick_override_alarm(alarms: list[Alarm], saved_at: datetime) -> Alarm | None:
-    """하루 한정 변경(OVERRIDE_*)을 적용할 알람 — 서버가 정한다(AI는 알람을 고르지 않음).
+    """하루 한정 변경(OVERRIDE_*)과 대화로 바꾼 루틴 항목을 적용할 알람 — 서버가 정한다(AI는 알람을 고르지 않음).
 
     기본안 "다음에 울릴 알람"을, 밤 기록이 적용되는 아침(APPLY_DATE)에 울리는 알람으로 좁힌다.
     그날 울릴 알람이 없으면 None — 이때는 변경값을 저장하지 않는다(OVERRIDE_ALARM_ID 필수 제약).

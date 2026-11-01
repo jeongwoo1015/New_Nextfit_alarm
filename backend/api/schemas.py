@@ -15,10 +15,8 @@ VoiceType = Literal[codes.VOICE_TYPES]
 MusicGenre = Literal[codes.MUSIC_GENRES]
 Theme = Literal[codes.THEMES]
 CallType = Literal[codes.MORNING_CALL_TYPES]
-RoutineMode = Literal[codes.ROUTINE_MODES]
 ContentType = Literal[codes.CONTENT_TYPES]
 AlarmMode = Literal[codes.ALARM_MODES]
-AlarmCoaching = Literal[codes.ALARM_COACHING_MIN]
 
 
 class Out(BaseModel):
@@ -63,8 +61,9 @@ class OnboardingIn(BaseModel):
     speech_style: SpeechStyle = "KIND"
     voice_type: VoiceType = "FEMALE"
     music_genre: MusicGenre = "POP"     # 정의서에 기본값이 없어 정한 기본안
-    template_id: str
-    coaching_min: AlarmCoaching = 20
+    morning_call_type: CallType         # 온보딩: 루틴 / 콘텐츠 선택
+    template_id: str | None = None      # 루틴이면 프리셋 5종 중 하나
+    content_type: ContentType | None = None   # 콘텐츠면 종류 (세부는 알람 세부 설정에서)
 
 
 class UserPatch(BaseModel):
@@ -96,10 +95,8 @@ class AlarmOut(Out):
     alarm_mode: str
     morning_call_type: str
     template_id: str | None
-    routine_mode: str | None
     content_type: str | None
     content_option: str | None
-    coaching_min: int
     enabled: bool
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -113,10 +110,8 @@ class AlarmIn(BaseModel):
     label: str | None = Field(default=None, max_length=20)
     alarm_mode: AlarmMode = "ON_TIME"
     template_id: str | None = None
-    routine_mode: RoutineMode | None = None
     content_type: ContentType | None = None
     content_option: str | None = None
-    coaching_min: AlarmCoaching = 20
     enabled: bool = True
 
 
@@ -129,20 +124,17 @@ class AlarmPatch(BaseModel):
     label: str | None = Field(default=None, max_length=20)
     alarm_mode: AlarmMode | None = None
     template_id: str | None = None
-    routine_mode: RoutineMode | None = None
     content_type: ContentType | None = None
     content_option: str | None = None
-    coaching_min: AlarmCoaching | None = None
     enabled: bool | None = None
 
 
-# ---------- 프리셋·개인화 ----------
+# ---------- 프리셋·알람별 루틴 시간 ----------
 class TemplateItemOut(Out):
     template_item_id: str
     item_name: str
     item_order: int
-    duration_10_sec: int | None
-    duration_20_sec: int | None
+    default_duration_sec: int
     response_type: str
 
 
@@ -151,14 +143,34 @@ class PresetOut(BaseModel):
     template_name: str
     target_desc: str | None
     description: str | None
-    total_10_sec: int
-    total_20_sec: int
+    total_sec: int                      # 기본 시간 합계 (시드 규칙상 600초)
     items: list[TemplateItemOut]
 
 
-class UserItemOut(TemplateItemOut):
-    enabled: bool
+class LimitsOut(BaseModel):
+    routine_max_sec: int                # 알람 루틴 합계 상한 (RS_APP_CONFIG)
+    duration_step_sec: int              # 항목 시간 단위 (30초)
+    content_duration_sec: int           # 콘텐츠 알람 고정 시간
 
 
-class UserItemPatch(BaseModel):
-    enabled: bool
+class RoutineItemOut(TemplateItemOut):
+    duration_sec: int                   # 이 알람에서 쓰는 시간 (0 = 뺀 항목)
+    customized: bool                    # 기본 시간과 다른가
+
+
+class AlarmRoutineOut(BaseModel):
+    alarm_id: str
+    template_id: str
+    total_sec: int
+    max_sec: int
+    items: list[RoutineItemOut]
+
+
+class RoutineItemIn(BaseModel):
+    template_item_id: str
+    duration_sec: int = Field(ge=0, multiple_of=30)
+
+
+class AlarmRoutineIn(BaseModel):
+    """알람의 항목 시간 전체. 보내지 않은 항목은 프리셋 기본 시간, 빈 목록이면 전부 기본값으로 되돌리기."""
+    items: list[RoutineItemIn]

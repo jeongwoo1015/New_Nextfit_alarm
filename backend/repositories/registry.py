@@ -5,17 +5,18 @@ supabase를 고르면 `backend.repositories.supabase.build_repositories()`(backe
 import importlib
 from dataclasses import dataclass
 
-from .base import (AlarmRepository, RoutineTemplateRepository, UserRepository, UserRoutineItemRepository,
-                   UserSettingRepository)
+from .base import (AlarmRepository, AlarmRoutineItemRepository, AppConfigRepository, RoutineTemplateRepository,
+                   UserRepository, UserSettingRepository)
 
 
 @dataclass
 class Repositories:
     users: UserRepository
     settings: UserSettingRepository
+    config: AppConfigRepository
     alarms: AlarmRepository
     templates: RoutineTemplateRepository
-    routine_items: UserRoutineItemRepository
+    alarm_routine_items: AlarmRoutineItemRepository
 
 
 def build_repositories(backend: str) -> Repositories:

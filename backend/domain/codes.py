@@ -1,7 +1,6 @@
-"""정의서(10/31수정) 값 목록 — DB의 CHECK 제약과 같은 값."""
+"""정의서(11/01 수정판) 값 목록 — DB의 CHECK 제약과 같은 값."""
 
 MORNING_CALL_TYPES = ("ROUTINE", "CONTENT")
-ROUTINE_MODES = ("PRESET", "CUSTOM")
 CONTENT_TYPES = ("MEDITATION", "EXERCISE", "LANGUAGE", "QUIZ")
 # 예시 값(팀 확정 전). 확정되면 여기만 고친다
 CONTENT_OPTIONS = {
@@ -11,9 +10,8 @@ CONTENT_OPTIONS = {
     "QUIZ": ("GENERAL", "SCIENCE", "HISTORY", "NONSENSE"),
 }
 
-ALARM_COACHING_MIN = (10, 20)
-SESSION_COACHING_MIN = (0, 10, 20)
-OVERRIDE_COACHING_MIN = (0, 10)   # 0 = 수행 안 함
+DURATION_STEP_SEC = 30              # 항목 시간 단위 (0 = 그 알람에서 항목 빼기)
+DEFAULT_CONTENT_DURATION_SEC = 600  # RS_APP_CONFIG.CONTENT_DURATION_SEC가 비어 있을 때 (팀 확정 전 기본안)
 
 ALARM_MODES = ("ON_TIME", "BEFORE_10", "BEFORE_30")
 STEP_STATUSES = ("PENDING", "DONE", "SKIPPED")

@@ -1,9 +1,9 @@
-"""메모리 저장소 — 테스트와 DB 없이 서버를 띄울 때 쓴다. 동작은 base.py의 규칙을 따른다."""
+"""메모리 저장소 — 테스트와 DB 없이 서버를 띄울 때 쓴다. 동작은 base.py의 규칙과 DB 트리거를 따른다."""
 import uuid
 from dataclasses import replace
 
 from backend.core.timeutil import now_kst
-from backend.domain.models import Alarm, RoutineTemplate, TemplateItem, User, UserSetting
+from backend.domain.models import Alarm, AppConfig, RoutineTemplate, TemplateItem, User, UserSetting
 
 from .seed import seed_templates
 
@@ -38,9 +38,32 @@ class MemoryUserSettingRepository:
         return setting
 
 
-class MemoryAlarmRepository:
+class MemoryAppConfigRepository:
+    def __init__(self, config: AppConfig | None = None):
+        self.config = config or AppConfig()
+
+    def get(self):
+        return self.config
+
+
+class MemoryAlarmRoutineItemRepository:
     def __init__(self):
+        self.rows: dict[str, dict[str, int]] = {}    # alarm_id → {template_item_id: duration_sec}
+
+    def get_overrides(self, alarm_id):
+        return dict(self.rows.get(alarm_id, {}))
+
+    def replace(self, alarm_id, user_id, overrides):
+        if overrides:
+            self.rows[alarm_id] = dict(overrides)
+        else:
+            self.rows.pop(alarm_id, None)
+
+
+class MemoryAlarmRepository:
+    def __init__(self, routine_items: MemoryAlarmRoutineItemRepository):
         self.rows: dict[str, Alarm] = {}
+        self._routine_items = routine_items
 
     def list_by_user(self, user_id):
         return sorted((a for a in self.rows.values() if a.user_id == user_id), key=lambda a: (a.alarm_time, a.alarm_id))
@@ -55,12 +78,15 @@ class MemoryAlarmRepository:
         return alarm
 
     def update(self, alarm):
+        if self.rows[alarm.alarm_id].template_id != alarm.template_id:     # DB 트리거 rs_alarm_template_changed
+            self._routine_items.rows.pop(alarm.alarm_id, None)
         alarm = replace(alarm, updated_at=now_kst())
         self.rows[alarm.alarm_id] = alarm
         return alarm
 
     def delete(self, alarm_id):
         self.rows.pop(alarm_id, None)
+        self._routine_items.rows.pop(alarm_id, None)                     # ON DELETE CASCADE
 
 
 class MemoryRoutineTemplateRepository:
@@ -77,28 +103,13 @@ class MemoryRoutineTemplateRepository:
     def list_items(self, template_id):
         return sorted((i for i in self.items.values() if i.template_id == template_id), key=lambda i: i.item_order)
 
-    def get_item(self, template_item_id):
-        return self.items.get(template_item_id)
 
-
-class MemoryUserRoutineItemRepository:
-    def __init__(self):
-        self.rows: set[tuple[str, str]] = set()
-
-    def list_excluded(self, user_id):
-        return {item for uid, item in self.rows if uid == user_id}
-
-    def exclude(self, user_id, template_item_id):
-        self.rows.add((user_id, template_item_id))
-
-    def restore(self, user_id, template_item_id):
-        self.rows.discard((user_id, template_item_id))
-
-
-def memory_repositories(seed: bool = True):
+def memory_repositories(seed: bool = True, config: AppConfig | None = None):
     from .registry import Repositories
     templates, items = seed_templates() if seed else ([], [])
+    routine_items = MemoryAlarmRoutineItemRepository()
     return Repositories(
-        users=MemoryUserRepository(), settings=MemoryUserSettingRepository(), alarms=MemoryAlarmRepository(),
-        templates=MemoryRoutineTemplateRepository(templates, items), routine_items=MemoryUserRoutineItemRepository(),
+        users=MemoryUserRepository(), settings=MemoryUserSettingRepository(), config=MemoryAppConfigRepository(config),
+        alarms=MemoryAlarmRepository(routine_items), templates=MemoryRoutineTemplateRepository(templates, items),
+        alarm_routine_items=routine_items,
     )

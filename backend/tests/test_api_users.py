@@ -7,7 +7,7 @@ from .conftest import USER_A, USER_B, auth
 ONBOARDING = {
     "user_name": "정우", "birth_date": "2000-03-15", "gender": "MALE",
     "user_call_name": "정우님", "tone": "CASUAL", "speech_style": "FRIENDLY", "voice_type": "MALE", "music_genre": "JAZZ",
-    "template_id": template_id("N"), "coaching_min": 10,
+    "morning_call_type": "ROUTINE", "template_id": template_id("N"),
 }
 
 
@@ -28,9 +28,17 @@ def test_onboarding_creates_user_setting_and_first_alarm(client):
     assert body["onboarding_done"] and body["user"]["user_name"] == "정우"
     assert body["setting"]["tone"] == "CASUAL" and body["setting"]["sleep_time"] == "23:00"
     alarm = body["first_alarm"]
-    assert (alarm["alarm_time"], alarm["morning_call_type"], alarm["routine_mode"], alarm["coaching_min"]) == ("07:00", "ROUTINE", "PRESET", 10)
+    assert (alarm["alarm_time"], alarm["morning_call_type"], alarm["content_type"]) == ("07:00", "ROUTINE", None)
     assert alarm["template_id"] == template_id("N")
     assert client.get("/users/me", headers=auth(USER_A)).json()["onboarding_done"] is True
+
+
+def test_onboarding_with_content_alarm(client):
+    r = onboard(client, morning_call_type="CONTENT", template_id=None, content_type="QUIZ")
+    assert r.status_code == 201
+    alarm = r.json()["first_alarm"]
+    assert (alarm["morning_call_type"], alarm["content_type"], alarm["content_option"], alarm["template_id"]) == ("CONTENT", "QUIZ", None, None)
+    assert onboard(client, user=USER_B, morning_call_type="CONTENT", content_type="QUIZ").status_code == 422   # 프리셋도 보냄
 
 
 def test_onboarding_twice_is_conflict(client):
@@ -51,7 +59,7 @@ def test_onboarding_rejects_bad_input(client):
     assert onboard(client, template_id="nope").status_code == 422
     r = onboard(client, tone="POLITE")
     assert r.status_code == 422 and r.json()["error"]["details"][0]["field"] == "tone"
-    assert onboard(client, coaching_min=15).status_code == 422
+    assert onboard(client, template_id=None).status_code == 422                    # 루틴인데 프리셋 없음
 
 
 def test_patch_settings_and_user(client):

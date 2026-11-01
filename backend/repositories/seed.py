@@ -1,45 +1,44 @@
-"""정의서 "초기 프리셋 시드 데이터(5종)" — 메모리 저장소와 테스트에서 쓴다. DB 시드는 backend-db 담당.
+"""초기 프리셋 시드 — feat/backend-db `supabase/03_seed_presets.sql`과 같은 값(메모리 저장소·테스트용).
 
-시간은 초 단위, None은 그 버전에서 진행하지 않는 항목. 고정 스크립트(SCRIPT) 문구는 아직 받지 못해
-비워 둔다(정의서에는 "스트레칭", "림프 순환" 표시만 있음). 값이 있으면 AI가 그대로 읽으므로 임시 문구를 넣지 않는다.
+프리셋 ID는 DB와 같은 고정값이다. 항목 ID는 DB가 만들기 때문에 여기서는 임의 값이다(항목은 이름·순서로 찾는다).
+고정 스크립트(SCRIPT) 실제 문구는 DB 시드에만 있다. 여기서는 스크립트가 있는 항목인지만 표시한다.
 """
 import uuid
 
 from backend.domain.models import RoutineTemplate, TemplateItem
 
 _NS = uuid.UUID("6f1c2a52-0d6b-4f3e-9c1e-2b7a5d0c9e10")
+STRETCH, LYMPH = "[stretch_short]", "[lymph]"
 
-# (프리셋 키, 이름, [(항목명, 10분 버전 초, 20분 버전 초, 응답 유형)])
+# (프리셋 키, 고정 ID, 이름, [(항목명, 기본 시간 초, 응답 유형, 스크립트)])
 PRESETS = [
-    ("M", "아침 붓기 삭제 · 셀프마사지 루틴", [
-        ("스트레칭(축소)", 120, 300, "PLAY"), ("햇빛 보기", 60, 60, "QA"), ("물 한 잔", 60, 60, "QA"),
-        ("세안", 120, 180, "QA"), ("목·얼굴 셀프마사지", 240, 300, "PLAY"), ("림프 스트레칭", None, 180, "PLAY"),
-        ("스킨케어", None, 120, "QA")]),
-    ("N", "간단하게 하루를 바꾸는 현실 모닝루틴", [
-        ("스트레칭(축소)", 180, 300, "PLAY"), ("햇빛 보기", 60, 60, "QA"), ("물 한 잔", 60, 60, "QA"),
-        ("이불 정리", 60, 60, "QA"), ("세수·양치", 120, 180, "QA"), ("오늘 할 일 3개 말하기", 120, 240, "SPEECH"),
-        ("가장 중요한 일 1개와 시작 시각", None, 180, "SPEECH"), ("하루 목표 한 줄", None, 120, "SPEECH")]),
-    ("O", "아침 15분 영어 습관루틴", [
-        ("스트레칭(축소)", 120, 240, "PLAY"), ("햇빛 보기", 30, 60, "QA"), ("물 한 잔", 30, 60, "QA"),
-        ("세수·양치", 60, 120, "QA"), ("AI 영어 대화", 360, 720, "SPEECH")]),
-    ("P", "하루를 차분하게 여는 웰니스 모닝 루틴", [
-        ("스트레칭(축소)", None, 240, "PLAY"), ("햇빛 보기", 60, 60, "QA"), ("물 한 잔", 60, 60, "QA"),
-        ("명상", 180, 300, "PLAY"), ("독서", 180, 360, "QA"), ("모닝일기", 120, 180, "SPEECH")]),
-    ("Q", "갓생도전 · 유산소 모닝루틴", [
-        ("스트레칭(축소)", 180, 300, "PLAY"), ("물 한 잔", 60, 60, "QA"), ("유산소(제자리 러닝 등)", 360, 600, "PLAY"),
-        ("샤워", None, 240, "QA")]),
+    ("M", "00000000-0000-4000-8000-0000000000a1", "아침 붓기 삭제 · 셀프마사지 루틴", [
+        ("스트레칭 (축소)", 120, "PLAY", STRETCH), ("햇빛 보기", 60, "QA", None), ("물 한 잔", 60, "QA", None),
+        ("세안", 120, "QA", None), ("목·얼굴 셀프마사지", 240, "PLAY", LYMPH)]),
+    ("N", "00000000-0000-4000-8000-0000000000a2", "간단하게 하루를 바꾸는 현실 모닝루틴", [
+        ("스트레칭 (축소)", 180, "PLAY", STRETCH), ("햇빛 보기", 60, "QA", None), ("물 한 잔", 60, "QA", None),
+        ("이불 정리", 60, "QA", None), ("세수·양치", 120, "QA", None), ("오늘 할 일 3개 말하기", 120, "SPEECH", None)]),
+    ("O", "00000000-0000-4000-8000-0000000000a3", "아침 15분 영어 습관루틴", [
+        ("스트레칭 (축소)", 120, "PLAY", STRETCH), ("햇빛 보기", 30, "QA", None), ("물 한 잔", 30, "QA", None),
+        ("세수·양치", 60, "QA", None), ("AI 영어 대화", 360, "SPEECH", None)]),
+    ("P", "00000000-0000-4000-8000-0000000000a4", "하루를 차분하게 여는 웰니스 모닝 루틴", [
+        ("햇빛 보기", 60, "QA", None), ("물 한 잔", 60, "QA", None), ("명상", 180, "PLAY", None),
+        ("독서", 180, "QA", None), ("모닝일기", 120, "SPEECH", None)]),
+    ("Q", "00000000-0000-4000-8000-0000000000a5", "갓생도전 · 유산소 모닝루틴", [
+        ("스트레칭 (축소)", 180, "PLAY", STRETCH), ("물 한 잔", 60, "QA", None), ("유산소 (제자리 러닝 등)", 360, "PLAY", None)]),
 ]
+
+TEMPLATE_IDS = {key: tid for key, tid, _, _ in PRESETS}
 
 
 def template_id(key: str) -> str:
-    return str(uuid.uuid5(_NS, f"template:{key}"))
+    return TEMPLATE_IDS[key]
 
 
 def seed_templates() -> tuple[list[RoutineTemplate], list[TemplateItem]]:
     templates, items = [], []
-    for key, name, rows in PRESETS:
-        tid = template_id(key)
+    for key, tid, name, rows in PRESETS:
         templates.append(RoutineTemplate(tid, name))
-        for order, (item_name, d10, d20, rtype) in enumerate(rows, 1):
-            items.append(TemplateItem(str(uuid.uuid5(_NS, f"item:{key}:{order}")), tid, item_name, order, d10, d20, rtype))
+        for order, (item_name, sec, rtype, script) in enumerate(rows, 1):
+            items.append(TemplateItem(str(uuid.uuid5(_NS, f"item:{key}:{order}")), tid, item_name, order, sec, rtype, script))
     return templates, items

@@ -8,7 +8,7 @@ from backend.domain.models import Alarm, User, UserSetting
 from backend.domain.user_rules import validate_setting, validate_user
 from backend.repositories.registry import Repositories
 
-# 정의서 팀 확인 사항 기본안: 온보딩의 루틴 선택 = 선택한 프리셋·코칭 길이로 07:00 루틴 알람 1개를 만든다
+# 정의서 팀 확인 사항 기본안: 온보딩에서 고른 유형(루틴 프리셋 또는 콘텐츠 종류)으로 07:00 알람 1개를 만든다
 FIRST_ALARM_TIME = time(7, 0)
 
 USER_FIELDS = {"user_name", "birth_date", "gender"}
@@ -38,9 +38,10 @@ class OnboardingInput:
     speech_style: str
     voice_type: str
     music_genre: str
-    # 3단계 루틴 선택
-    template_id: str
-    coaching_min: int = 20
+    # 3단계 루틴/콘텐츠 선택 → 4단계 프리셋(루틴) 또는 콘텐츠 종류. 콘텐츠 세부는 알람 세부 설정에서 고른다
+    morning_call_type: str
+    template_id: str | None = None
+    content_type: str | None = None
 
 
 class UserService:
@@ -58,17 +59,17 @@ class UserService:
         existing = self.r.users.get(user_id)
         if existing and existing.onboarding_done:
             raise Conflict("이미 온보딩을 마쳤어요", "ONBOARDING_DONE")
-        template = self.r.templates.get_template(inp.template_id)
-        if not template or not template.is_active:
-            raise ValidationFailed("선택할 수 없는 루틴 프리셋이에요")
-
         user = User(user_id, inp.user_name.strip(), inp.birth_date, inp.gender, onboarding_done=False)
         setting = UserSetting(user_id, inp.user_call_name.strip(), inp.music_genre, inp.tone, inp.speech_style, inp.voice_type)
-        alarm = Alarm("", user_id, FIRST_ALARM_TIME, "ROUTINE", template_id=inp.template_id, routine_mode="PRESET",
-                      coaching_min=inp.coaching_min)
+        alarm = Alarm("", user_id, FIRST_ALARM_TIME, inp.morning_call_type, template_id=inp.template_id,
+                      content_type=inp.content_type)
         validate_user(user)
         validate_setting(setting)
         validate_alarm(alarm)
+        if alarm.morning_call_type == "ROUTINE":
+            template = self.r.templates.get_template(alarm.template_id)
+            if not template or not template.is_active:
+                raise ValidationFailed("선택할 수 없는 루틴 프리셋이에요")
 
         user = self.r.users.update(replace(existing, **{f: getattr(user, f) for f in USER_FIELDS})) if existing \
             else self.r.users.create(user)
