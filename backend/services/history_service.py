@@ -8,8 +8,9 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from backend.clients import ai_stats
-from backend.core.errors import ValidationFailed
+from backend.core.errors import ValidationFailed, check_media_type
 from backend.core.timeutil import now_kst, today_kst
+from backend.domain import codes
 from backend.domain.models import MorningSession, NightRecord, SessionStep
 from backend.repositories.registry import Repositories
 
@@ -73,7 +74,7 @@ class HistoryService:
         return DiaryDay(day, ai_stats.day_summaries(rec, [day])[day], night, voice, sessions,
                         self._photo_url(photo.photo_path) if photo else None)
 
-    def upload_photo(self, user_id: str, day: date, data: bytes) -> str | None:
+    def upload_photo(self, user_id: str, day: date, data: bytes, content_type: str | None = "image/jpeg") -> str | None:
         """하루 대표 사진 1장(다시 올리면 덮어씀). 오늘 이후 날짜는 받지 않는다."""
         if day > today_kst(self.clock()):
             raise ValidationFailed("미래 날짜에는 사진을 올릴 수 없어요")
@@ -81,5 +82,6 @@ class HistoryService:
             raise ValidationFailed("사진 파일이 비어 있어요")
         if len(data) > MAX_PHOTO_BYTES:
             raise ValidationFailed(f"사진은 {MAX_PHOTO_BYTES // (1024 * 1024)}MB 이하여야 해요")
+        check_media_type(content_type, codes.PHOTO_MIME_TYPES)
         photo = self.r.storage.upload_photo(user_id, day, data)
         return self._photo_url(photo.photo_path)

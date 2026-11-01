@@ -144,10 +144,10 @@ def test_content_alarm_steps_from_ai(client, morning, ai):
     assert ai.calls[-1][1].content_name == "퀴즈" and ai.calls[-1][1].program_name == ""
     steps = client.post(url(v, "/coaching-token"), headers=auth(USER_A)).json()["steps"]
     assert [s["template_item_id"] for s in steps] == [None, None, None]
-    assert ("content", ("QUIZ", "HISTORY", 600)) in ai.calls
+    assert ("content", ("QUIZ", "HISTORY", 300)) in ai.calls
     ctx = ai.calls[-1][1]
     assert ctx.morning_call_type == "CONTENT" and ctx.steps[0].response_type == "SPEECH" and "정답:" in ctx.steps[0].script
-    assert client.get(url(v), headers=auth(USER_A)).json()["session"]["planned_total_sec"] == 600
+    assert client.get(url(v), headers=auth(USER_A)).json()["session"]["planned_total_sec"] == 300
 
 
 def test_rewake_response_end(client, morning, clock):

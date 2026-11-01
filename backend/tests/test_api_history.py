@@ -106,3 +106,14 @@ def test_delete_account(client, repos):
     assert client.delete("/users/me", headers=H).status_code == 204
     assert client.get("/users/me", headers=H).json()["onboarding_done"] is False
     assert not [k for k in repos.storage.files if k[1].startswith(USER_A)]
+
+
+def test_upload_media_types(client, clock):
+    onboard(client)
+    r = client.put("/diary/2026-11-05/photo", content=b"\x89PNG", headers={**H, "Content-Type": "image/png"})
+    assert r.status_code == 415 and r.json()["error"]["code"] == "UNSUPPORTED_MEDIA_TYPE"
+    assert client.put("/diary/2026-11-05/photo", content=b"jpg", headers={**H, "Content-Type": "image/jpeg; charset=binary"}).status_code == 200
+    rec_id = client.post("/night/transcript", json={"transcript": TALK}, headers=H).json()["night_record_id"]
+    url = f"/night/records/{rec_id}/voice"
+    assert client.put(url, content=b"m4a", headers={**H, "Content-Type": "audio/x-m4a"}).status_code == 200
+    assert client.put(url, content=b"wav", headers={**H, "Content-Type": "audio/wav"}).status_code == 415

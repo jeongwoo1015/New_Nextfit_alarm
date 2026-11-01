@@ -7,8 +7,9 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from backend.clients.ai_gateway import AIGateway, CalendarEvent, LiveToken, NightContext, Persona
-from backend.core.errors import AppError, NotFound, ValidationFailed
+from backend.core.errors import AppError, NotFound, ValidationFailed, check_media_type
 from backend.core.timeutil import now_kst, to_kst
+from backend.domain import codes
 from backend.domain.alarm_rules import pick_override_alarm
 from backend.domain.models import Alarm, NightRecord
 from backend.domain.routine_rules import apply_conversation
@@ -120,13 +121,14 @@ class NightService:
             raise NotFound("그날 밤 기록이 없어요", "NIGHT_RECORD_NOT_FOUND")
         return rec
 
-    def save_voice(self, user_id: str, night_record_id: str, data: bytes) -> NightRecord:
+    def save_voice(self, user_id: str, night_record_id: str, data: bytes, content_type: str | None = "audio/mp4") -> NightRecord:
         """AI가 "한 번 더 말해 달라"고 해 녹음한 목소리 → voice/{user_id}/{record_date}.m4a"""
         rec = self.get_record(user_id, night_record_id)
         if not data:
             raise ValidationFailed("목소리 파일이 비어 있어요")
         if len(data) > MAX_VOICE_BYTES:
             raise ValidationFailed(f"목소리 파일은 {MAX_VOICE_BYTES // (1024 * 1024)}MB 이하여야 해요")
+        check_media_type(content_type, codes.VOICE_MIME_TYPES)
         self.r.storage.upload_voice(user_id, rec.record_date, data)
         self.r.nights.set_voice_path(user_id, night_record_id)
         return self.get_record(user_id, night_record_id)

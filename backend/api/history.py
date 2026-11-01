@@ -50,4 +50,4 @@ def get_diary(day: date, user_id: str = Depends(current_user_id), svc: HistorySe
 async def put_photo(day: date, request: Request, user_id: str = Depends(current_user_id),
                     svc: HistoryService = Depends(history_service)):
     """일기 대표 사진(jpg)을 본문 그대로 보낸다 (Content-Type: image/jpeg, 10MB 이하). 다시 올리면 덮어쓴다."""
-    return PhotoOut(date=day, photo_url=svc.upload_photo(user_id, day, await request.body()))
+    return PhotoOut(date=day, photo_url=svc.upload_photo(user_id, day, await request.body(), request.headers.get("content-type")))

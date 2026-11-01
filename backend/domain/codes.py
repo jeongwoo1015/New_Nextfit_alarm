@@ -11,7 +11,11 @@ CONTENT_OPTIONS = {
 }
 
 DURATION_STEP_SEC = 30              # 항목 시간 단위 (0 = 그 알람에서 항목 빼기)
-DEFAULT_CONTENT_DURATION_SEC = 600  # RS_APP_CONFIG.CONTENT_DURATION_SEC가 비어 있을 때 (팀 확정 전 기본안)
+DEFAULT_CONTENT_DURATION_SEC = 300  # RS_APP_CONFIG.CONTENT_DURATION_SEC가 비어 있을 때 (11/01 팀 확정 5분, DB 시드와 같은 값)
+
+# Storage 버킷 허용 형식 (backend-db 02_security.sql / 08_storage_limits.sql과 같게)
+VOICE_MIME_TYPES = ("audio/mp4", "audio/x-m4a", "audio/m4a", "audio/aac")
+PHOTO_MIME_TYPES = ("image/jpeg",)
 
 ALARM_MODES = ("ON_TIME", "BEFORE_10", "BEFORE_30")
 STEP_STATUSES = ("PENDING", "DONE", "SKIPPED")

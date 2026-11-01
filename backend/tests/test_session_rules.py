@@ -81,5 +81,5 @@ def test_content_alarm_snapshot_and_fixed_duration():
     a = Alarm("a2", "u1", time(6, 30), "CONTENT", content_type="QUIZ", content_option="HISTORY")
     s = resolve_snapshot(a, None, TODAY)
     assert (s.morning_call_type, s.template_id, s.content_type, s.content_option) == ("CONTENT", None, "QUIZ", "HISTORY")
-    assert content_duration_sec(AppConfig()) == 600                     # 팀 확정 전 기본안
+    assert content_duration_sec(AppConfig()) == 300                     # 팀 확정 5분
     assert content_duration_sec(AppConfig(content_duration_sec=480)) == 480
