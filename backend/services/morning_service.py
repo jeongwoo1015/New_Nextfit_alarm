@@ -13,8 +13,8 @@ from backend.core.errors import AppError, Conflict, NotFound
 from backend.core.timeutil import now_kst, to_kst, today_kst
 from backend.domain.models import MorningSession, Progress, SessionStep
 from backend.domain.routine_rules import build_routine
-from backend.domain.session_rules import (content_duration_sec, content_steps, planned_total_sec, resolve_snapshot,
-                                          routine_steps)
+from backend.domain.session_rules import (content_duration_sec, content_steps, judge_wake, planned_total_sec,
+                                          resolve_snapshot, routine_steps)
 from backend.domain.step_rules import apply_verdict, mark, pending_steps, progress
 from backend.repositories.registry import Repositories
 
@@ -72,23 +72,38 @@ class MorningService:
         return self.view(user_id, latest.session_id)
 
     def rewake(self, user_id: str, session_id: str) -> int:
-        """8초 무응답으로 재기상 음악을 틀 때마다."""
+        """8초 무응답으로 재기상(AI) 음악을 틀 때마다. 확인 멘트를 마치기 전이면 기상 실패가 된다."""
         self._session(user_id, session_id)
         return self.r.sessions.add_rewake(user_id, session_id)
 
+    def snooze(self, user_id: str, session_id: str) -> int:
+        """"5분 뒤 다시 울리기"를 누를 때마다 (횟수 제한 없음, 한 번이라도 하면 기상 실패). 다시 울리면 같은 세션이 이어진다."""
+        self._session(user_id, session_id)
+        return self.r.sessions.add_snooze(user_id, session_id)
+
     def respond(self, user_id: str, session_id: str) -> MorningSession:
-        """알람 후 첫 음성 응답 (처음 한 번만 기록)."""
+        """알람 후 첫 음성 응답 (처음 한 번만 기록). 기상 성공 시각 = 이 시각."""
         s = self._session(user_id, session_id)
         if s.first_response_at is None:
             s = self.r.sessions.update_session(user_id, session_id, {"first_response_at": to_kst(self.clock())})
         return s
 
+    def wake_check(self, user_id: str, session_id: str) -> SessionView:
+        """브리핑 전 확인 멘트를 모두 마쳤을 때 (AI의 wake_check_done을 앱이 전달). 이때 기상 성공을 정한다.
+        처음 한 번만 판정하고, 실패해도 브리핑·루틴은 그대로 이어진다."""
+        s = self._session(user_id, session_id)
+        if s.wake_checked_at is None:
+            now = to_kst(self.clock())
+            if s.first_response_at is None:      # 확인 멘트에 답했다는 뜻이므로 첫 응답이 빠졌으면 지금으로 채운다
+                s = self.r.sessions.update_session(user_id, session_id, {"first_response_at": now})
+            self.r.sessions.update_session(user_id, session_id, {"wake_checked_at": now, "wake_success": judge_wake(s)})
+        return self.view(user_id, session_id)
+
     def end(self, user_id: str, session_id: str) -> SessionView:
-        """세션 종료. 기상 성공 기본안(팀 확정 전) = 알람 뒤 사용자가 한 번이라도 응답했는가."""
+        """세션 종료. 확인 멘트를 끝내지 못한 채 끝나면 기상 실패로 남는다(WAKE_SUCCESS 기본값 FALSE)."""
         s = self._session(user_id, session_id)
         if s.session_end_at is None:
-            self.r.sessions.update_session(user_id, session_id, {"session_end_at": to_kst(self.clock()),
-                                                                 "wake_success": s.first_response_at is not None})
+            self.r.sessions.update_session(user_id, session_id, {"session_end_at": to_kst(self.clock())})
         return self.view(user_id, session_id)
 
     # ---------- 브리핑 ----------

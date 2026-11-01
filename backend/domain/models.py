@@ -168,6 +168,8 @@ class MorningSession:
     alarm_rang_at: datetime | None = None
     first_response_at: datetime | None = None
     rewake_count: int = 0
+    snooze_count: int = 0                  # "5분 뒤 다시 울리기" 횟수 (11/01 기상 성공 기준, DB 컬럼 추가 요청)
+    wake_checked_at: datetime | None = None  # 브리핑 전 확인 멘트를 모두 마친 시각 = 기상 성공 판정 시점 (DB 컬럼 추가 요청)
     wake_success: bool = False
     session_end_at: datetime | None = None
 

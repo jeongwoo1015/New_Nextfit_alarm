@@ -270,6 +270,8 @@ class SessionOut(Out):
     alarm_rang_at: datetime | None
     first_response_at: datetime | None
     rewake_count: int
+    snooze_count: int
+    wake_checked_at: datetime | None    # 확인 멘트를 마친 시각 (이때 기상 성공을 정함)
     wake_success: bool
     session_end_at: datetime | None
 
@@ -298,6 +300,10 @@ class StepStatusIn(BaseModel):
 
 class RewakeOut(BaseModel):
     rewake_count: int
+
+
+class SnoozeOut(BaseModel):
+    snooze_count: int
 
 
 # ---------- 리포트·일기 ----------
