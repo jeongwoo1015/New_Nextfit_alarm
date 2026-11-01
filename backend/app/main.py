@@ -1,7 +1,7 @@
 """FastAPI 앱. 실행: uvicorn backend.app.main:app --reload (저장소 루트에서)"""
 from fastapi import Depends, FastAPI
 
-from backend.api import alarms, night, routines, users
+from backend.api import alarms, morning, night, routines, users
 from backend.clients.ai_gateway import build_ai_gateway
 from backend.core.auth import current_user_id
 from backend.core.config import get_settings
@@ -17,6 +17,7 @@ def create_app(repos: Repositories | None = None, ai=None, clock=now_kst) -> Fas
     app.state.repos = repos or build_repositories(settings.repository_backend)
     app.state.ai = ai or build_ai_gateway(settings)
     app.state.clock = clock
+    app.state.personalization_mode = settings.personalization_mode
     install_error_handlers(app)
 
     @app.get("/health", tags=["system"])
@@ -28,7 +29,7 @@ def create_app(repos: Repositories | None = None, ai=None, clock=now_kst) -> Fas
         """로그인 토큰 확인용. 토큰의 user_id를 그대로 돌려준다."""
         return {"user_id": user_id}
 
-    for module in (users, alarms, routines, night):
+    for module in (users, alarms, routines, night, morning):
         app.include_router(module.router)
     return app
 

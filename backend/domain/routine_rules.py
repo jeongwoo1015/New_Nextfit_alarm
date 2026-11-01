@@ -89,20 +89,3 @@ def apply_conversation(items: Iterable[AlarmRoutineItem], remove: Iterable[str],
         (removed if action == "remove" else restored).append(item_id)
     return ConversationChange(overrides_of(current), removed, restored, rejected)
 
-
-def safe_write_order(items: Iterable[AlarmRoutineItem], target: Mapping[str, int]) -> list[tuple[str, int | None]]:
-    """현재 items → target overrides로 한 행씩 바꿀 때의 순서 [(item_id, 새 시간 또는 None=행 삭제)].
-
-    DB 트리거가 문장마다 합계 상한·최소 1개를 검사하므로, 트랜잭션 함수(RPC) 없이 쓸 때 실패를 줄이려고
-    줄어드는 항목을 먼저 쓰고 늘어나는 항목을 나중에 쓴다. 0초로 줄이는 항목은 늘리는 항목 뒤로 미뤄
-    중간에 켜진 항목이 0개가 되지 않게 한다. (극단적인 경우는 RPC로만 해결된다)
-    """
-    ops = []
-    for r in items:
-        new_eff = target.get(r.template_item_id, r.default_duration_sec)
-        if new_eff == r.duration_sec and (r.template_item_id in target) == r.customized:
-            continue
-        delta = new_eff - r.duration_sec
-        group = 2 if new_eff == 0 else 0 if delta <= 0 else 1
-        ops.append((group, delta, r.template_item_id, target.get(r.template_item_id)))
-    return [(k, new) for _, _, k, new in sorted(ops)]

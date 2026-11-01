@@ -3,6 +3,7 @@ from fastapi import Depends, Request
 
 from backend.repositories.registry import Repositories
 from backend.services.alarm_service import AlarmService
+from backend.services.morning_service import MorningService
 from backend.services.night_service import NightService
 from backend.services.routine_service import RoutineService
 from backend.services.user_service import UserService
@@ -30,3 +31,7 @@ def get_ai(request: Request):
 
 def night_service(request: Request, repos: Repositories = Depends(get_repos), ai=Depends(get_ai)) -> NightService:
     return NightService(repos, ai, request.app.state.clock)
+
+
+def morning_service(request: Request, repos: Repositories = Depends(get_repos), ai=Depends(get_ai)) -> MorningService:
+    return MorningService(repos, ai, request.app.state.clock, request.app.state.personalization_mode)

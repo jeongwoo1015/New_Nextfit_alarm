@@ -1,10 +1,13 @@
-from datetime import time
+from dataclasses import replace
+from datetime import date, time
 
 import pytest
 
-from backend.clients.ai_gateway import UnavailableAIGateway, build_ai_gateway, to_night_record_fields
+from backend.clients.ai_gateway import (UnavailableAIGateway, build_ai_gateway, fit_seconds, night_view,
+                                        to_night_record_fields)
 from backend.core.config import Settings
 from backend.core.errors import ServiceUnavailable
+from backend.domain.models import NightRecord
 
 AI_ROW = {"ai_summary": "발표를 마쳤다", "tomorrow_goal": "보고서 끝내기", "tomorrow_notes": ["10시 회의"],
           "condition_label": "TIRED", "condition_text": "지쳤지만 뿌듯함", "encouragement": "잘했어요", "insight": "",
@@ -35,3 +38,16 @@ def test_without_key_or_ai_package_gateway_is_unavailable():
     with pytest.raises(ServiceUnavailable):
         gw.extract_night_record([])
     assert isinstance(build_ai_gateway(Settings(gemini_api_key="k")), UnavailableAIGateway)   # 이 브랜치엔 ai 패키지 없음
+
+
+def test_fit_seconds_keeps_ratio_and_total():
+    assert sum(fit_seconds([200, 400], 600)) == 600 and fit_seconds([200, 400], 600) == [200, 400]
+    assert sum(fit_seconds([120, 120, 120], 480)) == 480                       # 10분 구성을 8분 고정 시간에 맞춤
+    assert fit_seconds([None, 0, 300], 300)[0] >= 10
+
+
+def test_night_view_only_for_extracted_record():
+    rec = NightRecord("r", "u", date(2026, 11, 5), date(2026, 11, 6), tomorrow_goal="보고서", tomorrow_notes=("회의",))
+    assert night_view(rec) is None                                              # PENDING
+    v = night_view(replace(rec, extract_status="DONE"))
+    assert v.tomorrow_goal == "보고서" and v.tomorrow_notes == ("회의",) and v.ai_summary == ""

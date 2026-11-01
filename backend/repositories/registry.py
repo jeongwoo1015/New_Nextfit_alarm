@@ -14,7 +14,6 @@ class Repositories:
     users: UserRepository
     presets: PresetRepository
     alarms: AlarmRepository
-    # 아래는 밤·아침 흐름(3·4단계)에서 쓴다. 메모리 구현은 그때 추가한다
     nights: NightRepository | None = None
     sessions: SessionRepository | None = None
     personalization: PersonalizationRepository | None = None

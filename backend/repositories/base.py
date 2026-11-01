@@ -10,7 +10,8 @@
   상한 초과 트리거 → ValidationFailed("ROUTINE_OVER_LIMIT"), 모두 뺌 → ValidationFailed("ROUTINE_ALL_REMOVED"),
   CHECK·그 밖의 트리거 → ValidationFailed, UNIQUE → Conflict, 연결 실패·시간 초과 → ServiceUnavailable(503).
 - id(gen_random_uuid), created_at·updated_at, record_date·apply_date는 DB가 채운다. 서버는 넣지 않는다.
-- 여러 행을 바꾸는 함수(알람 항목 시간)는 한 번의 요청(RPC 등 한 트랜잭션)으로 처리한다.
+- 여러 행을 바꾸는 함수(알람 항목 시간)는 한 번의 요청(DB 함수 rs_replace_alarm_routine_items)으로 처리한다.
+  교체 함수의 '알람이 없습니다'(P0002)는 None으로 돌려준다(서버 404).
 """
 from datetime import date, datetime
 from typing import Protocol
@@ -46,16 +47,14 @@ class AlarmRepository(Protocol):
     def get_alarm(self, user_id: str, alarm_id: str) -> Alarm | None: ...
     def create_alarm(self, user_id: str, values: dict) -> Alarm: ...
     def update_alarm(self, user_id: str, alarm_id: str, changes: dict) -> Alarm | None: ...   # template_id가 바뀌면 DB가 항목 설정을 지움
-    def delete_alarm(self, user_id: str, alarm_id: str) -> bool: ...                 # 지난 세션은 남고(alarm_id NULL), 하루 한정 변경은 DB가 비움
-    def get_alarm_routine(self, user_id: str, alarm_id: str) -> list[AlarmRoutineItem]: ...   # item_order 순, 루틴 알람이 아니면 []
+    def delete_alarm(self, user_id: str, alarm_id: str) -> None: ...                 # 지난 세션은 남고(alarm_id NULL), 하루 한정 변경은 DB가 비움
+    def get_alarm_routine(self, user_id: str, alarm_id: str) -> list[AlarmRoutineItem] | None: ...   # item_order 순. 알람이 없거나 남의 것이면 None
 
-    def set_alarm_routine(self, user_id: str, alarm_id: str, overrides: dict[str, int]) -> list[AlarmRoutineItem]:
-        """항목 시간 전체 교체: 그 알람의 rs_alarm_routine_item 행을 정확히 overrides({template_item_id: 초})로 맞춘다.
+    def replace_alarm_routine(self, user_id: str, alarm_id: str, overrides: dict[str, int]) -> list[AlarmRoutineItem] | None:
+        """항목 시간 전체 교체 — DB 함수 rs_replace_alarm_routine_items 한 번(삭제와 저장이 한 트랜잭션, 합계 검사는 커밋 때).
 
-        overrides에 없는 항목의 행은 삭제(기본 시간), 0초 = 빼기. 서버가 규칙 검사를 마친 값만 넘긴다.
-        삭제와 upsert를 한 트랜잭션으로 처리해야 중간 상태에서 합계 트리거에 걸리지 않는다
-        (합계 검사를 DEFERRABLE INITIALLY DEFERRED constraint trigger로 + RPC, 또는 MERGE 한 문장).
-        반환값은 바뀐 뒤의 get_alarm_routine 결과.
+        overrides({template_item_id: 초})에 없는 항목과 기본 시간과 같은 값은 기본 시간(행 없음), 0초 = 빼기.
+        서버가 규칙 검사를 마친 값만 넘긴다. 반환값은 바뀐 뒤의 get_alarm_routine 결과.
         """
         ...
 
@@ -65,7 +64,7 @@ class NightRepository(Protocol):
     def save_night_raw(self, user_id: str, transcript: list, started_at: datetime | None,
                        ended_at: datetime | None) -> str: ...                        # rs_night_record(PENDING) + rs_night_raw. 같은 밤이면 덮어씀. night_record_id
     def save_night_extract(self, user_id: str, night_record_id: str, fields: dict,
-                           override_alarm_id: str | None) -> NightRecord: ...         # 11/01 컬럼 이름의 추출 결과, extract_status = DONE
+                           override_alarm_id: str | None) -> NightRecord | None: ...  # 11/01 컬럼 이름의 추출 결과, extract_status = DONE
     def mark_extract_failed(self, user_id: str, night_record_id: str) -> None: ...
     def get_night(self, user_id: str, night_record_id: str) -> NightRecord | None: ...   # 초안에 추가: 저장 직후 응답, 목소리 업로드
     def get_night_raw(self, night_record_id: str) -> NightRaw | None: ...            # 재추출 배치용 (서버 내부)

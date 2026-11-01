@@ -230,3 +230,71 @@ class NightRecordOut(Out):
     override_wake_time: HHMM | None = None
     override_skip_coaching: bool = False
     voice_url: str | None = None        # 서명된 임시 URL
+
+
+# ---------- 아침 흐름 ----------
+class SessionStartIn(BaseModel):
+    alarm_id: str
+
+
+class StepOut(Out):
+    step_order: int
+    step_name: str
+    template_item_id: str | None
+    planned_duration_sec: int | None
+    step_status: str
+    checked_at: datetime | None
+    ai_verdict: str | None
+
+
+class ProgressOut(Out):
+    total: int
+    done: int
+    skipped: int
+    pending: int
+    finished: bool                      # "완료!" 표시
+
+
+class SessionOut(Out):
+    session_id: str
+    alarm_id: str | None
+    session_date: date
+    morning_call_type: str
+    template_id: str | None
+    content_type: str | None
+    content_option: str | None
+    base_wake_time: HHMM
+    target_wake_time: HHMM
+    coaching_skipped: bool              # TRUE면 브리핑만 (코칭 토큰 요청 불가)
+    planned_total_sec: int | None
+    alarm_rang_at: datetime | None
+    first_response_at: datetime | None
+    rewake_count: int
+    wake_success: bool
+    session_end_at: datetime | None
+
+
+class SessionViewOut(BaseModel):
+    session: SessionOut
+    steps: list[StepOut]
+    progress: ProgressOut
+
+
+class BriefingTokenIn(BaseModel):
+    events_today: list[CalendarEventIn] = Field(default=[], max_length=30)
+
+
+class CoachingTokenOut(LiveTokenOut):
+    steps: list[StepOut]                # 오늘 단계 전체 (체크리스트 표시용). 토큰에는 PENDING 단계만 들어 있다
+
+
+class VerdictIn(BaseModel):
+    verdict: Literal[codes.AI_VERDICTS]
+
+
+class StepStatusIn(BaseModel):
+    step_status: Literal[codes.STEP_STATUSES]
+
+
+class RewakeOut(BaseModel):
+    rewake_count: int

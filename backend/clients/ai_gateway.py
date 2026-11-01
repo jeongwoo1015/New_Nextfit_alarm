@@ -8,15 +8,16 @@ AI 코드가 정의서 11/01 기준으로 바뀌기 전까지 여기서 맞춘�
 - 루틴 항목 "사용 중" = 알람 항목 시간이 0보다 큼.
 """
 import importlib.util
-from dataclasses import dataclass, field
-from datetime import time
+from dataclasses import asdict, dataclass, field
+from datetime import date, time
 from typing import Protocol
 
 import httpx
 
 from backend.core.config import Settings
 from backend.core.errors import ServiceUnavailable
-from backend.domain.models import AlarmRoutineItem
+from backend.domain.models import AlarmRoutineItem, NightRecord, RecentRecords
+
 
 AUTH_TOKEN_URL = "https://generativelanguage.googleapis.com/v1alpha/auth_tokens"
 LIVE_WS_URL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained"
@@ -55,6 +56,66 @@ class NightContext:
 
 
 @dataclass(frozen=True)
+class NightView:
+    """RS_NIGHT_RECORD 중 아침 대화에 쓰는 칸 (APPLY_DATE = 오늘인 행)."""
+    ai_summary: str = ""
+    tomorrow_goal: str = ""
+    tomorrow_notes: tuple[str, ...] = ()
+    condition_label: str = ""
+    condition_text: str = ""
+    encouragement: str = ""
+    insight: str = ""
+
+
+@dataclass(frozen=True)
+class BriefingContext:
+    persona: Persona
+    now_hhmm: str                           # 브리핑 시작 시각 (이미 일어난 뒤라 알람 시각 대신 말함)
+    events_today: tuple[CalendarEvent, ...] = ()
+    night: NightView | None = None
+    program_name: str = ""                  # 루틴 알람이면 프리셋 이름
+    content_name: str = ""                  # 콘텐츠 알람이면 콘텐츠 이름
+    coaching_skipped: bool = False          # 내일 코칭 안 하기에 동의한 날 → 브리핑만
+    strategy_block: str = ""
+
+
+@dataclass(frozen=True)
+class CoachStep:
+    """코칭 세션에 넘길 단계 (아직 PENDING인 것만)."""
+    order: int
+    name: str
+    planned_sec: int | None
+    response_type: str
+    script: str = ""
+
+
+@dataclass(frozen=True)
+class CoachingContext:
+    persona: Persona
+    morning_call_type: str                  # ROUTINE / CONTENT (11/01: 둘 중 하나만, 이어지는 세션 없음)
+    steps: tuple[CoachStep, ...]
+    resumed: bool = False                   # 재연결이면 전체 안내 생략
+    night: NightView | None = None
+    strategy_block: str = ""
+
+
+@dataclass(frozen=True)
+class ContentStep:
+    name: str
+    planned_sec: int | None
+    response_type: str
+    script: str
+
+
+@dataclass(frozen=True)
+class StrategyDecision:
+    strategy: dict              # 코칭 강도·브리핑 길이·응원 정도 (RS_STRATEGY_LOG.STRATEGY)
+    briefing_block: str
+    coaching_block: str
+    log_row: dict               # DecisionLog.to_row() → rs_strategy_log
+
+
+@dataclass(frozen=True)
 class LiveToken:
     """앱이 Gemini Live에 직접 연결할 1회용 임시 토큰. 지시문은 토큰에 고정돼 있다."""
     token: str                  # ws_url?access_token=<token>
@@ -79,10 +140,31 @@ class RoutineChangeRequest:
     note: str = ""
 
 
+def night_view(rec: NightRecord | None) -> NightView | None:
+    if rec is None or rec.extract_status != "DONE":
+        return None
+    return NightView(rec.ai_summary or "", rec.tomorrow_goal or "", tuple(rec.tomorrow_notes), rec.condition_label or "",
+                     rec.condition_text or "", rec.encouragement or "", rec.insight or "")
+
+
+def fit_seconds(raw: list[int | None], total: int) -> list[int]:
+    """비율을 유지하며 합이 total이 되게 맞춘다 (각 단계 최소 10초). AI 콘텐츠 구성은 10/20분만 받기 때문."""
+    raw = [max(1, r or 1) for r in raw]
+    out = [max(10, round(r * total / sum(raw))) for r in raw]
+    out[out.index(max(out))] += total - sum(out)
+    return out
+
 class AIGateway(Protocol):
     def issue_night_token(self, ctx: NightContext) -> LiveToken: ...
     def extract_night_record(self, transcript: list) -> NightExtract: ...
     def parse_routine_changes(self, transcript: list, items: list[AlarmRoutineItem]) -> RoutineChangeRequest: ...
+    def issue_briefing_token(self, ctx: BriefingContext) -> LiveToken: ...
+    def issue_coaching_token(self, ctx: CoachingContext) -> LiveToken: ...
+    def compose_content_steps(self, content_type: str, content_option: str | None, duration_sec: int,
+                              today: date) -> list[ContentStep]: ...      # 실패해도 AI 쪽 기본 단계를 돌려준다
+    def decide_strategy(self, user_id: str, records: RecentRecords, today: date, condition: str | None,
+                        speech_style: str | None, mode: str, bandit_state: dict | None) -> StrategyDecision: ...
+    def strategy_blocks(self, strategy: dict | None) -> tuple[str, str]: ...   # 재연결: 로그의 strategy → (브리핑, 코칭) 문장
 
 
 def _wake(v) -> time | None:
@@ -150,6 +232,58 @@ class RealAIGateway:
         res = parse_routine_changes(transcript, [RoutineItem(i.template_item_id, i.item_name, i.duration_sec > 0) for i in items], self.llm)
         return RoutineChangeRequest(list(res.remove), list(res.restore), res.status, res.note)
 
+    # ---------- 아침 ----------
+    @staticmethod
+    def _persona(ai, p: Persona):
+        return ai.Persona(p.call_name, p.tone, p.speech_style, p.voice_type)
+
+    @staticmethod
+    def _night(ai, n: NightView | None):
+        return ai.NightRecordView(**asdict(n)) if n else None
+
+    def issue_briefing_token(self, ctx: BriefingContext) -> LiveToken:
+        from ai.live import inputs as ai
+        from ai.live.config import build_setup
+        routine = bool(ctx.program_name) and not ctx.content_name
+        inp = ai.BriefingInput(
+            persona=self._persona(ai, ctx.persona), morning_call_type="CONTENT" if ctx.content_name else "ROUTINE",
+            program_name=ctx.program_name, content_name=ctx.content_name, routine_follows=routine,
+            coaching_min=0 if ctx.coaching_skipped else 10,   # AI는 0인지만 본다 (11/01: 코칭 길이 없음)
+            now_hhmm=ctx.now_hhmm, events_today=tuple(ai.CalendarEvent(e.title, e.start, e.end, e.all_day) for e in ctx.events_today),
+            weather=None, night=self._night(ai, ctx.night), strategy_block=ctx.strategy_block)
+        return self._issue("briefing", build_setup("briefing", inp))
+
+    def issue_coaching_token(self, ctx: CoachingContext) -> LiveToken:
+        from ai.live import inputs as ai
+        from ai.live.config import build_setup
+        inp = ai.CoachingInput(
+            persona=self._persona(ai, ctx.persona), morning_call_type=ctx.morning_call_type,
+            steps=tuple(ai.Step(s.order, s.name, s.planned_sec, s.response_type, s.script) for s in ctx.steps),
+            routine_follows=False, resumed=ctx.resumed, night=self._night(ai, ctx.night), strategy_block=ctx.strategy_block)
+        return self._issue("coaching", build_setup("coaching", inp))
+
+    def compose_content_steps(self, content_type: str, content_option: str | None, duration_sec: int, today: date) -> list[ContentStep]:
+        """AI 구성은 10/20분만 받으므로 가까운 쪽으로 만든 뒤 고정 시간에 맞춰 비율대로 늘이거나 줄인다."""
+        from ai.tasks.content_steps import compose_content_steps
+        res = compose_content_steps(content_type, content_option, 10 if duration_sec <= 900 else 20, self.llm, today=today)
+        secs = fit_seconds([s.planned_sec for s in res.steps], duration_sec)
+        return [ContentStep(s.name, sec, s.response_type, s.script) for s, sec in zip(res.steps, secs)]
+
+    def decide_strategy(self, user_id, records, today, condition, speech_style, mode, bandit_state) -> StrategyDecision:
+        from ai.personalization.agent import decide
+        from ai.personalization.bandit import ContextualBandit
+        from ai.personalization.records import build_sessions
+        sessions = build_sessions([asdict(s) for s in records.sessions], [asdict(s) for s in records.steps],
+                                  [asdict(n) for n in records.nights])
+        d = decide(user_id, sessions, today, condition=condition, speech_style=speech_style, mode=mode,
+                   bandit=ContextualBandit.from_dict(bandit_state) if bandit_state else None)
+        return StrategyDecision(d.strategy.to_dict(), d.briefing_block, d.coaching_block, d.log.to_row())
+
+    def strategy_blocks(self, strategy: dict | None) -> tuple[str, str]:
+        from ai.personalization.strategy import Strategy, strategy_block
+        s = Strategy.from_dict(strategy)
+        return strategy_block(s, "briefing"), strategy_block(s, "coaching")
+
 
 class UnavailableAIGateway:
     """GEMINI_API_KEY가 없거나 `ai` 패키지가 없을 때 (예: feat/backend-service 단독 실행)."""
@@ -161,6 +295,10 @@ class UnavailableAIGateway:
         raise ServiceUnavailable(f"AI 기능을 쓸 수 없어요: {self.reason}", "AI_UNAVAILABLE")
 
     issue_night_token = extract_night_record = parse_routine_changes = _fail
+    issue_briefing_token = issue_coaching_token = compose_content_steps = decide_strategy = _fail
+
+    def strategy_blocks(self, strategy):
+        return "", ""           # 전략 문장이 없으면 대화는 기본 방식으로 진행된다
 
 
 def build_ai_gateway(settings: Settings):
