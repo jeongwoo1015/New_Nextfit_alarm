@@ -14,6 +14,7 @@ from typing import Union, get_args, get_origin, get_type_hints
 
 import httpx
 from postgrest.exceptions import APIError
+from storage3.utils import StorageException
 from supabase import Client, create_client
 
 from backend.core.config import get_settings
@@ -25,6 +26,7 @@ from backend.domain.models import (AiMusic, Alarm, AlarmRoutineItem, AppConfig, 
 from .registry import Repositories
 
 USER_BUCKETS = ("voice", "night-raw", "photo")
+PAGE = 1000   # Supabase API가 한 번에 돌려주는 최대 행 수. 넘으면 나눠 받는다
 
 
 # ---------- 변환: DB 행(JSON) <-> 모델 ----------
@@ -104,6 +106,14 @@ def _db():
         if e.code in ("23514", "23502", "23503", "22P02", "22007", "22008"):
             raise ValidationFailed(message) from None
         raise
+    except StorageException as e:
+        message = getattr(e, "message", None) or str(e)
+        status = str(getattr(e, "status", ""))
+        if status == "404" or getattr(e, "code", "") in ("not_found", "NoSuchKey") or "not found" in message.lower():
+            raise NotFound(f"파일을 찾을 수 없어요: {message}") from None
+        if status in ("400", "413", "415"):
+            raise ValidationFailed(f"파일을 저장할 수 없어요: {message}") from None
+        raise ServiceUnavailable(f"Storage 오류: {message}") from None
     except httpx.HTTPError as e:
         raise ServiceUnavailable(f"DB에 연결할 수 없어요: {e}") from None
 
@@ -118,6 +128,16 @@ class _Base:
     def _run(self, query) -> list[dict]:
         with _db():
             return query.execute().data or []
+
+    def _run_all(self, make_query) -> list[dict]:
+        """PAGE 행씩 나눠 끝까지 받는다. make_query는 정렬까지 붙인 새 쿼리를 만든다(정렬이 있어야 페이지가 겹치지 않음)."""
+        rows, start = [], 0
+        while True:
+            page = self._run(make_query().range(start, start + PAGE - 1))
+            rows += page
+            if len(page) < PAGE:
+                return rows
+            start += PAGE
 
 
 # ---------- 1. 사용자·설정 ----------
@@ -397,17 +417,18 @@ class SupabaseSessionRepository(_Base):
         return _model(SessionStep, _first(self._run(q)))
 
     def recent_records(self, user_id, since, until):
-        sessions = _models(MorningSession, self._run(
+        """세션은 session_date, 단계는 세션 날짜로 조인해서, 밤 기록은 apply_date로 거른다(양 끝 포함). 길면 나눠 받는다."""
+        lo, hi = since.isoformat(), until.isoformat()
+        sessions = _models(MorningSession, self._run_all(lambda: (
             self._select("rs_morning_session").eq("user_id", user_id)
-            .gte("session_date", since.isoformat()).lte("session_date", until.isoformat()).order("session_date")))
-        steps = []
-        if sessions:
-            steps = _models(SessionStep, self._run(
-                self._select("rs_session_step").eq("user_id", user_id)
-                .in_("session_id", [s.session_id for s in sessions]).order("session_id").order("step_order")))
-        nights = _models(NightRecord, self._run(
+            .gte("session_date", lo).lte("session_date", hi).order("session_date").order("session_id"))))
+        steps = _models(SessionStep, self._run_all(lambda: (
+            self._select("rs_session_step", "*, rs_morning_session!inner(session_date)").eq("user_id", user_id)
+            .gte("rs_morning_session.session_date", lo).lte("rs_morning_session.session_date", hi)
+            .order("session_id").order("step_order")))) if sessions else []
+        nights = _models(NightRecord, self._run_all(lambda: (
             self._select("rs_night_record").eq("user_id", user_id)
-            .gte("apply_date", since.isoformat()).lte("apply_date", until.isoformat()).order("apply_date")))
+            .gte("apply_date", lo).lte("apply_date", hi).order("apply_date"))))
         return RecentRecords(sessions, steps, nights)
 
 
@@ -472,9 +493,20 @@ class SupabaseStorageClient(_Base):
         return _models(DiaryPhoto, self._run(q))
 
     def signed_url(self, bucket, path, expires_in=3600):
-        with _db():
-            res = self.db.storage.from_(bucket).create_signed_url(path, expires_in)
+        """파일이 없으면 None (서버는 URL 없이 정상 응답)."""
+        try:
+            with _db():
+                res = self.db.storage.from_(bucket).create_signed_url(path, expires_in)
+        except NotFound:
+            return None
         return res.get("signedUrl") or res.get("signedURL")
+
+    def delete_files(self, bucket, paths):
+        """보관 기간이 지난 파일 등 경로를 아는 파일 지우기. 지운 개수."""
+        if not paths:
+            return 0
+        with _db():
+            return len(self.db.storage.from_(bucket).remove(list(paths)))
 
     def delete_user_files(self, user_id):
         count = 0

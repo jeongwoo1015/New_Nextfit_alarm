@@ -139,8 +139,16 @@ def test_night(repos, uid, other, alarm):
     assert repos.nights.save_night_extract(other, nid, {"tomorrow_goal": "x"}, None) is None
     assert repos.nights.set_voice_path(uid, nid) == f"{uid}/{rec.record_date.isoformat()}.m4a"
 
+    db = repos.users.db                                                              # 30일 정리: 만료일을 과거로
+    db.table("rs_night_raw").update({"expires_at": "2026-01-01T00:00:00+09:00", "audio_path": f"{uid}/x.m4a"}) \
+      .eq("night_record_id", nid).execute()
+    assert f"{uid}/x.m4a" in repos.nights.purge_expired_raw(now_kst())
+    raw = repos.nights.get_night_raw(nid)
+    assert raw.transcript is None and raw.audio_path is None
+    assert repos.nights.get_night(uid, nid).tomorrow_goal == "발표"                 # 요약은 남는다
 
-def test_session_and_steps(repos, uid, other, alarm):
+
+def test_session_and_steps(repos, uid, other, alarm, monkeypatch):
     today = now_kst().date()
     snap = SessionSnapshot(uid, alarm.alarm_id, today, "ROUTINE", N, None, None, time(7, 0), time(7, 0))
     s = repos.sessions.get_or_create_session(snap)
@@ -166,6 +174,13 @@ def test_session_and_steps(repos, uid, other, alarm):
 
     rec = repos.sessions.recent_records(uid, today - timedelta(days=7), today + timedelta(days=1))
     assert len(rec.sessions) == 1 and len(rec.steps) == 2
+    assert [p.step_order for p in rec.steps] == [1, 2]
+
+    import backend.repositories.supabase as sb                                      # 한 번에 1행씩 받아도 끝까지 받는다
+    monkeypatch.setattr(sb, "PAGE", 1)
+    paged = repos.sessions.recent_records(uid, today - timedelta(days=7), today + timedelta(days=1))
+    assert [p.step_id for p in paged.steps] == [p.step_id for p in rec.steps]
+    assert repos.sessions.recent_records(uid, today + timedelta(days=1), today + timedelta(days=2)).steps == []
 
 
 def test_content_step_detail(repos, uid):
@@ -201,6 +216,9 @@ def test_storage(repos, uid):
     assert repos.storage.upload_photo(uid, d, b"\xff\xd8\xff\xd9").diary_photo_id == photo.diary_photo_id   # 덮어쓰기
     assert [p.diary_date for p in repos.storage.list_photos(uid, date(2026, 11, 1), date(2026, 11, 30))] == [d]
     assert repos.storage.signed_url("photo", photo.photo_path, 60).startswith("http")
+    assert repos.storage.signed_url("photo", f"{uid}/1999-01-01.jpg", 60) is None              # 없는 파일
+    path = repos.storage.upload_voice(uid, d, b"\x00\x00")
+    assert repos.storage.delete_files("voice", [path]) == 1
     repos.storage.upload_voice(uid, d, b"\x00\x00")
     assert repos.storage.delete_user_files(uid) == 2
 
