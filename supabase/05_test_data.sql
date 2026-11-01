@@ -112,6 +112,27 @@ select n.record_date, n.apply_date, n.tomorrow_notes, n.voice_audio_path,
 from rs_night_record n left join rs_night_raw r using (night_record_id);
 
 
+-- [T4-2] 밤 대화로 내일 하루만 항목 바꾸기: 스트레칭 5분 -> 2분, 이불 정리(알람 설정 0분)는 내일만 1분
+--  결과: 내일 합계 660 - 180 + 60 = 540, 저장된 내일 변경 2개, 알람 설정 합계는 660 그대로
+select item_order, item_name, alarm_duration_sec, duration_sec
+from rs_replace_night_routine_items(
+  (select user_id from rs_night_record limit 1), (select night_record_id from rs_night_record limit 1),
+  (select jsonb_agg(jsonb_build_object('template_item_id', template_item_id,
+                                       'duration_sec', case item_order when 1 then 120 else 60 end))
+   from rs_routine_template_item
+   where template_id = '00000000-0000-4000-8000-0000000000a2' and item_order in (1, 4)));
+
+select (select count(*) from rs_night_routine_item) as tomorrow_changes,
+       (select sum(duration_sec) from rs_night_routine_items((select night_record_id from rs_night_record limit 1))) as tomorrow_total,
+       rs_alarm_routine_total('00000000-0000-4000-8000-00000000b001') as alarm_total;
+
+
+-- [T4-3] 내일 변경 지우기 (빈 목록으로 교체). 결과: tomorrow_changes 0
+select count(*) from rs_replace_night_routine_items(
+  (select user_id from rs_night_record limit 1), (select night_record_id from rs_night_record limit 1), '[]'::jsonb);
+select count(*) as tomorrow_changes from rs_night_routine_item;
+
+
 -- [T5] 루틴 세션 + 단계 만들기 (알람 설정이 적용된 실제 항목 목록 사용)
 --  결과: 기상 06:30(하루 한정 변경), 계획 합계 660, 단계 5개(이불 정리 빠짐), 1번 DONE
 insert into rs_morning_session (session_id, user_id, alarm_id, session_date, morning_call_type, template_id,
@@ -180,7 +201,7 @@ on conflict (state_key) do update set state = excluded.state;
 select (select count(*) from rs_strategy_log) as logs, (select count(*) from rs_bandit_state) as bandit_states;
 
 
--- 아래 [E1]~[E12]는 모두 오류가 나야 정상. 오류 이름(constraint 또는 메시지)을 확인
+-- 아래 [E1]~[E15]는 모두 오류가 나야 정상. 오류 이름(constraint 또는 메시지)을 확인
 -- [E1] 음성 경로가 규칙과 다름 -> rs_night_voice_path
 update rs_night_record set voice_audio_path = '00000000-0000-0000-0000-000000000000/2020-01-01.m4a';
 
@@ -257,6 +278,13 @@ select * from rs_replace_alarm_routine_items(
 -- [E14] 다른 사용자 id로 교체 -> '알람이 없습니다'
 select * from rs_replace_alarm_routine_items(
   '00000000-0000-0000-0000-000000000000', '00000000-0000-4000-8000-00000000b001', '[]'::jsonb);
+
+
+-- [E15] 내일 변경으로 상한을 넘김(N 프리셋 6항목 모두 3분) -> '루틴 합계 1080초가 상한 900초를 넘습니다'
+select * from rs_replace_night_routine_items(
+  (select user_id from rs_night_record limit 1), (select night_record_id from rs_night_record limit 1),
+  (select jsonb_agg(jsonb_build_object('template_item_id', template_item_id, 'duration_sec', 180))
+   from rs_routine_template_item where template_id = '00000000-0000-4000-8000-0000000000a2'));
 
 
 -- [T7-2] 항목 설정이 있는 루틴 알람을 콘텐츠 알람으로 바꾸기 (설정은 지워지고 오류 없음)
