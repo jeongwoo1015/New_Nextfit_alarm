@@ -102,5 +102,6 @@ class StorageClient(Protocol):
     def upload_photo(self, user_id: str, diary_date: date, data: bytes) -> DiaryPhoto: ...   # 다시 올리면 덮어씀
     def get_photo(self, user_id: str, diary_date: date) -> DiaryPhoto | None: ...
     def list_photos(self, user_id: str, since: date, until: date) -> list[DiaryPhoto]: ...   # 일기 캘린더
-    def signed_url(self, bucket: str, path: str, expires_in: int = 3600) -> str: ...
+    def signed_url(self, bucket: str, path: str, expires_in: int = 3600) -> str | None: ...   # 파일이 없으면 None
+    def delete_files(self, bucket: str, paths: list[str]) -> int: ...                # 경로를 아는 파일 지우기(30일 원문 정리 등), 지운 개수
     def delete_user_files(self, user_id: str) -> int: ...                            # 계정 삭제 전에

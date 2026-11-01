@@ -6,6 +6,7 @@ from backend.core.errors import Conflict, NotFound, ValidationFailed
 from backend.domain.alarm_rules import ALARM_FIELDS, validate_alarm
 from backend.domain.models import Alarm, User, UserSetting
 from backend.domain.user_rules import validate_setting, validate_user
+from backend.jobs import maintenance
 from backend.repositories.registry import Repositories
 
 # 정의서 팀 확인 사항 기본안: 온보딩에서 고른 유형(루틴 프리셋 또는 콘텐츠 종류)으로 07:00 알람 1개를 만든다
@@ -87,6 +88,10 @@ class UserService:
             raise NotFound("온보딩을 먼저 마쳐 주세요", "USER_NOT_FOUND")
         validate_user(replace(user, **_pick(changes, USER_FIELDS)))
         return self.r.users.update_user(user_id, changes)
+
+    def delete_account(self, user_id: str) -> int:
+        """탈퇴. 순서(Storage 파일 먼저 → Auth 계정, DB 행은 CASCADE)는 backend-db의 정리 작업과 같은 함수를 쓴다."""
+        return maintenance.delete_account(self.r, user_id)
 
     def update_setting(self, user_id: str, changes: dict) -> UserSetting:
         setting = self.r.users.get_setting(user_id)

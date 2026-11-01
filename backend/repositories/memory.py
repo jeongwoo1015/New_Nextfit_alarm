@@ -314,7 +314,15 @@ class MemoryStorageClient:
         return sorted((p for (u, d), p in self.photos.items() if u == user_id and since <= d <= until), key=lambda p: p.diary_date)
 
     def signed_url(self, bucket, path, expires_in=3600):
+        if (bucket, path) not in self.files:
+            return None                                       # 없는 파일 (Supabase 구현과 같음)
         return f"memory://{bucket}/{path}?expires_in={expires_in}"
+
+    def delete_files(self, bucket, paths):
+        removed = [k for k in ((bucket, p) for p in paths) if k in self.files]
+        for k in removed:
+            del self.files[k]
+        return len(removed)
 
     def delete_user_files(self, user_id):
         keys = [k for k in self.files if k[1].startswith(f"{user_id}/")]

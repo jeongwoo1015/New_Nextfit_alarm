@@ -298,3 +298,57 @@ class StepStatusIn(BaseModel):
 
 class RewakeOut(BaseModel):
     rewake_count: int
+
+
+# ---------- 리포트·일기 ----------
+class TotalsOut(Out):
+    n_sessions: int
+    wake_success_rate: float | None      # 0~1, 기록이 없으면 null
+    avg_wake_clock: str | None           # 평균 기상 시각 "HH:MM" (첫 응답 기준)
+    routine_done: int
+    routine_total: int
+    routine_completion_rate: float | None
+
+
+class BucketOut(TotalsOut):
+    label: str                           # 주: 월~일, 월: 1주~5주, 연: 1월~12월
+    start: date
+    end: date                            # 포함하지 않는 끝 날짜
+
+
+class ReportOut(Out):
+    period: str
+    start: date
+    end: date
+    totals: TotalsOut
+    series: list[BucketOut]
+    current_streak: int
+    best_streak: int
+
+
+class CalendarDayOut(BaseModel):
+    date: date
+    photo_url: str | None                # 사진을 올린 날 (없으면 루틴 성공률을 보여 준다)
+    routine_completion_rate: float | None
+    routine_done: int
+    routine_total: int
+    has_session: bool
+    has_night_record: bool
+
+
+class DiarySessionOut(BaseModel):
+    session: SessionOut
+    steps: list[StepOut]
+
+
+class DiaryDayOut(BaseModel):
+    date: date
+    summary: TotalsOut
+    night: NightRecordOut | None         # RECORD_DATE = 이 날짜인 밤 기록 (한 줄 일기, 요약, 컨디션)
+    sessions: list[DiarySessionOut]      # SESSION_DATE = 이 날짜인 아침 세션
+    photo_url: str | None
+
+
+class PhotoOut(BaseModel):
+    date: date
+    photo_url: str | None

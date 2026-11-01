@@ -11,15 +11,17 @@
 | `api/` | 화면별 엔드포인트와 요청·응답 형식(`schemas.py`) |
 | `services/` | 서비스 흐름 — 사용자 확인(USER_ID 비교), 검사, 저장 순서 |
 | `repositories/` | DB 접근 인터페이스(`base.py`) + 메모리 구현 + 프리셋 시드. Supabase 구현은 backend-db 담당 |
-| `clients/` | AI 파트 어댑터(`ai_gateway.py`: Live 임시 토큰, 밤 기록 추출, 대화로 바꾼 루틴 항목) + 테스트용 `fake_ai.py` |
+| `clients/` | AI 파트 어댑터(`ai_gateway.py`: Live 토큰·추출·콘텐츠·개인화, `ai_stats.py`: 리포트·일기 통계) + 테스트용 `fake_ai.py` |
+| `jobs/` | 배치. `maintenance.py`(30일 원문 정리, FAILED 재추출, 탈퇴)는 backend-db 담당 |
 
-## API (4단계까지)
+## API (5단계까지)
 
 | 메서드 · 경로 | 화면 | 내용 |
 |---|---|---|
 | `GET /users/me` | 앱 시작 | 사용자·설정, `onboarding_done` |
 | `POST /onboarding` | 온보딩 | 사용자·설정 저장 + 고른 유형(루틴 프리셋 / 콘텐츠 종류)으로 07:00 알람 생성 |
 | `PATCH /users/me` | 내 정보 | 이름·생년월일·성별 |
+| `DELETE /users/me` | 설정 | 탈퇴: 파일 먼저 지우고 Auth 계정 삭제(DB 행은 CASCADE), `jobs.maintenance.delete_account` |
 | `GET /settings` · `PATCH /settings` | 내 정보·설정 | 호칭·어조·말투·목소리·음악 장르·취침 알림·테마·언어 |
 | `GET /alarms` · `POST /alarms` | 홈 | 알람 목록(시각 순)·추가 |
 | `GET` · `PATCH` · `DELETE /alarms/{id}` | 알람 설정 | 토글은 `PATCH {"enabled": false}` |
@@ -39,6 +41,10 @@
 | `PATCH /morning/sessions/{id}/steps/{n}` | 체크리스트 | 직접 체크·건너뛰기·해제 |
 | `POST /morning/sessions/{id}/end` | 종료 | `end_session` 또는 통화 종료. 기상 성공 기록 |
 | `GET /morning/sessions/{id}` · `GET /morning/sessions/today` | 루틴 화면 | 세션, 단계, 진행 개수(`finished` = "완료!") |
+| `GET /reports?period=week\|month\|year&date=` | 리포트 | 기간 합계(기상 성공률, 평균 기상 시각, 루틴 완료 52/70), 그래프 칸(주: 월~일, 월: 1주~5주, 연: 1~12월), 현재·최장 연속 달성일 |
+| `GET /diary/calendar?month=YYYY-MM` | 한 줄 일기 | 날짜별 사진 URL 또는 루틴 성공률, 세션·밤 기록 여부 |
+| `GET /diary/{date}` | 일기 상세 | 그날 밤 기록(한 줄 일기)·아침 세션과 단계·사진·하루 요약 |
+| `PUT /diary/{date}/photo` | 일기 사진 | jpg를 본문 그대로(`Content-Type: image/jpeg`, 10MB 이하, 미래 날짜 불가). 다시 올리면 덮어씀 |
 
 오류 응답은 모두 `{"error": {"code", "message", "details?"}}`. 전체 명세는 서버 실행 후 `/docs`(OpenAPI).
 
@@ -102,6 +108,15 @@ cd .. && backend/.venv/Scripts/python -m uvicorn backend.app.main:app --reload
 AI 쪽 브리핑 입력의 `coaching_min`은 0(코칭 안 함)/10(진행)으로만 넘긴다(AI는 0인지만 본다). 콘텐츠 구성은 AI가 10/20분만 받아
 가까운 쪽으로 만든 뒤 고정 시간에 맞춰 비율대로 조정한다.
 
+리포트·일기 통계는 AI 파트 `ai.personalization.user_model`(`compute_stats`, `aggregate`, `period_series`, `day_summary`)을
+그대로 쓴다(개인화와 화면이 같은 숫자를 보도록 AI 파트가 만든 함수, Gemini 키 불필요). 연속 달성일은 최근 1년 기록으로 센다.
+계산 가정(기상 시각 = 첫 응답, 세션 없는 날은 건너뛰되 3일 넘게 비면 연속이 끊김, 루틴 완료율 = DONE ÷ 전체)은 그쪽 설명을 따른다.
+
+## 브랜치·파일 담당
+역할별 브랜치끼리 병합해도 된다(11/01). 같은 파일을 두 브랜치에서 고치지 않는다: base.py·models·서비스·API·requirements·
+메모리 구현·`jobs/personalization.py`는 backend-service, `repositories/supabase.py`·`jobs/maintenance.py`·`supabase/*.sql`은 backend-db,
+`ai/`는 ai 담당. 이 브랜치에는 feat/backend-db와 feat/ai가 병합돼 있어 실제 `ai` 함수로 테스트한다(`tests/test_ai_real.py`).
+
 ## 정의서에서 정하지 않아 기본안으로 구현한 것 (팀 확인 필요)
 - AI 판정 `not_done` → `STEP_STATUS = SKIPPED` (AI 파트 CONTRACTS 1-3 제안). `ambiguous`/`other`는 상태를 바꾸지 않고 `AI_VERDICT`만 남긴다.
 - 하루 한정 변경 대상 알람(`OVERRIDE_ALARM_ID`): 밤 기록이 적용되는 아침(`APPLY_DATE`)에 가장 먼저 울리는 켜진 알람. 그날 울릴 알람이 없으면 변경값을 저장하지 않는다.
@@ -114,6 +129,8 @@ AI 쪽 브리핑 입력의 `coaching_min`은 0(코칭 안 함)/10(진행)으로�
 - 밤 대화에서 하루 한정 변경에 동의했는데 다음 날 아침에 울릴 알람이 없으면 변경값을 저장하지 않는다.
 - 기상 성공(`WAKE_SUCCESS`) = 세션 종료 때 알람 뒤 첫 음성 응답(`first_response_at`)이 있었는가 (판정 기준 팀 확정 전).
 - 개인화 Bandit 상태는 전체 합산(`state_key = 'global'`), 최근 7일 기록으로 결정. 보상 기록·학습(`set_reward`, `learn`)은 6단계 하루 끝 배치.
+- 리포트 월간 그래프는 날짜별이 아니라 주 단위(1주~5주, AI `period_series` 기준) — 앱 화면과 맞출 것.
+- 일기 사진은 오늘 이전 날짜만 받는다.
 - 날씨는 지역 정보가 정의서에 없어 아직 넘기지 않는다(AI 브리핑은 날씨를 건너뜀).
 - 대화 원문 role은 `user` / `assistant`만 받는다(AI CONTRACTS 2-2 권고). 사용자 발화가 없으면 422(`EMPTY_TRANSCRIPT`).
 - `MUSIC_GENRE`는 NOT NULL인데 기본값이 없어 온보딩에서 안 보내면 `POP`.
