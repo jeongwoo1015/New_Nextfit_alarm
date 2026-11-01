@@ -203,3 +203,23 @@ def test_storage(repos, uid):
     assert repos.storage.signed_url("photo", photo.photo_path, 60).startswith("http")
     repos.storage.upload_voice(uid, d, b"\x00\x00")
     assert repos.storage.delete_user_files(uid) == 2
+
+
+def test_delete_account_with_data(repos):
+    """Auth 계정 삭제는 supabase_auth_admin 권한으로 CASCADE된다. 알람·항목 설정·하루 한정 변경이 남아 있어도 지워져야 한다."""
+    user_id = _make_auth_user(repos, "repo-delete")
+    repos.users.create_user(user_id, "탈퇴", date(2000, 1, 1), "NONE")
+    repos.users.save_setting(user_id, {"user_call_name": "탈퇴", "music_genre": "POP"})
+    a = repos.alarms.create_alarm(user_id, {"alarm_time": time(7, 0), "morning_call_type": "ROUTINE", "template_id": N})
+    items = repos.alarms.get_alarm_routine(user_id, a.alarm_id)
+    repos.alarms.replace_alarm_routine(user_id, a.alarm_id, {items[0].template_item_id: 300, items[3].template_item_id: 0})
+    nid = repos.nights.save_night_raw(user_id, [{"role": "user", "text": "잘 자", "at": ""}], None, None)
+    repos.nights.save_night_extract(user_id, nid, {"override_wake_time": time(6, 30)}, a.alarm_id)
+    s = repos.sessions.get_or_create_session(SessionSnapshot(user_id, a.alarm_id, now_kst().date(), "ROUTINE", N,
+                                                             None, None, time(7, 0), time(6, 30)))
+    repos.sessions.create_steps(user_id, s.session_id, [StepPlan(1, items[0].item_name, items[0].template_item_id, 300)])
+
+    repos.users.delete_account(user_id)
+    db = repos.users.db
+    for table in ("rs_user", "rs_alarm", "rs_alarm_routine_item", "rs_night_record", "rs_morning_session", "rs_session_step"):
+        assert db.table(table).select("user_id").eq("user_id", user_id).execute().data == [], table

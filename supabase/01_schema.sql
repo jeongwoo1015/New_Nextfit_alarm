@@ -11,6 +11,9 @@
 --  - 밤 대화의 하루 한정 변경: 내일 알람 시각 변경, 내일 코칭 안 하기
 
 
+-- 테이블을 읽거나 고치는 트리거 함수는 security definer로 만든다.
+-- Auth 계정을 지우면 supabase_auth_admin 권한으로 CASCADE가 실행되는데, 이 역할에는 rs_ 테이블 권한이 없기 때문
+
 -- 공통: updated_at 자동 갱신
 create or replace function rs_set_updated_at() returns trigger
 language plpgsql as $$
@@ -166,7 +169,7 @@ $$;
 
 -- 넣기 전 확인: 루틴 알람인지, 알람 주인과 같은지, 알람 프리셋의 항목인지
 create or replace function rs_alarm_routine_item_check() returns trigger
-language plpgsql as $$
+language plpgsql security definer set search_path = public as $$
 declare
   a record;
   item_template uuid;
@@ -195,7 +198,7 @@ create trigger trg_alarm_routine_item_check before insert or update on rs_alarm_
 -- 바꾼 뒤 확인: 루틴 합계가 상한 이하인지, 켜진 항목이 하나 이상인지
 --  커밋할 때 검사한다(deferred). 여러 문장으로 바꾸는 중간 상태에서는 막지 않는다
 create or replace function rs_alarm_routine_total_check() returns trigger
-language plpgsql as $$
+language plpgsql security definer set search_path = public as $$
 declare
   target uuid;
   total int;
@@ -264,7 +267,7 @@ grant execute on function rs_replace_alarm_routine_items(uuid, uuid, jsonb) to s
 
 -- 알람의 프리셋이 바뀌거나 콘텐츠 알람으로 바뀌면 예전 항목 설정을 지운다
 create or replace function rs_alarm_template_changed() returns trigger
-language plpgsql as $$
+language plpgsql security definer set search_path = public as $$
 begin
   if new.template_id is distinct from old.template_id then
     delete from rs_alarm_routine_item where alarm_id = new.alarm_id;
@@ -331,7 +334,7 @@ create index if not exists idx_step_session on rs_session_step (session_id);
 --  - 루틴 세션이면 template_item_id 필수, 그 항목은 세션 프리셋의 항목이어야 함
 --  - 콘텐츠 세션이면 template_item_id는 비움
 create or replace function rs_session_step_check() returns trigger
-language plpgsql as $$
+language plpgsql security definer set search_path = public as $$
 declare
   s record;
   item_template uuid;
@@ -439,7 +442,7 @@ create trigger trg_night_record_dates before insert or update on rs_night_record
 -- 알람을 지우면 그 알람을 가리키던 하루 한정 변경값도 비운다
 -- (비우지 않으면 override_alarm_id가 NULL이 되면서 rs_night_override_alarm 규칙에 걸려 삭제가 막힘)
 create or replace function rs_alarm_clear_overrides() returns trigger
-language plpgsql as $$
+language plpgsql security definer set search_path = public as $$
 begin
   update rs_night_record
   set override_wake_time = null, override_skip_coaching = false
