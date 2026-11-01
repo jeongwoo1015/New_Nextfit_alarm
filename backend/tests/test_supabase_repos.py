@@ -87,24 +87,27 @@ def test_alarm_routine(repos, uid, other, alarm):
     assert sum(i.duration_sec for i in items) == 600
     stretch, bed = items[0].template_item_id, items[3].template_item_id
 
-    items = repos.alarms.set_alarm_routine(uid, alarm.alarm_id, {stretch: 300, bed: 0})
+    items = repos.alarms.replace_alarm_routine(uid, alarm.alarm_id, {stretch: 300, bed: 0})
     assert sum(i.duration_sec for i in items) == 660
     assert [i.customized for i in items].count(True) == 2
 
-    items = repos.alarms.set_alarm_routine(uid, alarm.alarm_id, {stretch: 120})   # 이불 정리는 기본으로
+    items = repos.alarms.replace_alarm_routine(uid, alarm.alarm_id, {stretch: 120})   # 이불 정리는 기본으로
     assert sum(i.duration_sec for i in items) == 540
 
     with pytest.raises(ValidationFailed) as e:
-        repos.alarms.set_alarm_routine(uid, alarm.alarm_id, {i.template_item_id: 180 for i in items})
+        repos.alarms.replace_alarm_routine(uid, alarm.alarm_id, {i.template_item_id: 180 for i in items})
     assert e.value.code == "ROUTINE_OVER_LIMIT"
     with pytest.raises(ValidationFailed) as e:
-        repos.alarms.set_alarm_routine(uid, alarm.alarm_id, {i.template_item_id: 0 for i in items})
+        repos.alarms.replace_alarm_routine(uid, alarm.alarm_id, {i.template_item_id: 0 for i in items})
     assert e.value.code == "ROUTINE_ALL_REMOVED"
     assert sum(i.duration_sec for i in repos.alarms.get_alarm_routine(uid, alarm.alarm_id)) == 540   # 실패하면 그대로
 
     assert repos.alarms.get_alarm(other, alarm.alarm_id) is None
-    assert repos.alarms.set_alarm_routine(other, alarm.alarm_id, {stretch: 60}) == []
-    assert repos.alarms.delete_alarm(other, alarm.alarm_id) is False
+    assert repos.alarms.get_alarm_routine(other, alarm.alarm_id) is None
+    assert repos.alarms.replace_alarm_routine(other, alarm.alarm_id, {stretch: 60}) is None
+    assert repos.alarms.replace_alarm_routine(uid, "not-a-uuid", {}) is None
+    repos.alarms.delete_alarm(other, alarm.alarm_id)
+    assert repos.alarms.get_alarm(uid, alarm.alarm_id)                               # 남이 지우려 해도 그대로
 
     changed = repos.alarms.update_alarm(uid, alarm.alarm_id, {"template_id": M})
     assert changed.template_id == M
@@ -133,6 +136,7 @@ def test_night(repos, uid, other, alarm):
                                                      "unknown_key": 1}, alarm.alarm_id)
     assert (rec.extract_status, rec.tomorrow_notes, rec.override_wake_time) == ("DONE", ("노트북",), time(6, 30))
     assert repos.nights.get_night_for_morning(uid, rec.apply_date).night_record_id == nid
+    assert repos.nights.save_night_extract(other, nid, {"tomorrow_goal": "x"}, None) is None
     assert repos.nights.set_voice_path(uid, nid) == f"{uid}/{rec.record_date.isoformat()}.m4a"
 
 
@@ -148,10 +152,12 @@ def test_session_and_steps(repos, uid, other, alarm):
     steps = repos.sessions.create_steps(uid, s.session_id, plans)
     assert [p.step_order for p in steps] == [1, 2]
     assert len(repos.sessions.create_steps(uid, s.session_id, plans)) == 2          # 이미 있으면 그대로
+    assert repos.sessions.create_steps(other, s.session_id, plans) == []
 
     from dataclasses import replace
     done = repos.sessions.save_step(uid, replace(steps[0], step_status="DONE", checked_at=now_kst(), ai_verdict="done"))
     assert done.step_status == "DONE" and done.checked_at
+    assert repos.sessions.save_step(other, steps[1]) is None
 
     assert repos.sessions.add_rewake(uid, s.session_id) == 1
     assert repos.sessions.add_rewake(uid, s.session_id) == 2

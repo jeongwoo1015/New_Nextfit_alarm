@@ -57,6 +57,7 @@
 | `save_night_raw` | user_id, transcript, started_at, ended_at | night_record_id | rs_night_record(PENDING), rs_night_raw | 통화 종료 후 원문 저장. 같은 밤에 다시 저장하면 덮어씀 |
 | `save_night_extract` | user_id, night_record_id, 추출 결과 dict(11/01 컬럼 이름), override_alarm_id | NightRecord 또는 None | rs_night_record | 추출 결과 저장, EXTRACT_STATUS = DONE |
 | `mark_extract_failed` | user_id, night_record_id | 없음 | rs_night_record | 추출 실패 (FAILED) |
+| `get_night` | user_id, night_record_id | NightRecord 또는 None | rs_night_record | 원문 저장 직후 응답, 목소리 업로드 |
 | `get_night_raw` | night_record_id | NightRaw 또는 None | rs_night_raw | 다시 추출할 때 원문 읽기 |
 | `list_failed_extracts` | limit | list[(user_id, night_record_id)] | rs_night_record | 재추출 배치 |
 | `get_night_for_morning` | user_id, apply_date | NightRecord 또는 None | rs_night_record | 아침 브리핑 "어젯밤 이어받기", 세션 스냅샷 |

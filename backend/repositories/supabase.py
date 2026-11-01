@@ -225,26 +225,27 @@ class SupabaseAlarmRepository(_Base):
         return _model(Alarm, _first(self._run(q)))
 
     def delete_alarm(self, user_id, alarm_id):
-        if not _is_uuid(alarm_id):
-            return False
-        return bool(self._run(self.db.table("rs_alarm").delete().eq("alarm_id", alarm_id).eq("user_id", user_id)))
+        if _is_uuid(alarm_id):
+            self._run(self.db.table("rs_alarm").delete().eq("alarm_id", alarm_id).eq("user_id", user_id))
 
     def get_alarm_routine(self, user_id, alarm_id):
-        alarm = self.get_alarm(user_id, alarm_id)
-        if not alarm or alarm.morning_call_type != "ROUTINE":
+        alarm = self.get_alarm(user_id, alarm_id)    # DB 함수는 사용자를 확인하지 않으므로 먼저 본인 알람인지 본다
+        if not alarm:
+            return None
+        if alarm.morning_call_type != "ROUTINE":
             return []
         return _models(AlarmRoutineItem, self._run(self.db.rpc("rs_alarm_routine_items", {"p_alarm_id": alarm_id})))
 
-    def set_alarm_routine(self, user_id, alarm_id, overrides):
+    def replace_alarm_routine(self, user_id, alarm_id, overrides):
         """DB 함수 하나로 교체한다(삭제와 저장이 한 트랜잭션, 합계 검사는 커밋 때)."""
         if not _is_uuid(alarm_id):
-            return []
+            return None
         items = [{"template_item_id": k, "duration_sec": v} for k, v in overrides.items()]
         params = {"p_user_id": user_id, "p_alarm_id": alarm_id, "p_items": items}
         try:
             rows = self._run(self.db.rpc("rs_replace_alarm_routine_items", params))
-        except NotFound:
-            return []
+        except NotFound:                                  # '알람이 없습니다' = 없거나 남의 알람
+            return None
         return _models(AlarmRoutineItem, rows)
 
 
@@ -277,10 +278,7 @@ class SupabaseNightRepository(_Base):
         values.update(override_alarm_id=override_alarm_id, extract_status="DONE")
         q = (self.db.table("rs_night_record").update(_plain(values))
              .eq("night_record_id", night_record_id).eq("user_id", user_id))
-        rec = _model(NightRecord, _first(self._run(q)))
-        if not rec:
-            raise NotFound("밤 기록을 찾을 수 없어요")
-        return rec
+        return _model(NightRecord, _first(self._run(q)))
 
     def mark_extract_failed(self, user_id, night_record_id):
         if _is_uuid(night_record_id):
@@ -361,7 +359,7 @@ class SupabaseSessionRepository(_Base):
         return _model(MorningSession, _first(self._run(q)))
 
     def add_rewake(self, user_id, session_id):
-        """읽은 횟수와 같을 때만 +1 (다른 요청이 먼저 바꿨으면 다시 읽어서 시도)."""
+        """읽은 횟수와 같을 때만 +1 하는 조건부 수정. 동시에 두 번 오면 늦은 쪽이 다시 읽어서 더하므로 빠지는 횟수가 없다."""
         for _ in range(5):
             s = self.get_session(user_id, session_id)
             if not s:
@@ -373,11 +371,11 @@ class SupabaseSessionRepository(_Base):
         raise Conflict("재기상 횟수를 저장하지 못했어요")
 
     def create_steps(self, user_id, session_id, plans: list[StepPlan]):
+        if not self.get_session(user_id, session_id):
+            return []
         existing = self.list_steps(user_id, session_id)
         if existing or not plans:
             return existing
-        if not self.get_session(user_id, session_id):
-            raise NotFound("세션을 찾을 수 없어요")
         rows = [{"user_id": user_id, "session_id": session_id, "step_order": p.step_order, "step_name": p.step_name,
                  "template_item_id": p.template_item_id, "planned_duration_sec": p.planned_duration_sec,
                  "step_detail": p.step_detail} for p in plans]
@@ -396,10 +394,7 @@ class SupabaseSessionRepository(_Base):
     def save_step(self, user_id, step: SessionStep):
         values = {"step_status": step.step_status, "checked_at": step.checked_at, "ai_verdict": step.ai_verdict}
         q = self.db.table("rs_session_step").update(_plain(values)).eq("step_id", step.step_id).eq("user_id", user_id)
-        saved = _model(SessionStep, _first(self._run(q)))
-        if not saved:
-            raise NotFound("단계를 찾을 수 없어요")
-        return saved
+        return _model(SessionStep, _first(self._run(q)))
 
     def recent_records(self, user_id, since, until):
         sessions = _models(MorningSession, self._run(
