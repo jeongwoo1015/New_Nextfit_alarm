@@ -217,6 +217,11 @@ def test_storage(repos, uid):
     assert [p.diary_date for p in repos.storage.list_photos(uid, date(2026, 11, 1), date(2026, 11, 30))] == [d]
     assert repos.storage.signed_url("photo", photo.photo_path, 60).startswith("http")
     assert repos.storage.signed_url("photo", f"{uid}/1999-01-01.jpg", 60) is None              # 없는 파일
+
+    with pytest.raises(ValidationFailed):                                                      # 버킷 제한: 10MB 초과
+        repos.storage.upload_voice(uid, d, b"\x00" * (10 * 1024 * 1024 + 1))
+    with pytest.raises(ValidationFailed):                                                      # 버킷 제한: jpeg가 아닌 형식
+        repos.storage._upload("photo", f"{uid}/2026-11-02.jpg", b"\x89PNG", "image/png")
     path = repos.storage.upload_voice(uid, d, b"\x00\x00")
     assert repos.storage.delete_files("voice", [path]) == 1
     repos.storage.upload_voice(uid, d, b"\x00\x00")
