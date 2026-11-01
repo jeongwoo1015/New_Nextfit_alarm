@@ -31,15 +31,32 @@
 오류 응답은 모두 `{"error": {"code", "message", "details?"}}`. 전체 명세는 서버 실행 후 `/docs`(OpenAPI).
 
 ## Repository (backend-db 담당에게)
-`repositories/base.py`의 인터페이스를 `backend/repositories/supabase.py`에 구현하고, 모듈에
-`build_repositories() -> Repositories`를 두면 `REPOSITORY_BACKEND=supabase`로 바뀐다. 반환 형식은
-`domain/models.py` 데이터 클래스이고, 세부 규칙(없으면 None, id는 DB가 생성 등)은 `base.py` 맨 위에 있다.
-메모리 구현(`repositories/memory.py`)이 같은 동작의 예시다.
+backend-db 초안(`repository_functions_draft.md`)의 함수 이름·묶음으로 `repositories/base.py`를 만들었다(같은 파일을
+두 브랜치에서 고치면 main에서 충돌하므로 인터페이스는 backend-service가 관리한다). backend-db는 `supabase_*.py`에
+구현하고 `backend/repositories/supabase.py`의 `build_repositories() -> Repositories`로 묶으면 `REPOSITORY_BACKEND=supabase`로 바뀐다.
 
-**요청: 알람 항목 시간 한 번에 바꾸는 DB 함수.** `rs_alarm_routine_item` 트리거가 행마다 합계 상한·최소 1개를 검사해서,
-여러 항목을 한 행씩 바꾸면 중간 상태에서 실패할 수 있다(예: A를 늘린 뒤 B를 줄이는 순서). 서버는 항목 시간을 전체 교체로만
-보내므로(`AlarmRoutineItemRepository.replace`), 이것을 한 트랜잭션으로 처리하는 함수(예: `rs_set_alarm_routine_items(alarm_id, jsonb)`)를
-두고 `replace`에서 RPC로 불러 주면 좋겠다. 함수 전에는 `domain.routine_rules.safe_write_order()` 순서로 쓰면 대부분 통과한다.
+| 묶음 | 인터페이스 | 메모리 구현 |
+|---|---|---|
+| 1. 사용자·설정 | `UserRepository` | 있음 |
+| 2. 공용 데이터(프리셋·앱 설정·음악) | `PresetRepository` | 있음 (`pick_music`은 None) |
+| 3. 알람 | `AlarmRepository` | 있음 |
+| 4. 밤 기록 | `NightRepository` | 3단계에서 |
+| 5. 모닝 세션·단계 | `SessionRepository` | 4단계에서 |
+| 6. 개인화 | `PersonalizationRepository` | 4단계에서 |
+| 7. Storage | `StorageClient` | 3단계에서 |
+
+초안과 달라진 점
+- 사용자 확인: 쿼리에 `user_id` 조건을 넣고 다른 사용자 행이면 None → 서버는 404 (403 대신, 데이터 존재 여부도 숨김).
+- 알람 항목 시간: `set_alarm_item_durations` + `reset_alarm_items` → `set_alarm_routine(user_id, alarm_id, overrides)` 전체 교체 하나.
+  삭제와 upsert가 다른 문장이면 그 사이에 합계 트리거가 걸릴 수 있어 한 트랜잭션이 필요하다
+  (합계 검사를 `DEFERRABLE INITIALLY DEFERRED` constraint trigger로 바꾸고 RPC, 또는 `MERGE` 한 문장).
+  그 전에는 `domain.routine_rules.safe_write_order()` 순서로 쓰면 대부분 통과한다.
+- 추가: `update_user`, `delete_account`, `get_template`, `list_photos`.
+- `AlarmRoutineItem`은 DB 함수 `rs_alarm_routine_items` 한 줄 + `default_duration_sec`(평평한 형태).
+- `planned_total_sec`는 `MorningSession`에 두고 단계를 만든 뒤 `update_session`으로 채운다.
+- 추출 결과의 `override_coaching_min` → `override_skip_coaching` 변환은 서버의 AI 어댑터가 한다. `save_night_extract`는 11/01 컬럼 이름만 받는다.
+- 재연결 때 전략 문장은 저장하지 않는다. `StrategyLog.strategy`로 AI의 `strategy_block()`을 다시 부르면 같은 문장이 나온다.
+- 의존성 `supabase>=2.32,<3`은 `backend/requirements.txt`에 들어 있다.
 
 ## 실행
 

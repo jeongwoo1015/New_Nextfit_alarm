@@ -30,14 +30,14 @@ class RoutineService:
         self.r = repos
 
     def presets(self) -> list[Preset]:
-        return [Preset(t, self.r.templates.list_items(t.template_id)) for t in self.r.templates.list_templates(active_only=True)]
+        return [Preset(t, self.r.presets.list_template_items(t.template_id)) for t in self.r.presets.list_templates(active_only=True)]
 
     def preset(self, template_id: str) -> Preset:
-        t = self.r.templates.get_template(template_id)
+        t = self.r.presets.get_template(template_id)
         if not t:
             raise NotFound("루틴 프리셋을 찾을 수 없어요", "TEMPLATE_NOT_FOUND")
-        return Preset(t, self.r.templates.list_items(template_id))
+        return Preset(t, self.r.presets.list_template_items(template_id))
 
     def limits(self) -> RoutineLimits:
-        cfg = self.r.config.get()
+        cfg = self.r.presets.get_app_config()
         return RoutineLimits(cfg.routine_max_sec, codes.DURATION_STEP_SEC, content_duration_sec(cfg))

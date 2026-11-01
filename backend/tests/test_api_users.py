@@ -49,7 +49,7 @@ def test_onboarding_twice_is_conflict(client):
 
 def test_onboarding_resumes_without_duplicate_alarm(client, repos):
     onboard(client)
-    repos.users.update(replace(repos.users.get(USER_A), onboarding_done=False))   # 중간 실패를 흉내
+    repos.users.users[USER_A] = replace(repos.users.users[USER_A], onboarding_done=False)   # 중간 실패를 흉내
     r = onboard(client, user_name="정우2")
     assert r.status_code == 201 and r.json()["first_alarm"] is None
     assert len(client.get("/alarms", headers=auth(USER_A)).json()) == 1

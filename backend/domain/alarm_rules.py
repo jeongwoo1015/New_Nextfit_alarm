@@ -10,6 +10,9 @@ from .models import Alarm
 
 REPEAT_DAYS = re.compile(r"^[01]{7}$")
 LABEL_MAX = 20
+# 사용자가 정하는 RS_ALARM 컬럼 (id·user_id·시각 기록 제외)
+ALARM_FIELDS = ("alarm_time", "repeat_days", "label", "alarm_mode", "morning_call_type", "template_id",
+                "content_type", "content_option", "enabled")
 
 
 def validate_alarm(a: Alarm) -> None:

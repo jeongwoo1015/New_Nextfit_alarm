@@ -51,14 +51,14 @@ def test_toggle_and_switch_type(client):
     assert client.patch(url, json={"alarm_time": None}, headers=auth(USER_A)).status_code == 422
 
 
-def test_other_users_alarm_is_forbidden(client):
+def test_other_users_alarm_looks_missing(client):
     a = create(client, ROUTINE).json()
     url = f"/alarms/{a['alarm_id']}"
-    assert client.get(url, headers=auth(USER_B)).status_code == 403
-    assert client.patch(url, json={"enabled": False}, headers=auth(USER_B)).status_code == 403
-    assert client.delete(url, headers=auth(USER_B)).status_code == 403
-    assert client.get(items_url(a), headers=auth(USER_B)).status_code == 403
-    assert client.put(items_url(a), json={"items": []}, headers=auth(USER_B)).status_code == 403
+    assert client.get(url, headers=auth(USER_B)).status_code == 404
+    assert client.patch(url, json={"enabled": False}, headers=auth(USER_B)).status_code == 404
+    assert client.delete(url, headers=auth(USER_B)).status_code == 404
+    assert client.get(items_url(a), headers=auth(USER_B)).status_code == 404
+    assert client.put(items_url(a), json={"items": []}, headers=auth(USER_B)).status_code == 404
     assert client.get("/alarms", headers=auth(USER_B)).json() == []
 
 
@@ -71,7 +71,7 @@ def test_delete(client):
 def test_inactive_preset_cannot_be_newly_chosen_but_existing_alarm_keeps_it(client, repos):
     a = create(client, ROUTINE).json()
     q = template_id("Q")
-    repos.templates.templates[q] = replace(repos.templates.templates[q], is_active=False)
+    repos.presets.templates[q] = replace(repos.presets.templates[q], is_active=False)
     assert create(client, ROUTINE).status_code == 422
     assert client.patch(f"/alarms/{a['alarm_id']}", json={"alarm_time": "06:00"}, headers=auth(USER_A)).status_code == 200
     assert client.patch(f"/alarms/{a['alarm_id']}", json={"template_id": template_id("N")}, headers=auth(USER_A)).status_code == 200
@@ -95,9 +95,9 @@ def test_set_routine_items_and_reset(client, repos):
     r = client.put(items_url(a), json=body, headers=auth(USER_A))
     assert r.status_code == 200
     assert r.json()["total_sec"] == 660 and [i["duration_sec"] for i in r.json()["items"]] == [300, 0, 360]
-    assert repos.alarm_routine_items.get_overrides(a["alarm_id"]) == {stretch: 300, water: 0}   # 바꾼 항목만 저장
+    assert repos.alarms.overrides.get(a["alarm_id"], {}) == {stretch: 300, water: 0}   # 바꾼 항목만 저장
     r = client.put(items_url(a), json={"items": []}, headers=auth(USER_A))                   # 전부 기본값으로
-    assert r.json()["total_sec"] == 600 and repos.alarm_routine_items.get_overrides(a["alarm_id"]) == {}
+    assert r.json()["total_sec"] == 600 and repos.alarms.overrides.get(a["alarm_id"], {}) == {}
 
 
 def test_set_routine_items_rejects(client):
@@ -105,8 +105,8 @@ def test_set_routine_items_rejects(client):
     stretch, water, cardio = (i["template_item_id"] for i in client.get(items_url(a), headers=auth(USER_A)).json()["items"])
     put = lambda items: client.put(items_url(a), json={"items": items}, headers=auth(USER_A))
     over = put([{"template_item_id": cardio, "duration_sec": 690}])                         # 930초
-    assert over.status_code == 422 and over.json()["error"]["code"] == "ROUTINE_TIME_INVALID"
-    assert put([{"template_item_id": x, "duration_sec": 0} for x in (stretch, water, cardio)]).status_code == 422
+    assert over.status_code == 422 and over.json()["error"]["code"] == "ROUTINE_OVER_LIMIT"
+    assert put([{"template_item_id": x, "duration_sec": 0} for x in (stretch, water, cardio)]).json()["error"]["code"] == "ROUTINE_ALL_REMOVED"
     assert put([{"template_item_id": water, "duration_sec": 45}]).status_code == 422           # 30초 단위
     assert put([{"template_item_id": "nope", "duration_sec": 60}]).json()["error"]["code"] == "ROUTINE_ITEM_UNKNOWN"
     assert put([{"template_item_id": water, "duration_sec": 30}, {"template_item_id": water, "duration_sec": 60}]).status_code == 422
@@ -125,4 +125,4 @@ def test_changing_preset_clears_item_settings(client, repos):
     client.patch(f"/alarms/{a['alarm_id']}", json={"template_id": template_id("N")}, headers=auth(USER_A))
     r = client.get(items_url(a), headers=auth(USER_A)).json()
     assert r["template_id"] == template_id("N") and r["total_sec"] == 600
-    assert repos.alarm_routine_items.get_overrides(a["alarm_id"]) == {}
+    assert repos.alarms.overrides.get(a["alarm_id"], {}) == {}

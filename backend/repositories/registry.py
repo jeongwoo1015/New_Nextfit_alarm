@@ -5,18 +5,20 @@ supabase를 고르면 `backend.repositories.supabase.build_repositories()`(backe
 import importlib
 from dataclasses import dataclass
 
-from .base import (AlarmRepository, AlarmRoutineItemRepository, AppConfigRepository, RoutineTemplateRepository,
-                   UserRepository, UserSettingRepository)
+from .base import (AlarmRepository, NightRepository, PersonalizationRepository, PresetRepository, SessionRepository,
+                   StorageClient, UserRepository)
 
 
 @dataclass
 class Repositories:
     users: UserRepository
-    settings: UserSettingRepository
-    config: AppConfigRepository
+    presets: PresetRepository
     alarms: AlarmRepository
-    templates: RoutineTemplateRepository
-    alarm_routine_items: AlarmRoutineItemRepository
+    # 아래는 밤·아침 흐름(3·4단계)에서 쓴다. 메모리 구현은 그때 추가한다
+    nights: NightRepository | None = None
+    sessions: SessionRepository | None = None
+    personalization: PersonalizationRepository | None = None
+    storage: StorageClient | None = None
 
 
 def build_repositories(backend: str) -> Repositories:

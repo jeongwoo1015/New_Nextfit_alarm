@@ -82,17 +82,22 @@ class TemplateItem:
 
 
 @dataclass(frozen=True)
-class RoutineItem:
+class AlarmRoutineItem:
     """알람에서 실제로 쓰는 항목 = 프리셋 항목 + 알람별 설정(RS_ALARM_ROUTINE_ITEM). 0초면 뺀 항목.
 
-    DB 함수 rs_alarm_routine_items(alarm_id)의 한 줄과 같다.
+    DB 함수 rs_alarm_routine_items(alarm_id)의 한 줄 + default_duration_sec.
     """
-    item: TemplateItem
+    template_item_id: str
+    item_order: int
+    item_name: str
+    default_duration_sec: int
     duration_sec: int
+    response_type: str = "PLAY"
+    script: str | None = None
 
     @property
     def customized(self) -> bool:
-        return self.duration_sec != self.item.default_duration_sec
+        return self.duration_sec != self.default_duration_sec
 
 
 @dataclass(frozen=True)
@@ -120,6 +125,17 @@ class NightRecord:
 
 
 @dataclass(frozen=True)
+class NightRaw:
+    """RS_NIGHT_RAW (서버만). transcript = [{role, text, at}]"""
+    night_record_id: str
+    transcript: list | None = None
+    audio_path: str | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    expires_at: datetime | None = None
+
+
+@dataclass(frozen=True)
 class SessionSnapshot:
     """RS_MORNING_SESSION을 만들 때 넣는 그날의 값(알람 설정이 나중에 바뀌어도 기록은 유지)."""
     user_id: str
@@ -132,6 +148,28 @@ class SessionSnapshot:
     base_wake_time: time
     target_wake_time: time
     coaching_skipped: bool = False
+
+
+@dataclass(frozen=True)
+class MorningSession:
+    """RS_MORNING_SESSION. 만들 때는 SessionSnapshot 값, 진행하며 나머지 칸을 채운다."""
+    session_id: str
+    user_id: str
+    alarm_id: str | None
+    session_date: date
+    morning_call_type: str
+    template_id: str | None
+    content_type: str | None
+    content_option: str | None
+    base_wake_time: time
+    target_wake_time: time
+    coaching_skipped: bool = False
+    planned_total_sec: int | None = None   # 단계를 만든 뒤 채운다
+    alarm_rang_at: datetime | None = None
+    first_response_at: datetime | None = None
+    rewake_count: int = 0
+    wake_success: bool = False
+    session_end_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -163,6 +201,61 @@ class SessionStep:
     step_status: str = "PENDING"
     checked_at: datetime | None = None
     ai_verdict: str | None = None
+
+
+@dataclass(frozen=True)
+class RecentRecords:
+    """개인화 build_sessions()와 리포트 입력: 기간 안의 세션·단계·밤 기록."""
+    sessions: list[MorningSession]
+    steps: list[SessionStep]
+    nights: list[NightRecord]
+
+
+@dataclass(frozen=True)
+class StrategyLog:
+    """RS_STRATEGY_LOG (서버만). 컬럼은 AI 파트 DecisionLog.to_row()와 같다."""
+    log_id: str
+    user_id: str
+    session_date: date
+    source: str
+    mode: str
+    session_id: str | None = None
+    strategy_id: str | None = None
+    strategy: dict | None = None           # 재연결 때 strategy_block(Strategy.from_dict(strategy))로 같은 문장을 다시 만든다
+    rule_ids: list | None = None
+    context_key: str | None = None
+    propensity: float | None = None
+    allowed_arms: list | None = None
+    explored: bool | None = None
+    ab_group: str | None = None
+    ab_propensity: float | None = None
+    stats: dict | None = None
+    prompt_version: str | None = None
+    reward: float | None = None
+    error: str | None = None
+    created_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class DiaryPhoto:
+    """RS_DIARY_PHOTO. photo_path = {user_id}/{diary_date}.jpg (photo 버킷)"""
+    diary_photo_id: str
+    user_id: str
+    diary_date: date
+    photo_path: str
+    created_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class AiMusic:
+    """RS_AI_MUSIC (공용 캐시). REWAKE는 genre, SLEEP은 mood."""
+    music_id: str
+    music_type: str
+    music_prompt: str
+    music_path: str
+    genre: str | None = None
+    mood: str | None = None
+    created_at: datetime | None = None
 
 
 @dataclass(frozen=True)

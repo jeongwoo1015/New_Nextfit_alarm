@@ -1,22 +1,18 @@
 """알람 목록·설정 (홈 화면, 알람 세부 설정)."""
 from dataclasses import dataclass, replace
 
-from backend.core.auth import ensure_owner
 from backend.core.errors import NotFound, ValidationFailed
-from backend.domain.alarm_rules import validate_alarm
-from backend.domain.models import Alarm, RoutineItem
-from backend.domain.routine_rules import apply_durations, routine_items, total_sec
+from backend.domain.alarm_rules import ALARM_FIELDS, validate_alarm
+from backend.domain.models import Alarm, AlarmRoutineItem
+from backend.domain.routine_rules import apply_durations, total_sec
 from backend.repositories.registry import Repositories
-
-EDITABLE = {"alarm_time", "repeat_days", "label", "alarm_mode", "morning_call_type", "template_id",
-            "content_type", "content_option", "enabled"}
 
 
 @dataclass(frozen=True)
 class AlarmRoutine:
     """알람 세부 설정의 루틴 항목 화면."""
     alarm: Alarm
-    items: list[RoutineItem]
+    items: list[AlarmRoutineItem]
     max_sec: int
 
     @property
@@ -29,43 +25,41 @@ class AlarmService:
         self.r = repos
 
     def list(self, user_id: str) -> list[Alarm]:
-        return self.r.alarms.list_by_user(user_id)
+        return self.r.alarms.list_alarms(user_id)
 
     def get(self, user_id: str, alarm_id: str) -> Alarm:
-        alarm = self.r.alarms.get(alarm_id)
+        """다른 사용자의 알람은 Repository가 None을 돌려주므로 없는 알람과 같이 404."""
+        alarm = self.r.alarms.get_alarm(user_id, alarm_id)
         if not alarm:
             raise NotFound("알람을 찾을 수 없어요", "ALARM_NOT_FOUND")
-        ensure_owner(user_id, alarm.user_id)
         return alarm
 
     def create(self, user_id: str, fields: dict) -> Alarm:
-        alarm = Alarm(alarm_id="", user_id=user_id, **_editable(fields))
-        self._validate(alarm, previous=None)
-        return self.r.alarms.create(alarm)
+        values = _editable(fields)
+        self._validate(Alarm(alarm_id="", user_id=user_id, **values), previous=None)
+        return self.r.alarms.create_alarm(user_id, values)
 
     def update(self, user_id: str, alarm_id: str, changes: dict) -> Alarm:
         """프리셋을 바꾸거나 콘텐츠 알람으로 바꾸면 예전 항목 시간 설정은 DB 트리거가 지운다."""
         current = self.get(user_id, alarm_id)
-        alarm = replace(current, **_editable(changes))
-        self._validate(alarm, previous=current)
-        return self.r.alarms.update(alarm)
+        self._validate(replace(current, **_editable(changes)), previous=current)
+        return self.r.alarms.update_alarm(user_id, alarm_id, changes)
 
     def delete(self, user_id: str, alarm_id: str) -> None:
-        self.get(user_id, alarm_id)
-        self.r.alarms.delete(alarm_id)
+        if not self.r.alarms.delete_alarm(user_id, alarm_id):
+            raise NotFound("알람을 찾을 수 없어요", "ALARM_NOT_FOUND")
 
     # ---------- 알람 세부 설정: 루틴 항목 시간 ----------
     def routine(self, user_id: str, alarm_id: str) -> AlarmRoutine:
         alarm = self._routine_alarm(user_id, alarm_id)
-        items = routine_items(self.r.templates.list_items(alarm.template_id), self.r.alarm_routine_items.get_overrides(alarm_id))
-        return AlarmRoutine(alarm, items, self.r.config.get().routine_max_sec)
+        return AlarmRoutine(alarm, self.r.alarms.get_alarm_routine(user_id, alarm_id), self.r.presets.get_app_config().routine_max_sec)
 
     def set_routine(self, user_id: str, alarm_id: str, durations: dict[str, int]) -> AlarmRoutine:
         """항목 시간 전체 교체. durations에 없는 항목은 프리셋 기본 시간, 0초는 그 알람에서 빼기."""
         alarm = self._routine_alarm(user_id, alarm_id)
-        overrides = apply_durations(self.r.templates.list_items(alarm.template_id), durations, self.r.config.get().routine_max_sec)
-        self.r.alarm_routine_items.replace(alarm_id, user_id, overrides)
-        return self.routine(user_id, alarm_id)
+        max_sec = self.r.presets.get_app_config().routine_max_sec
+        overrides = apply_durations(self.r.alarms.get_alarm_routine(user_id, alarm_id), durations, max_sec)
+        return AlarmRoutine(alarm, self.r.alarms.set_alarm_routine(user_id, alarm_id, overrides), max_sec)
 
     def _routine_alarm(self, user_id: str, alarm_id: str) -> Alarm:
         alarm = self.get(user_id, alarm_id)
@@ -77,7 +71,7 @@ class AlarmService:
         validate_alarm(alarm)
         if alarm.morning_call_type != "ROUTINE":
             return
-        template = self.r.templates.get_template(alarm.template_id)
+        template = self.r.presets.get_template(alarm.template_id)
         if not template:
             raise ValidationFailed("없는 루틴 프리셋이에요")
         # 비활성 프리셋은 새로 고를 수 없다. 이미 쓰던 알람은 그대로 둘 수 있다(정의서: 삭제 대신 비활성화)
@@ -86,7 +80,7 @@ class AlarmService:
 
 
 def _editable(fields: dict) -> dict:
-    unknown = set(fields) - EDITABLE
+    unknown = set(fields) - set(ALARM_FIELDS)
     if unknown:
         raise ValidationFailed(f"바꿀 수 없는 항목이에요: {', '.join(sorted(unknown))}")
     return fields

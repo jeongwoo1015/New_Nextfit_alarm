@@ -6,7 +6,7 @@ from backend.core.auth import current_user_id
 from backend.core.errors import ValidationFailed
 from backend.services.alarm_service import AlarmRoutine, AlarmService
 
-from .schemas import AlarmIn, AlarmOut, AlarmPatch, AlarmRoutineIn, AlarmRoutineOut, RoutineItemOut, TemplateItemOut
+from .schemas import AlarmIn, AlarmOut, AlarmPatch, AlarmRoutineIn, AlarmRoutineOut, RoutineItemOut
 
 router = APIRouter(prefix="/alarms", tags=["alarms"])
 
@@ -14,8 +14,7 @@ NULLABLE = {"label", "template_id", "content_type", "content_option"}
 
 
 def _routine(r: AlarmRoutine) -> AlarmRoutineOut:
-    items = [RoutineItemOut(**TemplateItemOut.model_validate(x.item).model_dump(), duration_sec=x.duration_sec,
-                            customized=x.customized) for x in r.items]
+    items = [RoutineItemOut.model_validate(x) for x in r.items]
     return AlarmRoutineOut(alarm_id=r.alarm.alarm_id, template_id=r.alarm.template_id, total_sec=r.total_sec,
                            max_sec=r.max_sec, items=items)
 

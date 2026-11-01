@@ -3,7 +3,7 @@ from datetime import date
 from typing import Iterable, Protocol
 
 from . import codes
-from .models import Alarm, AppConfig, NightRecord, RoutineItem, SessionSnapshot, StepPlan
+from .models import Alarm, AlarmRoutineItem, AppConfig, NightRecord, SessionSnapshot, StepPlan
 
 
 def override_applies(alarm: Alarm, night: NightRecord | None, session_date: date) -> bool:
@@ -25,12 +25,12 @@ def resolve_snapshot(alarm: Alarm, night: NightRecord | None, session_date: date
     )
 
 
-def routine_steps(items: Iterable[RoutineItem], coaching_skipped: bool = False) -> list[StepPlan]:
+def routine_steps(items: Iterable[AlarmRoutineItem], coaching_skipped: bool = False) -> list[StepPlan]:
     """루틴 알람의 단계 = 알람의 항목 중 시간이 0보다 큰 것, 그 시간으로. 코칭을 건너뛰는 날은 단계가 없다."""
     if coaching_skipped:
         return []
-    chosen = [r for r in sorted(items, key=lambda r: r.item.item_order) if r.duration_sec > 0]
-    return [StepPlan(n, r.item.item_name, r.item.template_item_id, r.duration_sec, r.item.response_type, r.item.script)
+    chosen = [r for r in sorted(items, key=lambda r: r.item_order) if r.duration_sec > 0]
+    return [StepPlan(n, r.item_name, r.template_item_id, r.duration_sec, r.response_type, r.script)
             for n, r in enumerate(chosen, 1)]
 
 

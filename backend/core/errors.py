@@ -21,7 +21,8 @@ class Unauthorized(AppError):
 
 
 class Forbidden(AppError):
-    """요청한 데이터의 USER_ID가 로그인 사용자와 다를 때 (service_role이라 RLS가 막아 주지 않는다)."""
+    """요청한 데이터의 USER_ID가 로그인 사용자와 다를 때 (service_role이라 RLS가 막아 주지 않는다).
+    사용자 데이터 조회는 Repository가 user_id로 걸러 None을 돌려주므로 보통 NotFound(404)가 된다."""
     status_code = 403
     code = "FORBIDDEN"
 
@@ -39,6 +40,12 @@ class Conflict(AppError):
 class ValidationFailed(AppError):
     status_code = 422
     code = "VALIDATION_FAILED"
+
+
+class ServiceUnavailable(AppError):
+    """DB 연결 실패·시간 초과 (Repository 구현이 던진다)."""
+    status_code = 503
+    code = "DB_UNAVAILABLE"
 
 
 def install_error_handlers(app: FastAPI) -> None:

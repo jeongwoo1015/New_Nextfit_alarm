@@ -4,7 +4,7 @@ from datetime import date, time
 import pytest
 
 from backend.domain.models import Alarm, AppConfig, NightRecord
-from backend.domain.routine_rules import routine_items
+from backend.domain.routine_rules import build_routine
 from backend.domain.session_rules import (content_duration_sec, content_steps, planned_total_sec, resolve_snapshot,
                                           routine_steps)
 from backend.repositories.seed import seed_templates, template_id
@@ -21,7 +21,7 @@ def night(**over):
 
 
 def test_default_routine_uses_preset_default_times():
-    steps = routine_steps(routine_items(reversed(N_ITEMS), {}))     # 입력 순서와 무관하게 ITEM_ORDER 순
+    steps = routine_steps(build_routine(reversed(N_ITEMS), {}))     # 입력 순서와 무관하게 ITEM_ORDER 순
     assert [s.step_name for s in steps] == [i.item_name for i in N_ITEMS]
     assert [s.step_order for s in steps] == list(range(1, 7))
     assert planned_total_sec(steps) == 600
@@ -31,7 +31,7 @@ def test_default_routine_uses_preset_default_times():
 
 def test_alarm_overrides_change_times_and_zero_removes_item():
     stretch, bed = N_ITEMS[0].template_item_id, N_ITEMS[3].template_item_id
-    steps = routine_steps(routine_items(N_ITEMS, {stretch: 300, bed: 0}))
+    steps = routine_steps(build_routine(N_ITEMS, {stretch: 300, bed: 0}))
     assert bed not in [s.template_item_id for s in steps]
     assert [s.step_order for s in steps] == [1, 2, 3, 4, 5]                    # 번호는 다시 1부터
     assert steps[0].planned_duration_sec == 300
@@ -39,7 +39,7 @@ def test_alarm_overrides_change_times_and_zero_removes_item():
 
 
 def test_skip_coaching_makes_no_steps():
-    assert routine_steps(routine_items(N_ITEMS, {}), coaching_skipped=True) == []
+    assert routine_steps(build_routine(N_ITEMS, {}), coaching_skipped=True) == []
 
 
 def test_snapshot_without_override_uses_alarm():
