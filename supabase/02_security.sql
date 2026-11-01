@@ -39,12 +39,20 @@ alter table rs_bandit_state enable row level security;
 
 
 -- Storage 버킷 (모두 비공개, 재생은 서명된 임시 URL)
-insert into storage.buckets (id, name, public) values
-  ('voice', 'voice', false),          -- {user_id}/{record_date}.m4a
-  ('night-raw', 'night-raw', false),  -- {user_id}/{record_date}.m4a, 서버만
-  ('photo', 'photo', false),          -- {user_id}/{diary_date}.jpg
-  ('music', 'music', false)           -- {music_type}/{genre 또는 mood}/{music_id}.mp3
-on conflict (id) do nothing;
+--  파일 크기(바이트)와 허용 형식을 버킷에서 막는다. 바꿀 때는 숫자·목록만 고친다
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types) values
+  ('voice', 'voice', false, 10485760,                 -- {user_id}/{record_date}.m4a, 10MB
+   array['audio/mp4', 'audio/x-m4a', 'audio/m4a', 'audio/aac']),
+  ('night-raw', 'night-raw', false, 52428800,         -- {user_id}/{record_date}.m4a, 50MB, 서버만
+   array['audio/mp4', 'audio/x-m4a', 'audio/m4a', 'audio/aac']),
+  ('photo', 'photo', false, 10485760,                 -- {user_id}/{diary_date}.jpg, 10MB
+   array['image/jpeg']),
+  ('music', 'music', false, 20971520,                 -- {music_type}/{genre 또는 mood}/{music_id}.mp3, 20MB
+   array['audio/mpeg'])
+on conflict (id) do update
+  set public = excluded.public,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
 
 -- voice, photo: 본인 폴더({user_id}/...)만
 drop policy if exists "own_files_select" on storage.objects;

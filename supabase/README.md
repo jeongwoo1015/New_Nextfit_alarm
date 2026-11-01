@@ -15,10 +15,12 @@
 | 5 | `05_test_data.sql` | 데이터 넣기 테스트. 테스트 계정이 필요하고 마지막 블록에서 지움 |
 | (6) | `06_alarm_items_replace.sql` | 11/01 추가 변경. 01을 이 변경 전에 실행한 DB에만 적용 (테이블·데이터 유지) |
 | (7) | `07_trigger_security.sql` | 계정 삭제 오류 수정. 01을 이 변경 전에 실행한 DB에만 적용 (테이블·데이터 유지) |
+| (8) | `08_storage_limits.sql` | Storage 버킷 파일 크기·형식 제한. 02를 이 변경 전에 실행한 DB에만 적용 |
 
 ## 구조 요약
 - 앱은 DB에 직접 접근하지 않고 FastAPI 서버를 거칩니다. 서버는 service_role 키를 쓰고, 로그인 토큰의 user_id를 코드에서 확인합니다.
 - RLS: 사용자 데이터는 본인 행만, 프리셋·음악은 로그인 사용자 읽기만, 밤 대화 원문(`rs_night_raw`)은 서버만.
+- Storage 제한: voice 10MB / night-raw 50MB (m4a 계열), photo 10MB (jpeg만), music 20MB (mp3만). 앱은 사진을 jpeg로 바꿔 보낸다.
 - 날짜: `record_date` = KST 현재 − 12시간의 날짜, `apply_date` = `record_date` + 1 (트리거가 계산). 아침 브리핑은 `apply_date` = 오늘인 밤 기록을 씁니다.
 - 알람: 루틴 알람(`ROUTINE`) 또는 콘텐츠 알람(`CONTENT`) 중 하나입니다.
 - 루틴: 프리셋 항목마다 기본 시간(`default_duration_sec`)이 있고 합계는 10분입니다. 알람 세부 설정에서 항목 시간을 30초 단위로 바꿀 수 있고, 0분이면 그 항목을 뺍니다(`rs_alarm_routine_item`, 바꾼 항목만 저장). 알람의 루틴 합계는 `rs_app_config.routine_max_sec`(900초) 이하입니다.

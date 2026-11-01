@@ -26,7 +26,8 @@ order by tablename;
 
 
 -- [4] Storage 버킷 4개 (voice, night-raw, photo, music, 모두 public = false)
-select id, public from storage.buckets order by id;
+--     크기: music 20971520, night-raw 52428800, photo·voice 10485760
+select id, public, file_size_limit, allowed_mime_types from storage.buckets order by id;
 
 
 -- [5] 앱 설정 (routine_max_sec = 900)

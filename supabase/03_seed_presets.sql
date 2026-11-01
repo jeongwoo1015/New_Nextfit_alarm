@@ -89,3 +89,7 @@ on conflict (template_id, item_order) do update
       default_duration_sec = excluded.default_duration_sec,
       response_type        = excluded.response_type,
       script               = excluded.script;
+
+
+-- 앱 설정 값 (11/01 팀 확정: 콘텐츠 알람 고정 시간 5분)
+update rs_app_config set content_duration_sec = 300;
