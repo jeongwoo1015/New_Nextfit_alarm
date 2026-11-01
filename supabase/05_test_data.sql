@@ -55,6 +55,35 @@ select item_order, item_name, duration_sec,
 from rs_alarm_routine_items('00000000-0000-4000-8000-00000000b001');
 
 
+-- [T3-2] 전체 교체 함수: 스트레칭 2분, 이불 정리 1분(기본값이라 저장 안 함), 나머지는 넘기지 않음(기본)
+--  결과: 스트레칭 120, 이불 정리 60(기본), 합계 540, 저장된 항목 설정 1개
+select item_order, item_name, default_duration_sec, duration_sec
+from rs_replace_alarm_routine_items(
+  (select user_id from rs_alarm where alarm_id = '00000000-0000-4000-8000-00000000b001'),
+  '00000000-0000-4000-8000-00000000b001',
+  (select jsonb_agg(jsonb_build_object('template_item_id', template_item_id,
+                                       'duration_sec', case item_order when 1 then 120 else 60 end))
+   from rs_routine_template_item
+   where template_id = '00000000-0000-4000-8000-0000000000a2' and item_order in (1, 4)));
+
+select (select count(*) from rs_alarm_routine_item) as item_settings,
+       rs_alarm_routine_total('00000000-0000-4000-8000-00000000b001') as total_sec;
+
+
+-- [T3-3] 다시 T3 상태로 (스트레칭 5분, 이불 정리 0분). 결과: 합계 660, 저장된 항목 설정 2개
+select count(*) as items
+from rs_replace_alarm_routine_items(
+  (select user_id from rs_alarm where alarm_id = '00000000-0000-4000-8000-00000000b001'),
+  '00000000-0000-4000-8000-00000000b001',
+  (select jsonb_agg(jsonb_build_object('template_item_id', template_item_id,
+                                       'duration_sec', case item_order when 1 then 300 else 0 end))
+   from rs_routine_template_item
+   where template_id = '00000000-0000-4000-8000-0000000000a2' and item_order in (1, 4)));
+
+select (select count(*) from rs_alarm_routine_item) as item_settings,
+       rs_alarm_routine_total('00000000-0000-4000-8000-00000000b001') as total_sec;
+
+
 -- [T4] 밤 기록 저장 (날짜는 트리거가 계산) + 하루 한정 변경(내일만 06:30) + 원문
 --  결과: record_date = KST 현재 - 12시간의 날짜, apply_date = 다음 날, 음성 경로 = {user_id}/{record_date}.m4a
 insert into rs_night_record (user_id, ai_summary, tomorrow_goal, tomorrow_notes, condition_label, condition_text,
@@ -217,6 +246,31 @@ update rs_night_record set override_alarm_id = null;
 
 -- [E12] Bandit 상태 키 규칙 위반 -> rs_bandit_state_key
 insert into rs_bandit_state (state_key, state) values ('user:abc', '{}');
+
+-- [E13] 전체 교체로 상한을 넘김(N 프리셋 6항목을 모두 3분) -> '루틴 합계 1080초가 상한 900초를 넘습니다'
+select * from rs_replace_alarm_routine_items(
+  (select user_id from rs_alarm where alarm_id = '00000000-0000-4000-8000-00000000b001'),
+  '00000000-0000-4000-8000-00000000b001',
+  (select jsonb_agg(jsonb_build_object('template_item_id', template_item_id, 'duration_sec', 180))
+   from rs_routine_template_item where template_id = '00000000-0000-4000-8000-0000000000a2'));
+
+-- [E14] 다른 사용자 id로 교체 -> '알람이 없습니다'
+select * from rs_replace_alarm_routine_items(
+  '00000000-0000-0000-0000-000000000000', '00000000-0000-4000-8000-00000000b001', '[]'::jsonb);
+
+
+-- [T7-2] 항목 설정이 있는 루틴 알람을 콘텐츠 알람으로 바꾸기 (설정은 지워지고 오류 없음)
+--  결과: CONTENT, 항목 설정 0개. 확인 뒤 루틴 알람으로 되돌린다(설정은 지워진 채, T8 결과는 그대로)
+update rs_alarm
+set morning_call_type = 'CONTENT', template_id = null, content_type = 'QUIZ'
+where alarm_id = '00000000-0000-4000-8000-00000000b001';
+
+select (select morning_call_type from rs_alarm where alarm_id = '00000000-0000-4000-8000-00000000b001') as call_type,
+       (select count(*) from rs_alarm_routine_item) as item_settings;
+
+update rs_alarm
+set morning_call_type = 'ROUTINE', template_id = '00000000-0000-4000-8000-0000000000a2', content_type = null
+where alarm_id = '00000000-0000-4000-8000-00000000b001';
 
 
 -- [T8] 알람 프리셋을 M으로 바꾸면 예전 항목 설정이 지워짐

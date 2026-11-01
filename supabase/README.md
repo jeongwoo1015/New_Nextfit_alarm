@@ -13,6 +13,7 @@
 | 3 | `03_seed_presets.sql` | 초기 프리셋 5종(M~Q), 항목 24개, 고정 스크립트 |
 | 4 | `04_check.sql` | 확인 쿼리. 블록을 하나씩 선택해서 실행 |
 | 5 | `05_test_data.sql` | 데이터 넣기 테스트. 테스트 계정이 필요하고 마지막 블록에서 지움 |
+| (6) | `06_alarm_items_replace.sql` | 11/01 추가 변경. 01을 이 변경 전에 실행한 DB에만 적용 (테이블·데이터 유지) |
 
 ## 구조 요약
 - 앱은 DB에 직접 접근하지 않고 FastAPI 서버를 거칩니다. 서버는 service_role 키를 쓰고, 로그인 토큰의 user_id를 코드에서 확인합니다.
@@ -20,7 +21,8 @@
 - 날짜: `record_date` = KST 현재 − 12시간의 날짜, `apply_date` = `record_date` + 1 (트리거가 계산). 아침 브리핑은 `apply_date` = 오늘인 밤 기록을 씁니다.
 - 알람: 루틴 알람(`ROUTINE`) 또는 콘텐츠 알람(`CONTENT`) 중 하나입니다.
 - 루틴: 프리셋 항목마다 기본 시간(`default_duration_sec`)이 있고 합계는 10분입니다. 알람 세부 설정에서 항목 시간을 30초 단위로 바꿀 수 있고, 0분이면 그 항목을 뺍니다(`rs_alarm_routine_item`, 바꾼 항목만 저장). 알람의 루틴 합계는 `rs_app_config.routine_max_sec`(900초) 이하입니다.
-- 실제 항목 목록과 합계는 함수로 구합니다: `rs_alarm_routine_items(alarm_id)`, `rs_alarm_routine_total(alarm_id)`. 세션 단계를 만들 때는 시간이 0보다 큰 항목만 씁니다.
+- 실제 항목 목록(기본 시간 포함)과 합계는 함수로 구합니다: `rs_alarm_routine_items(alarm_id)`, `rs_alarm_routine_total(alarm_id)`. 세션 단계를 만들 때는 시간이 0보다 큰 항목만 씁니다.
+- 서버는 항목 설정을 `rs_replace_alarm_routine_items(user_id, alarm_id, items)`로 한 번에 교체합니다. 기본 시간과 같은 값은 저장하지 않고, 합계 검사는 커밋할 때 합니다.
 - 콘텐츠: 고정 시간(`rs_app_config.content_duration_sec`, 팀 확정 후), 단계 내용은 `rs_session_step.step_detail`(JSON)에 둡니다.
 - 밤 대화의 하루 한정 변경: 내일 알람 시각(`override_wake_time`), 내일 코칭 안 하기(`override_skip_coaching`).
 - 개인화: 전략 로그(`rs_strategy_log`)와 Bandit 상태(`rs_bandit_state`)는 서버만 읽고 씁니다.

@@ -28,6 +28,7 @@ drop function if exists
   rs_set_updated_at(),
   rs_alarm_routine_items(uuid),
   rs_alarm_routine_total(uuid),
+  rs_replace_alarm_routine_items(uuid, uuid, jsonb),
   rs_alarm_routine_item_check(),
   rs_alarm_routine_total_check(),
   rs_alarm_template_changed(),

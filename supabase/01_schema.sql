@@ -144,11 +144,12 @@ create trigger trg_alarm_routine_item_updated before update on rs_alarm_routine_
   for each row execute function rs_set_updated_at();
 
 -- 알람의 실제 항목 시간: 바꾼 시간이 있으면 그 시간, 없으면 프리셋 기본 시간 (0이면 뺀 항목)
-create or replace function rs_alarm_routine_items(p_alarm_id uuid)
-returns table (template_item_id uuid, item_order int, item_name varchar, duration_sec int,
-               response_type varchar, script text)
+drop function if exists rs_alarm_routine_items(uuid);   -- 반환 칸이 바뀌어 다시 만든다
+create function rs_alarm_routine_items(p_alarm_id uuid)
+returns table (template_item_id uuid, item_order int, item_name varchar, default_duration_sec int,
+               duration_sec int, response_type varchar, script text)
 language sql stable as $$
-  select i.template_item_id, i.item_order, i.item_name,
+  select i.template_item_id, i.item_order, i.item_name, i.default_duration_sec,
          coalesce(x.duration_sec, i.default_duration_sec), i.response_type, i.script
   from rs_alarm a
   join rs_routine_template_item i on i.template_id = a.template_id
@@ -192,6 +193,7 @@ create trigger trg_alarm_routine_item_check before insert or update on rs_alarm_
   for each row execute function rs_alarm_routine_item_check();
 
 -- 바꾼 뒤 확인: 루틴 합계가 상한 이하인지, 켜진 항목이 하나 이상인지
+--  커밋할 때 검사한다(deferred). 여러 문장으로 바꾸는 중간 상태에서는 막지 않는다
 create or replace function rs_alarm_routine_total_check() returns trigger
 language plpgsql as $$
 declare
@@ -206,8 +208,8 @@ begin
     target := new.alarm_id;
   end if;
 
-  if not exists (select 1 from rs_alarm where alarm_id = target) then
-    return null;   -- 알람 자체가 지워지는 중
+  if not exists (select 1 from rs_alarm where alarm_id = target and morning_call_type = 'ROUTINE') then
+    return null;   -- 알람이 지워졌거나 콘텐츠 알람으로 바뀌는 중
   end if;
 
   total := rs_alarm_routine_total(target);
@@ -225,8 +227,40 @@ begin
 end $$;
 
 drop trigger if exists trg_alarm_routine_total_check on rs_alarm_routine_item;
-create trigger trg_alarm_routine_total_check after insert or update or delete on rs_alarm_routine_item
+create constraint trigger trg_alarm_routine_total_check after insert or update or delete on rs_alarm_routine_item
+  deferrable initially deferred
   for each row execute function rs_alarm_routine_total_check();
+
+-- 알람의 항목 설정 전체 교체 (서버 전용)
+--  p_items: [{"template_item_id": "...", "duration_sec": 300}, ...] 화면에 보이는 최종 값
+--  기본 시간과 같은 항목은 저장하지 않는다(행이 없으면 기본 시간)
+--  넘기지 않은 항목도 기본 시간으로 돌아간다
+drop function if exists rs_replace_alarm_routine_items(uuid, uuid, jsonb);
+create function rs_replace_alarm_routine_items(p_user_id uuid, p_alarm_id uuid, p_items jsonb)
+returns table (template_item_id uuid, item_order int, item_name varchar, default_duration_sec int,
+               duration_sec int, response_type varchar, script text)
+language plpgsql as $$
+begin
+  if not exists (select 1 from rs_alarm a where a.alarm_id = p_alarm_id and a.user_id = p_user_id) then
+    raise exception '알람이 없습니다' using errcode = 'P0002';
+  end if;
+  if jsonb_typeof(p_items) is distinct from 'array' then
+    raise exception 'p_items는 JSON 배열이어야 합니다';
+  end if;
+
+  delete from rs_alarm_routine_item x where x.alarm_id = p_alarm_id;
+
+  insert into rs_alarm_routine_item (alarm_id, template_item_id, user_id, duration_sec)
+  select p_alarm_id, v.template_item_id, p_user_id, v.duration_sec
+  from jsonb_to_recordset(p_items) as v(template_item_id uuid, duration_sec int)
+  left join rs_routine_template_item i on i.template_item_id = v.template_item_id
+  where i.default_duration_sec is distinct from v.duration_sec;
+
+  return query select * from rs_alarm_routine_items(p_alarm_id);
+end $$;
+
+revoke execute on function rs_replace_alarm_routine_items(uuid, uuid, jsonb) from public, anon, authenticated;
+grant execute on function rs_replace_alarm_routine_items(uuid, uuid, jsonb) to service_role;
 
 -- 알람의 프리셋이 바뀌거나 콘텐츠 알람으로 바뀌면 예전 항목 설정을 지운다
 create or replace function rs_alarm_template_changed() returns trigger
