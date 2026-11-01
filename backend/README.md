@@ -34,7 +34,9 @@
 | `GET /night/records/{id}` · `GET /night/records?record_date=` | 밤 기록·일기 | 추출 결과, 하루 한정 변경, 목소리 서명 URL |
 | `PUT /night/records/{id}/voice` | 굿나잇콜 | 목소리 m4a를 본문 그대로(`Content-Type: audio/mp4`, 10MB 이하) |
 | `POST /morning/sessions` | 알람 울림 | `{alarm_id}` → 오늘 세션 만들기(하루 한정 변경 반영) 또는 기존 세션(재연결) |
-| `POST /morning/sessions/{id}/rewake` · `/response` | 모닝콜 | 8초 무응답 재기상 횟수 +1 / 첫 음성 응답 시각 |
+| `POST /morning/sessions/{id}/rewake` · `/response` | 모닝콜 | 8초 무응답 재기상(AI 음악) 횟수 +1 / 첫 음성 응답 시각(= 기상 성공 시각) |
+| `POST /morning/sessions/{id}/snooze` | 모닝콜 | "5분 뒤 다시 울리기" 횟수 +1 (제한 없음). 다시 울리면 `POST /morning/sessions`로 같은 세션 |
+| `POST /morning/sessions/{id}/wake-check` | 브리핑 | 확인 멘트(2~3개)를 모두 마침 — 브리핑 Live의 `wake_check_done`을 앱이 전달. 이때 기상 성공 판정 |
 | `POST /morning/sessions/{id}/briefing-token` | 브리핑 | 오늘 일정을 보내면 브리핑 Live 토큰. 그날 처음이면 개인화 전략을 정해 로그 |
 | `POST /morning/sessions/{id}/coaching-token` | 루틴·콘텐츠 | `start_routine` 뒤(재연결도) 호출. 처음이면 단계를 PENDING으로 만들고 남은 단계만 토큰에 |
 | `POST /morning/sessions/{id}/steps/{n}/verdict` | 코칭 | Live `report_step_result` 전달 |
@@ -117,6 +119,13 @@ AI 쪽 브리핑 입력의 `coaching_min`은 0(코칭 안 함)/10(진행)으로�
 메모리 구현·`jobs/personalization.py`는 backend-service, `repositories/supabase.py`·`jobs/maintenance.py`·`supabase/*.sql`은 backend-db,
 `ai/`는 ai 담당. 이 브랜치에는 feat/backend-db와 feat/ai가 병합돼 있어 실제 `ai` 함수로 테스트한다(`tests/test_ai_real.py`).
 
+## 기상 성공 기준 (11/01 팀 확정)
+브리핑 전 확인 멘트 2~3개(예: "잘 주무셨어요?")에 모두 응답했고, 그때까지 ① 스누즈("5분 뒤 다시 울리기")를 한 번도 하지 않았고
+② 8초 무응답으로 AI 재기상 음악이 한 번도 나오지 않았으면 성공. 기상 성공 시각은 첫 응답(`first_response_at`).
+판정은 확인 멘트를 마친 순간(`POST .../wake-check`, `wake_checked_at`) 한 번만 하고, 그 뒤의 재기상·스누즈는 판정을 바꾸지 않는다.
+실패해도 브리핑·루틴은 그대로 진행한다. 확인 멘트를 끝내지 못한 채 세션이 끝나면 실패(기본값 FALSE)로 남는다.
+DB에 `rs_morning_session.snooze_count`, `wake_checked_at` 컬럼이 필요하다(backend-db에 요청).
+
 ## 정의서에서 정하지 않아 기본안으로 구현한 것 (팀 확인 필요)
 - AI 판정 `not_done` → `STEP_STATUS = SKIPPED` (AI 파트 CONTRACTS 1-3 제안). `ambiguous`/`other`는 상태를 바꾸지 않고 `AI_VERDICT`만 남긴다.
 - 하루 한정 변경 대상 알람(`OVERRIDE_ALARM_ID`): 밤 기록이 적용되는 아침(`APPLY_DATE`)에 가장 먼저 울리는 켜진 알람. 그날 울릴 알람이 없으면 변경값을 저장하지 않는다.
@@ -127,7 +136,7 @@ AI 쪽 브리핑 입력의 `coaching_min`은 0(코칭 안 함)/10(진행)으로�
 - 밤 대화로 루틴 항목을 빼거나 다시 넣으면 **다음 날 아침에 울릴 알람**(하루 한정 변경과 같은 대상)에만 적용한다.
   빼기 = 0초, 다시 넣기 = 기본 시간. 규칙(합계 상한·최소 한 항목)에 걸리는 요청은 반영하지 않는다(`routine_rules.apply_conversation`).
 - 밤 대화에서 하루 한정 변경에 동의했는데 다음 날 아침에 울릴 알람이 없으면 변경값을 저장하지 않는다.
-- 기상 성공(`WAKE_SUCCESS`) = 세션 종료 때 알람 뒤 첫 음성 응답(`first_response_at`)이 있었는가 (판정 기준 팀 확정 전).
+
 - 개인화 Bandit 상태는 전체 합산(`state_key = 'global'`), 최근 7일 기록으로 결정. 보상 기록·학습(`set_reward`, `learn`)은 6단계 하루 끝 배치.
 - 리포트 월간 그래프는 날짜별이 아니라 주 단위(1주~5주, AI `period_series` 기준) — 앱 화면과 맞출 것.
 - 일기 사진은 오늘 이전 날짜만 받는다.

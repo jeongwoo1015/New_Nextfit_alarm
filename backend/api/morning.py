@@ -7,7 +7,7 @@ from backend.core.auth import current_user_id
 from backend.services.morning_service import MorningService, SessionView
 
 from .schemas import (BriefingTokenIn, CoachingTokenOut, LiveTokenOut, ProgressOut, RewakeOut, SessionOut, SessionStartIn,
-                      SessionViewOut, StepOut, StepStatusIn, VerdictIn)
+                      SessionViewOut, SnoozeOut, StepOut, StepStatusIn, VerdictIn)
 
 router = APIRouter(prefix="/morning", tags=["morning"])
 
@@ -36,8 +36,22 @@ def get_session(session_id: str, user_id: str = Depends(current_user_id), svc: M
 
 @router.post("/sessions/{session_id}/rewake", response_model=RewakeOut)
 def rewake(session_id: str, user_id: str = Depends(current_user_id), svc: MorningService = Depends(morning_service)):
-    """8초 무응답으로 재기상 음악을 틀 때마다 호출."""
+    """8초 무응답으로 재기상(AI) 음악을 틀 때마다 호출. 확인 멘트를 마치기 전이면 기상 실패가 된다."""
     return RewakeOut(rewake_count=svc.rewake(user_id, session_id))
+
+
+@router.post("/sessions/{session_id}/snooze", response_model=SnoozeOut)
+def snooze(session_id: str, user_id: str = Depends(current_user_id), svc: MorningService = Depends(morning_service)):
+    """"5분 뒤 다시 울리기"를 누를 때마다 호출 (횟수 제한 없음). 5분 뒤 다시 울리면 POST /morning/sessions로 같은 세션을 받는다.
+    한 번이라도 하면 그날은 기상 실패."""
+    return SnoozeOut(snooze_count=svc.snooze(user_id, session_id))
+
+
+@router.post("/sessions/{session_id}/wake-check", response_model=SessionViewOut)
+def wake_check(session_id: str, user_id: str = Depends(current_user_id), svc: MorningService = Depends(morning_service)):
+    """브리핑 전 확인 멘트(2~3개)를 모두 마쳤을 때 — 브리핑 Live의 wake_check_done을 앱이 전달.
+    기상 성공 = 스누즈 0회 + 그때까지 재기상 음악 0회 + 첫 응답 있음. 처음 한 번만 판정한다."""
+    return _view(svc.wake_check(user_id, session_id))
 
 
 @router.post("/sessions/{session_id}/response", response_model=SessionOut)
@@ -78,5 +92,6 @@ def mark_step(session_id: str, step_order: int, body: StepStatusIn, user_id: str
 
 @router.post("/sessions/{session_id}/end", response_model=SessionViewOut)
 def end_session(session_id: str, user_id: str = Depends(current_user_id), svc: MorningService = Depends(morning_service)):
-    """end_session을 받았거나 사용자가 통화를 끊었을 때. 남은 단계는 PENDING으로 둔다."""
+    """end_session을 받았거나 사용자가 통화를 끊었을 때. 남은 단계는 PENDING으로 둔다.
+    확인 멘트를 끝내지 못한 채(wake-check 없이) 끝나면 기상 실패로 남는다."""
     return _view(svc.end(user_id, session_id))

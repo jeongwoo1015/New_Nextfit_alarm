@@ -15,7 +15,7 @@ H = auth(USER_A)
 
 
 def morning(client, clock, day: date, respond=True, done=6):
-    """그날 07:00 알람 → (07:03 첫 응답) → 코칭 단계 done개 완료 → 종료. 프리셋 N은 6단계."""
+    """그날 07:00 알람 → (07:03 첫 응답·확인 멘트 완료) → 코칭 단계 done개 완료 → 종료. 프리셋 N은 6단계."""
     alarm = client.get("/alarms", headers=H).json()[0]
     clock.now = datetime(day.year, day.month, day.day, 7, 0, tzinfo=KST)
     v = client.post("/morning/sessions", json={"alarm_id": alarm["alarm_id"]}, headers=H).json()
@@ -23,6 +23,7 @@ def morning(client, clock, day: date, respond=True, done=6):
     if respond:
         clock.now = clock.now.replace(minute=3)
         client.post(f"{url}/response", headers=H)
+        client.post(f"{url}/wake-check", headers=H)                         # 확인 멘트 완료 → 기상 성공
     client.post(f"{url}/coaching-token", headers=H)
     for n in range(1, done + 1):
         client.post(f"{url}/steps/{n}/verdict", json={"verdict": "done"}, headers=H)

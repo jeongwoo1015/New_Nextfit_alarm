@@ -228,6 +228,11 @@ class MemorySessionRepository:
         self.sessions[session_id] = replace(s, **changes)
         return self.sessions[session_id]
 
+    def add_snooze(self, user_id, session_id):
+        s = self._own(user_id, session_id)
+        self.sessions[session_id] = replace(s, snooze_count=s.snooze_count + 1)
+        return s.snooze_count + 1
+
     def add_rewake(self, user_id, session_id):
         s = self._own(user_id, session_id)
         self.sessions[session_id] = replace(s, rewake_count=s.rewake_count + 1)
