@@ -9,7 +9,8 @@ do $$
 declare t text;
 begin
   foreach t in array array['rs_user', 'rs_user_setting', 'rs_alarm', 'rs_alarm_routine_item',
-                           'rs_morning_session', 'rs_session_step', 'rs_night_record', 'rs_diary_photo']
+                           'rs_morning_session', 'rs_session_step', 'rs_night_record', 'rs_night_routine_item',
+                           'rs_diary_photo']
   loop
     execute format('alter table %I enable row level security', t);
     execute format('drop policy if exists "own_rows" on %I', t);

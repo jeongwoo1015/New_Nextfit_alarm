@@ -148,6 +148,39 @@ def test_night(repos, uid, other, alarm):
     assert repos.nights.get_night(uid, nid).tomorrow_goal == "발표"                 # 요약은 남는다
 
 
+def test_night_routine_tomorrow_only(repos, uid, other, alarm):
+    """밤 대화로 내일 하루만 항목 시간 바꾸기·빼기. 알람 설정은 그대로 남는다."""
+    items = repos.alarms.get_alarm_routine(uid, alarm.alarm_id)
+    stretch, bed = items[0].template_item_id, items[3].template_item_id
+    repos.alarms.replace_alarm_routine(uid, alarm.alarm_id, {stretch: 300})          # 알람 설정: 스트레칭 5분(합계 720)
+    nid = repos.nights.save_night_raw(uid, [{"role": "user", "text": "내일 스트레칭 줄여 줘", "at": ""}], None, None)
+    assert repos.nights.get_night_routine(uid, nid) == []                           # 대상 알람이 아직 없음
+    with pytest.raises(ValidationFailed):
+        repos.nights.replace_night_routine(uid, nid, {stretch: 180})
+    repos.nights.save_night_extract(uid, nid, {}, alarm.alarm_id)
+
+    tomorrow = repos.nights.replace_night_routine(uid, nid, {stretch: 180, bed: 0})   # 내일만 3분, 이불 정리 빼기
+    assert sum(i.duration_sec for i in tomorrow) == 720 - 120 - 60
+    assert sum(i.duration_sec for i in repos.alarms.get_alarm_routine(uid, alarm.alarm_id)) == 720   # 알람 설정은 그대로
+    rows = repos.users.db.table("rs_night_routine_item").select("template_item_id").eq("night_record_id", nid).execute().data
+    assert len(rows) == 2
+    assert len(repos.nights.replace_night_routine(uid, nid, {stretch: 300})) == 6     # 알람 설정과 같은 값은 저장 안 함
+    assert repos.users.db.table("rs_night_routine_item").select("template_item_id").eq("night_record_id", nid).execute().data == []
+
+    with pytest.raises(ValidationFailed) as e:
+        repos.nights.replace_night_routine(uid, nid, {i.template_item_id: 180 for i in items})
+    assert e.value.code == "ROUTINE_OVER_LIMIT"
+    with pytest.raises(ValidationFailed) as e:
+        repos.nights.replace_night_routine(uid, nid, {i.template_item_id: 0 for i in items})
+    assert e.value.code == "ROUTINE_ALL_REMOVED"
+    assert repos.nights.replace_night_routine(other, nid, {stretch: 60}) is None
+    assert repos.nights.get_night_routine(other, nid) is None
+
+    repos.nights.replace_night_routine(uid, nid, {stretch: 120})
+    repos.alarms.update_alarm(uid, alarm.alarm_id, {"template_id": M})                # 알람 프리셋이 바뀌면 내일 변경도 무효
+    assert repos.users.db.table("rs_night_routine_item").select("template_item_id").eq("night_record_id", nid).execute().data == []
+
+
 def test_session_and_steps(repos, uid, other, alarm, monkeypatch):
     today = now_kst().date()
     snap = SessionSnapshot(uid, alarm.alarm_id, today, "ROUTINE", N, None, None, time(7, 0), time(7, 0))
@@ -167,10 +200,22 @@ def test_session_and_steps(repos, uid, other, alarm, monkeypatch):
     assert done.step_status == "DONE" and done.checked_at
     assert repos.sessions.save_step(other, steps[1]) is None
 
+    changed = repos.sessions.update_step_duration(uid, s.session_id, 2, 30)          # 코칭 중 "오늘 좀 적게"
+    assert changed.planned_duration_sec == 30 and changed.step_status == "PENDING"
+    assert repos.sessions.update_step_duration(other, s.session_id, 2, 30) is None
+    assert repos.sessions.update_step_duration(uid, s.session_id, 99, 30) is None
+    with pytest.raises(ValidationFailed):
+        repos.sessions.update_step_duration(uid, s.session_id, 2, 0)
+
     assert repos.sessions.add_rewake(uid, s.session_id) == 1
     assert repos.sessions.add_rewake(uid, s.session_id) == 2
-    s2 = repos.sessions.update_session(uid, s.session_id, {"planned_total_sec": 300, "wake_success": True})
-    assert (s2.planned_total_sec, s2.wake_success) == (300, True)
+    assert repos.sessions.add_snooze(uid, s.session_id) == 1
+    assert repos.sessions.add_snooze(uid, s.session_id) == 2
+    checked = now_kst()
+    s2 = repos.sessions.update_session(uid, s.session_id, {"planned_total_sec": 300, "wake_success": True,
+                                                           "wake_checked_at": checked})
+    assert (s2.planned_total_sec, s2.wake_success, s2.rewake_count, s2.snooze_count) == (300, True, 2, 2)
+    assert abs((s2.wake_checked_at - checked).total_seconds()) < 1
 
     rec = repos.sessions.recent_records(uid, today - timedelta(days=7), today + timedelta(days=1))
     assert len(rec.sessions) == 1 and len(rec.steps) == 2

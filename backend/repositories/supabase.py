@@ -334,6 +334,23 @@ class SupabaseNightRepository(_Base):
                   .eq("night_record_id", night_record_id).eq("user_id", user_id))
         return path
 
+    def get_night_routine(self, user_id, night_record_id):
+        """내일 진행할 루틴 항목 = 대상 알람 설정 + 밤 대화로 내일만 바꾼 시간. 남의 기록이면 None, 대상 알람이 없으면 []."""
+        if not self._own(user_id, night_record_id):
+            return None
+        return _models(AlarmRoutineItem, self._run(self.db.rpc("rs_night_routine_items", {"p_night_record_id": night_record_id})))
+
+    def replace_night_routine(self, user_id, night_record_id, overrides):
+        """내일만 바꿀 항목 시간 전체 교체({template_item_id: 초}, 0 = 내일만 빼기). 알람 설정과 같은 값은 저장하지 않는다."""
+        if not _is_uuid(night_record_id):
+            return None
+        items = [{"template_item_id": k, "duration_sec": v} for k, v in overrides.items()]
+        params = {"p_user_id": user_id, "p_night_record_id": night_record_id, "p_items": items}
+        try:
+            return _models(AlarmRoutineItem, self._run(self.db.rpc("rs_replace_night_routine_items", params)))
+        except NotFound:                                  # '밤 기록이 없습니다' = 없거나 남의 기록
+            return None
+
     def purge_expired_raw(self, now):
         q = (self._select("rs_night_raw", "night_record_id, audio_path").lt("expires_at", _plain(now))
              .or_("transcript.not.is.null,audio_path.not.is.null"))
@@ -346,7 +363,7 @@ class SupabaseNightRepository(_Base):
 
 
 # ---------- 5. 모닝 세션·단계 ----------
-_SESSION_CHANGES = {"alarm_rang_at", "first_response_at", "planned_total_sec", "wake_success", "session_end_at"}
+_SESSION_CHANGES = {"alarm_rang_at", "first_response_at", "planned_total_sec", "wake_checked_at", "wake_success", "session_end_at"}
 
 
 class SupabaseSessionRepository(_Base):
@@ -378,17 +395,25 @@ class SupabaseSessionRepository(_Base):
         q = self.db.table("rs_morning_session").update(_plain(changes)).eq("session_id", session_id).eq("user_id", user_id)
         return _model(MorningSession, _first(self._run(q)))
 
-    def add_rewake(self, user_id, session_id):
-        """읽은 횟수와 같을 때만 +1 하는 조건부 수정. 동시에 두 번 오면 늦은 쪽이 다시 읽어서 더하므로 빠지는 횟수가 없다."""
+    def _increment(self, user_id, session_id, column):
+        """읽은 값과 같을 때만 +1 하는 조건부 수정. 동시에 두 번 오면 늦은 쪽이 다시 읽어서 더하므로 빠지는 횟수가 없다."""
         for _ in range(5):
             s = self.get_session(user_id, session_id)
             if not s:
                 raise NotFound("세션을 찾을 수 없어요")
-            q = (self.db.table("rs_morning_session").update({"rewake_count": s.rewake_count + 1})
-                 .eq("session_id", session_id).eq("user_id", user_id).eq("rewake_count", s.rewake_count))
+            current = getattr(s, column)
+            q = (self.db.table("rs_morning_session").update({column: current + 1})
+                 .eq("session_id", session_id).eq("user_id", user_id).eq(column, current))
             if self._run(q):
-                return s.rewake_count + 1
-        raise Conflict("재기상 횟수를 저장하지 못했어요")
+                return current + 1
+        raise Conflict("횟수를 저장하지 못했어요")
+
+    def add_rewake(self, user_id, session_id):
+        return self._increment(user_id, session_id, "rewake_count")
+
+    def add_snooze(self, user_id, session_id):
+        """"5분 뒤 다시 울리기" 횟수 +1."""
+        return self._increment(user_id, session_id, "snooze_count")
 
     def create_steps(self, user_id, session_id, plans: list[StepPlan]):
         if not self.get_session(user_id, session_id):
@@ -404,6 +429,17 @@ class SupabaseSessionRepository(_Base):
         except Conflict:                                  # 재연결로 동시에 만든 경우 기존 단계를 쓴다
             pass
         return self.list_steps(user_id, session_id)
+
+    def update_step_duration(self, user_id, session_id, step_order, duration_sec):
+        """오늘 진행 중인 단계의 계획 시간 바꾸기(코칭 중 "오늘 스트레칭 적게 할래"). 오늘만 빼기는 save_step으로 SKIPPED.
+        남의 세션이거나 없는 단계면 None. 오늘 합계 상한 검사는 서버 규칙에서 한다."""
+        if not _is_uuid(session_id):
+            return None
+        if duration_sec <= 0:
+            raise ValidationFailed("단계 시간은 0보다 커야 해요. 오늘 빼려면 SKIPPED로 바꿔 주세요")
+        q = (self.db.table("rs_session_step").update({"planned_duration_sec": duration_sec})
+             .eq("session_id", session_id).eq("user_id", user_id).eq("step_order", step_order))
+        return _model(SessionStep, _first(self._run(q)))
 
     def list_steps(self, user_id, session_id):
         if not _is_uuid(session_id):

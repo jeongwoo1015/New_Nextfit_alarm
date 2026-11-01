@@ -63,9 +63,13 @@
 | `get_night_for_morning` | user_id, apply_date | NightRecord 또는 None | rs_night_record | 아침 브리핑 "어젯밤 이어받기", 세션 스냅샷 |
 | `get_night_by_date` | user_id, record_date | NightRecord 또는 None | rs_night_record | 일기 화면 |
 | `set_voice_path` | user_id, night_record_id | 경로 | rs_night_record | 목소리 업로드 후 경로 저장 (`{user_id}/{record_date}.m4a`) |
+| `get_night_routine` | user_id, night_record_id | list[AlarmRoutineItem] 또는 None | 함수 rs_night_routine_items | 내일 진행할 항목 = 알람 설정 + 내일만 바꾼 시간. 대상 알람이 없으면 [] |
+| `replace_night_routine` | user_id, night_record_id, {template_item_id: 초} | list[AlarmRoutineItem] 또는 None | 함수 rs_replace_night_routine_items | 밤 대화로 내일만 항목 시간 바꾸기·빼기(0초) 전체 교체. 알람 설정과 같은 값은 저장 안 함 |
 | `purge_expired_raw` | now | 지운 파일 경로 목록 | rs_night_raw + Storage | 30일 보관 배치 |
 
 추출 결과 dict는 11/01 컬럼 이름으로 받는다. AI 출력의 `override_coaching_min` → `override_skip_coaching` 변환은 정우님 AI 어댑터에서 한다.
+
+항목 시간 변경 범위: 앞으로 계속 = `replace_alarm_routine`(알람 설정), 내일만 = `replace_night_routine`(밤 대화), 오늘 진행 중 = `update_step_duration` 또는 SKIPPED(아침 코칭).
 
 ## 5. 모닝 세션·단계 (`SessionRepository`)
 
@@ -76,6 +80,7 @@
 | `update_session` | user_id, session_id, 바꿀 값 | MorningSession 또는 None | rs_morning_session | alarm_rang_at, first_response_at, planned_total_sec(단계를 만든 뒤), wake_success, session_end_at |
 | `add_rewake` | user_id, session_id | 바뀐 횟수 | rs_morning_session | 8초 무응답으로 재기상 음악 재생 |
 | `create_steps` | user_id, session_id, list[StepPlan] | list[SessionStep] | rs_session_step | 브리핑 뒤 단계 만들기 (PENDING). 이미 있으면 만들지 않음 |
+| `update_step_duration` | user_id, session_id, step_order, 초 | SessionStep 또는 None | rs_session_step | 코칭 중 "오늘 좀 적게" 즉시 반영. 오늘만 빼기는 save_step으로 SKIPPED |
 | `list_steps` | user_id, session_id | list[SessionStep] | rs_session_step | 진행 개수, 재연결 시 PENDING 단계 |
 | `save_step` | user_id, SessionStep | SessionStep | rs_session_step | 판정 반영·직접 체크 결과 저장 (상태 계산은 domain/step_rules) |
 | `recent_records` | user_id, since, until | (세션 목록, 단계 목록, 밤 기록 목록) dict | 세 테이블 | 개인화 `build_sessions()` 입력, 리포트 |

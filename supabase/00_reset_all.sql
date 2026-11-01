@@ -10,6 +10,7 @@ drop table if exists
   rs_strategy_log,
   rs_diary_photo,
   rs_night_raw,
+  rs_night_routine_item,
   rs_night_record,
   rs_ai_music,
   rs_session_step,
@@ -34,7 +35,12 @@ drop function if exists
   rs_alarm_template_changed(),
   rs_session_step_check(),
   rs_night_record_dates(),
-  rs_alarm_clear_overrides()
+  rs_alarm_clear_overrides(),
+  rs_night_routine_items(uuid),
+  rs_night_routine_item_check(),
+  rs_night_routine_total_check(),
+  rs_night_alarm_changed(),
+  rs_replace_night_routine_items(uuid, uuid, jsonb)
 cascade;
 
 -- 남은 rs_ 테이블 확인 (0이어야 함)
