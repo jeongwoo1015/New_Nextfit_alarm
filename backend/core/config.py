@@ -13,6 +13,7 @@ class Settings:
     supabase_jwt_secret: str = ""   # 비어 있으면 JWKS(비대칭 키)로 검증
     gemini_api_key: str = ""
     repository_backend: str = "memory"   # memory | supabase
+    personalization_mode: str = "rule"   # off | rule | bandit | ab (AI CONTRACTS 6-2: 처음에는 rule 권장)
 
     @property
     def jwks_url(self) -> str:
@@ -28,4 +29,5 @@ def get_settings() -> Settings:
         supabase_jwt_secret=os.getenv("SUPABASE_JWT_SECRET", ""),
         gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
         repository_backend=os.getenv("REPOSITORY_BACKEND", "memory"),
+        personalization_mode=os.getenv("PERSONALIZATION_MODE", "rule"),
     )

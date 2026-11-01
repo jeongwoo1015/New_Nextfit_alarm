@@ -13,7 +13,7 @@
 | `repositories/` | DB 접근 인터페이스(`base.py`) + 메모리 구현 + 프리셋 시드. Supabase 구현은 backend-db 담당 |
 | `clients/` | AI 파트 어댑터(`ai_gateway.py`: Live 임시 토큰, 밤 기록 추출, 대화로 바꾼 루틴 항목) + 테스트용 `fake_ai.py` |
 
-## API (3단계까지)
+## API (4단계까지)
 
 | 메서드 · 경로 | 화면 | 내용 |
 |---|---|---|
@@ -31,6 +31,14 @@
 | `POST /night/transcript` | 굿나잇콜 종료 | 받아쓰기 저장(202, `extract_status: PENDING`), 추출은 백그라운드 |
 | `GET /night/records/{id}` · `GET /night/records?record_date=` | 밤 기록·일기 | 추출 결과, 하루 한정 변경, 목소리 서명 URL |
 | `PUT /night/records/{id}/voice` | 굿나잇콜 | 목소리 m4a를 본문 그대로(`Content-Type: audio/mp4`, 10MB 이하) |
+| `POST /morning/sessions` | 알람 울림 | `{alarm_id}` → 오늘 세션 만들기(하루 한정 변경 반영) 또는 기존 세션(재연결) |
+| `POST /morning/sessions/{id}/rewake` · `/response` | 모닝콜 | 8초 무응답 재기상 횟수 +1 / 첫 음성 응답 시각 |
+| `POST /morning/sessions/{id}/briefing-token` | 브리핑 | 오늘 일정을 보내면 브리핑 Live 토큰. 그날 처음이면 개인화 전략을 정해 로그 |
+| `POST /morning/sessions/{id}/coaching-token` | 루틴·콘텐츠 | `start_routine` 뒤(재연결도) 호출. 처음이면 단계를 PENDING으로 만들고 남은 단계만 토큰에 |
+| `POST /morning/sessions/{id}/steps/{n}/verdict` | 코칭 | Live `report_step_result` 전달 |
+| `PATCH /morning/sessions/{id}/steps/{n}` | 체크리스트 | 직접 체크·건너뛰기·해제 |
+| `POST /morning/sessions/{id}/end` | 종료 | `end_session` 또는 통화 종료. 기상 성공 기록 |
+| `GET /morning/sessions/{id}` · `GET /morning/sessions/today` | 루틴 화면 | 세션, 단계, 진행 개수(`finished` = "완료!") |
 
 오류 응답은 모두 `{"error": {"code", "message", "details?"}}`. 전체 명세는 서버 실행 후 `/docs`(OpenAPI).
 
@@ -45,8 +53,8 @@ backend-db 초안(`repository_functions_draft.md`)의 함수 이름·묶음으�
 | 2. 공용 데이터(프리셋·앱 설정·음악) | `PresetRepository` | 있음 (`pick_music`은 None) |
 | 3. 알람 | `AlarmRepository` | 있음 |
 | 4. 밤 기록 | `NightRepository` (+ `get_night` 추가) | 있음 |
-| 5. 모닝 세션·단계 | `SessionRepository` | 4단계에서 |
-| 6. 개인화 | `PersonalizationRepository` | 4단계에서 |
+| 5. 모닝 세션·단계 | `SessionRepository` | 있음 |
+| 6. 개인화 | `PersonalizationRepository` | 있음 |
 | 7. Storage | `StorageClient` | 있음 |
 
 초안과 달라진 점
@@ -87,6 +95,13 @@ cd .. && backend/.venv/Scripts/python -m uvicorn backend.app.main:app --reload
 `extract_night_record` → 하루 한정 변경 대상 알람 지정 → `parse_routine_changes` → `apply_conversation` → `replace_alarm_routine`.
 루틴 변경이 실패해도 밤 기록 저장은 유지한다. 추출이 실패하면 `FAILED`로 두고 원문은 남긴다(재추출 배치는 6단계).
 
+아침 흐름: 세션 시작(스냅샷) → 브리핑 토큰(어젯밤 기록, 오늘 일정, 프리셋/콘텐츠 이름, 전략 문장) → `start_routine` →
+코칭 토큰(처음이면 루틴 = 알람 항목 시간 중 0초 초과, 콘텐츠 = AI `compose_content_steps` → 단계 PENDING 생성,
+`planned_total_sec` 기록) → 판정 반영 → 종료. 개인화는 그날 처음 브리핑 때 `decide()` 한 번, 로그 저장,
+재연결 때는 로그의 `strategy`로 같은 문장(`strategy_blocks`). 개인화가 실패하면 기본 방식으로 진행한다.
+AI 쪽 브리핑 입력의 `coaching_min`은 0(코칭 안 함)/10(진행)으로만 넘긴다(AI는 0인지만 본다). 콘텐츠 구성은 AI가 10/20분만 받아
+가까운 쪽으로 만든 뒤 고정 시간에 맞춰 비율대로 조정한다.
+
 ## 정의서에서 정하지 않아 기본안으로 구현한 것 (팀 확인 필요)
 - AI 판정 `not_done` → `STEP_STATUS = SKIPPED` (AI 파트 CONTRACTS 1-3 제안). `ambiguous`/`other`는 상태를 바꾸지 않고 `AI_VERDICT`만 남긴다.
 - 하루 한정 변경 대상 알람(`OVERRIDE_ALARM_ID`): 밤 기록이 적용되는 아침(`APPLY_DATE`)에 가장 먼저 울리는 켜진 알람. 그날 울릴 알람이 없으면 변경값을 저장하지 않는다.
@@ -97,6 +112,9 @@ cd .. && backend/.venv/Scripts/python -m uvicorn backend.app.main:app --reload
 - 밤 대화로 루틴 항목을 빼거나 다시 넣으면 **다음 날 아침에 울릴 알람**(하루 한정 변경과 같은 대상)에만 적용한다.
   빼기 = 0초, 다시 넣기 = 기본 시간. 규칙(합계 상한·최소 한 항목)에 걸리는 요청은 반영하지 않는다(`routine_rules.apply_conversation`).
 - 밤 대화에서 하루 한정 변경에 동의했는데 다음 날 아침에 울릴 알람이 없으면 변경값을 저장하지 않는다.
+- 기상 성공(`WAKE_SUCCESS`) = 세션 종료 때 알람 뒤 첫 음성 응답(`first_response_at`)이 있었는가 (판정 기준 팀 확정 전).
+- 개인화 Bandit 상태는 전체 합산(`state_key = 'global'`), 최근 7일 기록으로 결정. 보상 기록·학습(`set_reward`, `learn`)은 6단계 하루 끝 배치.
+- 날씨는 지역 정보가 정의서에 없어 아직 넘기지 않는다(AI 브리핑은 날씨를 건너뜀).
 - 대화 원문 role은 `user` / `assistant`만 받는다(AI CONTRACTS 2-2 권고). 사용자 발화가 없으면 422(`EMPTY_TRANSCRIPT`).
 - `MUSIC_GENRE`는 NOT NULL인데 기본값이 없어 온보딩에서 안 보내면 `POP`.
 - 메모리 시드의 고정 스크립트는 표시(`[stretch_short]`, `[lymph]`)만 있다. 실제 문구는 DB 시드에 있다.
