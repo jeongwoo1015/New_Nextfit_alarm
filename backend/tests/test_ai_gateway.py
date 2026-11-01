@@ -3,7 +3,7 @@ from datetime import date, time
 
 import pytest
 
-from backend.clients.ai_gateway import (UnavailableAIGateway, build_ai_gateway, fit_seconds, night_view,
+from backend.clients.ai_gateway import (RealAIGateway, UnavailableAIGateway, build_ai_gateway, fit_seconds, night_view,
                                         to_night_record_fields)
 from backend.core.config import Settings
 from backend.core.errors import ServiceUnavailable
@@ -32,12 +32,16 @@ def test_future_ai_field_is_also_accepted():
     assert f["override_skip_coaching"] is True and f["override_wake_time"] is None
 
 
-def test_without_key_or_ai_package_gateway_is_unavailable():
+def test_without_key_gateway_is_unavailable():
     gw = build_ai_gateway(Settings())
     assert isinstance(gw, UnavailableAIGateway)
     with pytest.raises(ServiceUnavailable):
         gw.extract_night_record([])
-    assert isinstance(build_ai_gateway(Settings(gemini_api_key="k")), UnavailableAIGateway)   # 이 브랜치엔 ai 패키지 없음
+    assert gw.strategy_blocks({"strategy_id": "gentle"}) == ("", "")      # 전략 문장이 없으면 기본 방식
+
+
+def test_with_key_and_ai_package_gateway_is_real():
+    assert isinstance(build_ai_gateway(Settings(gemini_api_key="k")), RealAIGateway)   # feat/ai 병합 후
 
 
 def test_fit_seconds_keeps_ratio_and_total():
