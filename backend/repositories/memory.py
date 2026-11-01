@@ -105,23 +105,25 @@ class MemoryAlarmRepository:
         return alarm
 
     def delete_alarm(self, user_id, alarm_id):
-        if not self._own(user_id, alarm_id):
-            return False
-        del self.alarms[alarm_id]
-        self.overrides.pop(alarm_id, None)                    # ON DELETE CASCADE
-        return True
+        if self._own(user_id, alarm_id):
+            del self.alarms[alarm_id]
+            self.overrides.pop(alarm_id, None)                # ON DELETE CASCADE
 
     def get_alarm_routine(self, user_id, alarm_id):
         alarm = self._own(user_id, alarm_id)
-        if not alarm or alarm.morning_call_type != "ROUTINE":
+        if not alarm:
+            return None
+        if alarm.morning_call_type != "ROUTINE":
             return []
         return build_routine(self._presets.list_template_items(alarm.template_id), self.overrides.get(alarm_id, {}))
 
-    def set_alarm_routine(self, user_id, alarm_id, overrides):
+    def replace_alarm_routine(self, user_id, alarm_id, overrides):
         if not self._own(user_id, alarm_id):
-            return []
-        if overrides:
-            self.overrides[alarm_id] = dict(overrides)
+            return None
+        defaults = {i.template_item_id: i.default_duration_sec for i in self._presets.list_template_items(self.alarms[alarm_id].template_id)}
+        rows = {k: v for k, v in overrides.items() if defaults.get(k) != v}     # 기본 시간과 같은 값은 행 없음
+        if rows:
+            self.overrides[alarm_id] = rows
         else:
             self.overrides.pop(alarm_id, None)
         return self.get_alarm_routine(user_id, alarm_id)

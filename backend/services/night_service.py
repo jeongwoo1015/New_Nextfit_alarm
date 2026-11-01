@@ -49,7 +49,7 @@ class NightService:
         alarm = self._tomorrow_alarm(user_id, now)
         items = ()
         if alarm and alarm.morning_call_type == "ROUTINE":
-            items = tuple(i.item_name for i in self.r.alarms.get_alarm_routine(user_id, alarm.alarm_id) if i.duration_sec > 0)
+            items = tuple(i.item_name for i in (self.r.alarms.get_alarm_routine(user_id, alarm.alarm_id) or []) if i.duration_sec > 0)
         ctx = NightContext(self._persona(user_id), now.strftime("%H:%M"), tuple(events_today), tuple(events_tomorrow),
                            alarm.alarm_time.strftime("%H:%M") if alarm else "", items)
         return self.ai.issue_night_token(ctx)
@@ -95,13 +95,13 @@ class NightService:
     def _apply_routine_changes(self, user_id: str, alarm: Alarm, transcript: list, outcome: ExtractOutcome) -> ExtractOutcome:
         """루틴 변경은 부가 기능이라 실패해도 밤 기록 저장은 그대로 둔다."""
         try:
-            items = self.r.alarms.get_alarm_routine(user_id, alarm.alarm_id)
+            items = self.r.alarms.get_alarm_routine(user_id, alarm.alarm_id) or []
             req = self.ai.parse_routine_changes(transcript, items)
             if req.status != "DONE" or not (req.remove or req.restore):
                 return outcome
             change = apply_conversation(items, req.remove, req.restore, self.r.presets.get_app_config().routine_max_sec)
             if change.removed or change.restored:
-                self.r.alarms.set_alarm_routine(user_id, alarm.alarm_id, change.overrides)
+                self.r.alarms.replace_alarm_routine(user_id, alarm.alarm_id, change.overrides)
             return ExtractOutcome(outcome.status, outcome.override_alarm_id, outcome.dropped_override,
                                   change.removed, change.restored, change.rejected)
         except AppError as e:

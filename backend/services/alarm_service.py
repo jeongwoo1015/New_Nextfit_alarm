@@ -1,4 +1,6 @@
 """알람 목록·설정 (홈 화면, 알람 세부 설정)."""
+from __future__ import annotations   # 메서드 이름 list가 내장 list 어노테이션을 가리지 않게
+
 from dataclasses import dataclass, replace
 
 from backend.core.errors import NotFound, ValidationFailed
@@ -46,20 +48,29 @@ class AlarmService:
         return self.r.alarms.update_alarm(user_id, alarm_id, changes)
 
     def delete(self, user_id: str, alarm_id: str) -> None:
-        if not self.r.alarms.delete_alarm(user_id, alarm_id):
-            raise NotFound("알람을 찾을 수 없어요", "ALARM_NOT_FOUND")
+        self.get(user_id, alarm_id)
+        self.r.alarms.delete_alarm(user_id, alarm_id)
 
     # ---------- 알람 세부 설정: 루틴 항목 시간 ----------
     def routine(self, user_id: str, alarm_id: str) -> AlarmRoutine:
         alarm = self._routine_alarm(user_id, alarm_id)
-        return AlarmRoutine(alarm, self.r.alarms.get_alarm_routine(user_id, alarm_id), self.r.presets.get_app_config().routine_max_sec)
+        return AlarmRoutine(alarm, self._items(user_id, alarm_id), self.r.presets.get_app_config().routine_max_sec)
 
     def set_routine(self, user_id: str, alarm_id: str, durations: dict[str, int]) -> AlarmRoutine:
         """항목 시간 전체 교체. durations에 없는 항목은 프리셋 기본 시간, 0초는 그 알람에서 빼기."""
         alarm = self._routine_alarm(user_id, alarm_id)
         max_sec = self.r.presets.get_app_config().routine_max_sec
-        overrides = apply_durations(self.r.alarms.get_alarm_routine(user_id, alarm_id), durations, max_sec)
-        return AlarmRoutine(alarm, self.r.alarms.set_alarm_routine(user_id, alarm_id, overrides), max_sec)
+        overrides = apply_durations(self._items(user_id, alarm_id), durations, max_sec)
+        items = self.r.alarms.replace_alarm_routine(user_id, alarm_id, overrides)
+        if items is None:
+            raise NotFound("알람을 찾을 수 없어요", "ALARM_NOT_FOUND")
+        return AlarmRoutine(alarm, items, max_sec)
+
+    def _items(self, user_id: str, alarm_id: str) -> list[AlarmRoutineItem]:
+        items = self.r.alarms.get_alarm_routine(user_id, alarm_id)
+        if items is None:
+            raise NotFound("알람을 찾을 수 없어요", "ALARM_NOT_FOUND")
+        return items
 
     def _routine_alarm(self, user_id: str, alarm_id: str) -> Alarm:
         alarm = self.get(user_id, alarm_id)

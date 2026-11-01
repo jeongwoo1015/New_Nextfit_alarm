@@ -1,8 +1,7 @@
 import pytest
 
 from backend.core.errors import ValidationFailed
-from backend.domain.routine_rules import (apply_conversation, apply_durations, build_routine, safe_write_order,
-                                          total_sec)
+from backend.domain.routine_rules import apply_conversation, apply_durations, build_routine
 from backend.repositories.seed import seed_templates, template_id
 
 _, ITEMS = seed_templates()
@@ -57,13 +56,3 @@ def test_conversation_skips_requests_that_break_rules():
     c = apply_conversation(build_routine(Q_ITEMS, {STRETCH: 0, CARDIO: 840}), remove=[], restore=[STRETCH], max_sec=900)
     assert c.rejected == [STRETCH] and c.overrides == {STRETCH: 0, CARDIO: 840}
 
-
-def test_safe_write_order_keeps_each_step_valid():
-    current, target = {CARDIO: 660}, {STRETCH: 300, CARDIO: 540, WATER: 0}           # 900 → 840
-    ops = safe_write_order(build_routine(Q_ITEMS, current), target)
-    state = dict(current)
-    for item_id, sec in ops:
-        state.pop(item_id, None) if sec is None else state.__setitem__(item_id, sec)
-        items = build_routine(Q_ITEMS, state)
-        assert total_sec(items) <= 900 and any(r.duration_sec > 0 for r in items)
-    assert state == target

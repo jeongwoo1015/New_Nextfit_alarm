@@ -51,11 +51,10 @@ backend-db 초안(`repository_functions_draft.md`)의 함수 이름·묶음으�
 
 초안과 달라진 점
 - 사용자 확인: 쿼리에 `user_id` 조건을 넣고 다른 사용자 행이면 None → 서버는 404 (403 대신, 데이터 존재 여부도 숨김).
-- 알람 항목 시간: `set_alarm_item_durations` + `reset_alarm_items` → `set_alarm_routine(user_id, alarm_id, overrides)` 전체 교체 하나.
-  삭제와 upsert가 다른 문장이면 그 사이에 합계 트리거가 걸릴 수 있어 한 트랜잭션이 필요하다
-  (합계 검사를 `DEFERRABLE INITIALLY DEFERRED` constraint trigger로 바꾸고 RPC, 또는 `MERGE` 한 문장).
-  그 전에는 `domain.routine_rules.safe_write_order()` 순서로 쓰면 대부분 통과한다.
-- 추가: `update_user`, `delete_account`, `get_template`, `list_photos`.
+- 알람 항목 시간: `replace_alarm_routine(user_id, alarm_id, overrides)` 전체 교체 하나 → DB 함수 `rs_replace_alarm_routine_items`
+  (`supabase/06_alarm_items_replace.sql`, 합계 검사는 커밋 때).
+- `get_night(user_id, night_record_id)` 추가(밤 원문 저장 직후 응답, 목소리 업로드).
+- 추가: `update_user`, `delete_account`, `get_template`, `list_photos`, `get_night`.
 - `AlarmRoutineItem`은 DB 함수 `rs_alarm_routine_items` 한 줄 + `default_duration_sec`(평평한 형태).
 - `planned_total_sec`는 `MorningSession`에 두고 단계를 만든 뒤 `update_session`으로 채운다.
 - 추출 결과의 `override_coaching_min` → `override_skip_coaching` 변환은 서버의 AI 어댑터가 한다. `save_night_extract`는 11/01 컬럼 이름만 받는다.
@@ -85,7 +84,7 @@ cd .. && backend/.venv/Scripts/python -m uvicorn backend.app.main:app --reload
 추출 결과 `override_coaching_min = 0` → `override_skip_coaching = TRUE`(10은 11/01에 없어 버림), 토큰 입력의 `tomorrow_coaching_min`은 비움.
 
 밤 흐름: 토큰 발급 때 내일 울릴 알람(시각, 루틴이면 지금 쓰는 항목 이름)을 지시문에 넣는다 → 원문 저장 → 백그라운드에서
-`extract_night_record` → 하루 한정 변경 대상 알람 지정 → `parse_routine_changes` → `apply_conversation` → `set_alarm_routine`.
+`extract_night_record` → 하루 한정 변경 대상 알람 지정 → `parse_routine_changes` → `apply_conversation` → `replace_alarm_routine`.
 루틴 변경이 실패해도 밤 기록 저장은 유지한다. 추출이 실패하면 `FAILED`로 두고 원문은 남긴다(재추출 배치는 6단계).
 
 ## 정의서에서 정하지 않아 기본안으로 구현한 것 (팀 확인 필요)
