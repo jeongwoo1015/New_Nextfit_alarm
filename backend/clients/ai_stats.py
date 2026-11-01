@@ -32,7 +32,8 @@ class Report:
     period: str
     start: date
     end: date                                  # 포함하지 않는 끝 날짜
-    totals: Totals
+    overall: Totals                            # 화면 상단: 전체 기간 누적 (기상 성공률·루틴 성공률)
+    totals: Totals                             # 선택한 기간 합계 (그래프 영역의 평균 기상 시간·루틴 완료율)
     series: list[Bucket]
     current_streak: int
     best_streak: int
@@ -65,14 +66,15 @@ def period_bounds(period: str, anchor: date) -> tuple[date, date]:
 
 
 def report(rec: RecentRecords, period: str, anchor: date, today: date) -> Report:
-    """rec에는 기간 데이터와 연속 달성일을 셀 과거 기록(최근 1년)이 함께 들어 있어야 한다."""
+    """rec에는 선택한 기간과 전체 기록(누적·연속 달성일용)이 함께 들어 있어야 한다."""
     _, um = _ai()
     sessions = _sessions(rec)
     series = um.period_series(sessions, period, anchor)
     start, end = series[0].start, series[-1].end
     totals = um.aggregate([s for s in sessions if s.session_date and start <= s.session_date < end])
+    overall = um.aggregate([s for s in sessions if s.session_date and s.session_date <= today])
     stats = um.compute_stats(sessions, today, include_today=True)
-    return Report(period, start, end, Totals(**_totals(totals)),
+    return Report(period, start, end, Totals(**_totals(overall)), Totals(**_totals(totals)),
                   [Bucket(**_totals(b), label=b.label, start=b.start, end=b.end) for b in series],
                   stats.current_streak, stats.best_streak)
 

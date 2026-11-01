@@ -49,6 +49,7 @@ def test_week_report(client, week):
     assert [b["routine_done"] for b in r["series"]] == [6, 3, 6, 0, 6, 0, 0]
     assert r["series"][5]["routine_completion_rate"] is None                    # 기록 없는 날
     assert (r["current_streak"], r["best_streak"]) == (1, 3)                    # 목요일 실패로 끊김
+    assert r["overall"] == r["totals"]                                          # 기록이 이번 주뿐이면 누적 = 기간
 
 
 def test_month_and_year_reports(client, week):
@@ -118,3 +119,14 @@ def test_upload_media_types(client, clock):
     url = f"/night/records/{rec_id}/voice"
     assert client.put(url, content=b"m4a", headers={**H, "Content-Type": "audio/x-m4a"}).status_code == 200
     assert client.put(url, content=b"wav", headers={**H, "Content-Type": "audio/wav"}).status_code == 415
+
+
+def test_overall_is_cumulative_and_series_is_period(client, clock, week):
+    morning(client, clock, date(2026, 10, 26), True, 0)                          # 지난주 월요일: 성공, 0/6
+    clock.now = datetime(2026, 11, 6, 21, 0, tzinfo=KST)
+    r = client.get("/reports", params={"period": "week"}, headers=H).json()
+    assert (r["overall"]["n_sessions"], r["overall"]["routine_done"], r["overall"]["routine_total"]) == (6, 21, 36)
+    assert r["overall"]["wake_success_rate"] == pytest.approx(5 / 6)
+    assert (r["totals"]["n_sessions"], r["totals"]["routine_total"]) == (5, 30)   # 그래프 영역은 이번 주만
+    last = client.get("/reports", params={"period": "week", "date": "2026-10-26"}, headers=H).json()
+    assert last["totals"]["n_sessions"] == 1 and last["overall"]["n_sessions"] == 6   # 지난주를 봐도 상단은 누적

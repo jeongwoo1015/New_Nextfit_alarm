@@ -330,7 +330,8 @@ class ReportOut(Out):
     period: str
     start: date
     end: date
-    totals: TotalsOut
+    overall: TotalsOut                   # 화면 상단 도넛: 전체 기간 누적 기상 성공률·루틴 성공률
+    totals: TotalsOut                    # 선택한 기간: 그래프 영역의 평균 기상 시각·루틴 완료율(52/70)
     series: list[BucketOut]
     current_streak: int
     best_streak: int

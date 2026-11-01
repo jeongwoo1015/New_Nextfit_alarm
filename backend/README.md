@@ -44,7 +44,7 @@
 | `PATCH /morning/sessions/{id}/steps/{n}/duration` | 코칭 | 오늘 진행 중 변경("오늘 스트레칭 좀 적게", Live 함수를 앱이 전달). PENDING만, 30초 단위, 오늘 합계 ≤ 상한, 0초 = 오늘만 빼기 |
 | `POST /morning/sessions/{id}/end` | 종료 | `end_session` 또는 통화 종료. 기상 성공 기록 |
 | `GET /morning/sessions/{id}` · `GET /morning/sessions/today` | 루틴 화면 | 세션, 단계, 진행 개수(`finished` = "완료!") |
-| `GET /reports?period=week\|month\|year&date=` | 리포트 | 기간 합계(기상 성공률, 평균 기상 시각, 루틴 완료 52/70), 그래프 칸(주: 월~일, 월: 1주~5주, 연: 1~12월), 현재·최장 연속 달성일 |
+| `GET /reports?period=week\|month\|year&date=` | 리포트 | 상단 `overall` = 전체 기간 누적(기상 성공률·루틴 성공률), `totals`·`series` = 선택한 기간(평균 기상 시각, 루틴 완료 52/70, 그래프 칸 주: 월~일 / 월: 1주~5주 / 연: 1~12월), 현재·최장 연속 달성일 |
 | `GET /diary/calendar?month=YYYY-MM` | 한 줄 일기 | 날짜별 사진 URL 또는 루틴 성공률, 세션·밤 기록 여부 |
 | `GET /diary/{date}` | 일기 상세 | 그날 밤 기록(한 줄 일기)·아침 세션과 단계·사진·하루 요약 |
 | `PUT /diary/{date}/photo` | 일기 사진 | jpg를 본문 그대로(`Content-Type: image/jpeg`, 10MB 이하, 미래 날짜 불가). 다시 올리면 덮어씀 |
@@ -114,7 +114,7 @@ AI 쪽 브리핑 입력의 `coaching_min`은 0(코칭 안 함)/10(진행)으로�
 가까운 쪽으로 만든 뒤 고정 시간에 맞춰 비율대로 조정한다.
 
 리포트·일기 통계는 AI 파트 `ai.personalization.user_model`(`compute_stats`, `aggregate`, `period_series`, `day_summary`)을
-그대로 쓴다(개인화와 화면이 같은 숫자를 보도록 AI 파트가 만든 함수, Gemini 키 불필요). 연속 달성일은 최근 1년 기록으로 센다.
+그대로 쓴다(개인화와 화면이 같은 숫자를 보도록 AI 파트가 만든 함수, Gemini 키 불필요). 상단 성공률(누적)과 연속 달성일은 전체 기록으로 센다.
 계산 가정(기상 시각 = 첫 응답, 세션 없는 날은 건너뛰되 3일 넘게 비면 연속이 끊김, 루틴 완료율 = DONE ÷ 전체)은 그쪽 설명을 따른다.
 
 ## 브랜치·파일 담당

@@ -14,7 +14,7 @@ from backend.domain import codes
 from backend.domain.models import MorningSession, NightRecord, SessionStep
 from backend.repositories.registry import Repositories
 
-STREAK_DAYS = 365          # 연속 달성일을 셀 과거 기록 범위
+ALL_HISTORY_SINCE = date(2020, 1, 1)   # 누적·연속 달성일은 전체 기록으로 센다 (서비스 시작 이전 날짜)
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
 PERIODS = ("week", "month", "year")
 
@@ -42,12 +42,13 @@ class HistoryService:
         self.r, self.clock = repos, clock
 
     def report(self, user_id: str, period: str, anchor: date | None) -> ai_stats.Report:
+        """상단(기상·루틴 성공률)은 전체 기간 누적, 그래프와 그 영역의 합계는 선택한 주·월·연 (팀 결정 11/01)."""
         if period not in PERIODS:
             raise ValidationFailed(f"period는 {'/'.join(PERIODS)} 중 하나예요")
         today = today_kst(self.clock())
         anchor = anchor or today
         start, end = ai_stats.period_bounds(period, anchor)
-        rec = self.r.sessions.recent_records(user_id, min(start, today - timedelta(days=STREAK_DAYS)), max(end - timedelta(days=1), today))
+        rec = self.r.sessions.recent_records(user_id, ALL_HISTORY_SINCE, max(end - timedelta(days=1), today))
         return ai_stats.report(rec, period, anchor, today)
 
     def _photo_url(self, path: str | None) -> str | None:

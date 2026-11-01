@@ -16,7 +16,8 @@ router = APIRouter(tags=["history"])
 @router.get("/reports", response_model=ReportOut)
 def get_report(period: str = Query("week", pattern="^(week|month|year)$"), date_: date | None = Query(None, alias="date"),
                user_id: str = Depends(current_user_id), svc: HistoryService = Depends(history_service)):
-    """리포트 화면: 기간(date가 속한 주·월·연, 기본 오늘) 합계, 그래프 칸, 현재·최장 연속 달성일."""
+    """리포트 화면: 상단은 전체 기간 누적(overall), 그래프와 그 영역 합계는 date가 속한 주·월·연(totals·series, 기본 오늘),
+    현재·최장 연속 달성일."""
     return svc.report(user_id, period, date_)
 
 
