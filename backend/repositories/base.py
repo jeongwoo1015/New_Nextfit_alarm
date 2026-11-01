@@ -67,6 +67,7 @@ class NightRepository(Protocol):
     def save_night_extract(self, user_id: str, night_record_id: str, fields: dict,
                            override_alarm_id: str | None) -> NightRecord: ...         # 11/01 컬럼 이름의 추출 결과, extract_status = DONE
     def mark_extract_failed(self, user_id: str, night_record_id: str) -> None: ...
+    def get_night(self, user_id: str, night_record_id: str) -> NightRecord | None: ...   # 초안에 추가: 저장 직후 응답, 목소리 업로드
     def get_night_raw(self, night_record_id: str) -> NightRaw | None: ...            # 재추출 배치용 (서버 내부)
     def list_failed_extracts(self, limit: int) -> list[tuple[str, str]]: ...         # [(user_id, night_record_id)]
     def get_night_for_morning(self, user_id: str, apply_date: date) -> NightRecord | None: ...

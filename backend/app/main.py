@@ -1,16 +1,22 @@
 """FastAPI 앱. 실행: uvicorn backend.app.main:app --reload (저장소 루트에서)"""
 from fastapi import Depends, FastAPI
 
-from backend.api import alarms, routines, users
+from backend.api import alarms, night, routines, users
+from backend.clients.ai_gateway import build_ai_gateway
 from backend.core.auth import current_user_id
 from backend.core.config import get_settings
 from backend.core.errors import install_error_handlers
+from backend.core.timeutil import now_kst
 from backend.repositories.registry import Repositories, build_repositories
 
 
-def create_app(repos: Repositories | None = None) -> FastAPI:
+def create_app(repos: Repositories | None = None, ai=None, clock=now_kst) -> FastAPI:
+    """repos·ai·clock은 테스트에서 바꿔 끼운다 (clock: KST 현재 시각을 돌려주는 함수)."""
     app = FastAPI(title="Re:Spec Backend API", version="0.1.0")
-    app.state.repos = repos or build_repositories(get_settings().repository_backend)
+    settings = get_settings()
+    app.state.repos = repos or build_repositories(settings.repository_backend)
+    app.state.ai = ai or build_ai_gateway(settings)
+    app.state.clock = clock
     install_error_handlers(app)
 
     @app.get("/health", tags=["system"])
@@ -22,7 +28,7 @@ def create_app(repos: Repositories | None = None) -> FastAPI:
         """로그인 토큰 확인용. 토큰의 user_id를 그대로 돌려준다."""
         return {"user_id": user_id}
 
-    for module in (users, alarms, routines):
+    for module in (users, alarms, routines, night):
         app.include_router(module.router)
     return app
 

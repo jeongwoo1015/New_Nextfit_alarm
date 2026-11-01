@@ -174,3 +174,59 @@ class RoutineItemIn(BaseModel):
 class AlarmRoutineIn(BaseModel):
     """알람의 항목 시간 전체. 보내지 않은 항목은 프리셋 기본 시간, 빈 목록이면 전부 기본값으로 되돌리기."""
     items: list[RoutineItemIn]
+
+
+# ---------- 밤 흐름 ----------
+class CalendarEventIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    start: str = Field(default="", pattern=r"^$|^([01]\d|2[0-3]):[0-5]\d$")
+    end: str = Field(default="", pattern=r"^$|^([01]\d|2[0-3]):[0-5]\d$")
+    all_day: bool = False
+
+
+class NightTokenIn(BaseModel):
+    """앱이 폰 캘린더에서 읽은 오늘·내일 일정 (DB에 저장하지 않음)."""
+    events_today: list[CalendarEventIn] = Field(default=[], max_length=30)
+    events_tomorrow: list[CalendarEventIn] = Field(default=[], max_length=30)
+
+
+class LiveTokenOut(BaseModel):
+    """ws_url?access_token=<token>으로 연결 → 첫 메시지 {"setup": {"model": model}} → start_signal을 realtimeInput.text로.
+    토큰은 한 번만 쓸 수 있다. 재연결은 새 토큰을 받는다."""
+    token: str
+    ws_url: str
+    model: str
+    start_signal: str
+    expires_at: str
+
+
+class TranscriptTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    text: str = Field(max_length=4000)
+    at: str | None = None
+
+
+class TranscriptIn(BaseModel):
+    """Gemini Live 받아쓰기(inputTranscription=user, outputTranscription=assistant). 시작 신호 글자는 넣지 않는다."""
+    transcript: list[TranscriptTurn] = Field(min_length=1, max_length=2000)
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+
+
+class NightRecordOut(Out):
+    night_record_id: str
+    record_date: date
+    apply_date: date
+    extract_status: str                 # PENDING이면 추출 중, FAILED면 서버가 나중에 다시 추출
+    ai_summary: str | None = None
+    tomorrow_goal: str | None = None
+    tomorrow_notes: list[str] = []
+    condition_label: str | None = None
+    condition_text: str | None = None
+    encouragement: str | None = None
+    insight: str | None = None
+    diary_text: str | None = None
+    override_alarm_id: str | None = None
+    override_wake_time: HHMM | None = None
+    override_skip_coaching: bool = False
+    voice_url: str | None = None        # 서명된 임시 URL

@@ -11,9 +11,9 @@
 | `api/` | 화면별 엔드포인트와 요청·응답 형식(`schemas.py`) |
 | `services/` | 서비스 흐름 — 사용자 확인(USER_ID 비교), 검사, 저장 순서 |
 | `repositories/` | DB 접근 인터페이스(`base.py`) + 메모리 구현 + 프리셋 시드. Supabase 구현은 backend-db 담당 |
-| `clients/` | (다음 단계) AI 파트 함수 어댑터, Gemini 임시 토큰, Storage |
+| `clients/` | AI 파트 어댑터(`ai_gateway.py`: Live 임시 토큰, 밤 기록 추출, 대화로 바꾼 루틴 항목) + 테스트용 `fake_ai.py` |
 
-## API (2단계까지)
+## API (3단계까지)
 
 | 메서드 · 경로 | 화면 | 내용 |
 |---|---|---|
@@ -27,6 +27,10 @@
 | `PUT /alarms/{id}/routine-items` | 알람 세부 설정 | 항목 시간 전체 교체(30초 단위, 합계 ≤ 900초, 최소 한 항목). 보내지 않은 항목은 기본 시간 |
 | `GET /presets` · `GET /presets/{id}` | 프리셋 선택 카드 | 활성 프리셋, 항목별 기본 시간(합계 600초) |
 | `GET /config/limits` | 알람 세부 설정 | 루틴 합계 상한, 시간 단위, 콘텐츠 고정 시간 |
+| `POST /night/token` | 굿나잇콜 시작 | 오늘·내일 일정을 보내면 지시문이 고정된 1회용 Live 토큰·시작 신호 |
+| `POST /night/transcript` | 굿나잇콜 종료 | 받아쓰기 저장(202, `extract_status: PENDING`), 추출은 백그라운드 |
+| `GET /night/records/{id}` · `GET /night/records?record_date=` | 밤 기록·일기 | 추출 결과, 하루 한정 변경, 목소리 서명 URL |
+| `PUT /night/records/{id}/voice` | 굿나잇콜 | 목소리 m4a를 본문 그대로(`Content-Type: audio/mp4`, 10MB 이하) |
 
 오류 응답은 모두 `{"error": {"code", "message", "details?"}}`. 전체 명세는 서버 실행 후 `/docs`(OpenAPI).
 
@@ -40,10 +44,10 @@ backend-db 초안(`repository_functions_draft.md`)의 함수 이름·묶음으�
 | 1. 사용자·설정 | `UserRepository` | 있음 |
 | 2. 공용 데이터(프리셋·앱 설정·음악) | `PresetRepository` | 있음 (`pick_music`은 None) |
 | 3. 알람 | `AlarmRepository` | 있음 |
-| 4. 밤 기록 | `NightRepository` | 3단계에서 |
+| 4. 밤 기록 | `NightRepository` (+ `get_night` 추가) | 있음 |
 | 5. 모닝 세션·단계 | `SessionRepository` | 4단계에서 |
 | 6. 개인화 | `PersonalizationRepository` | 4단계에서 |
-| 7. Storage | `StorageClient` | 3단계에서 |
+| 7. Storage | `StorageClient` | 있음 |
 
 초안과 달라진 점
 - 사용자 확인: 쿼리에 `user_id` 조건을 넣고 다른 사용자 행이면 None → 서버는 404 (403 대신, 데이터 존재 여부도 숨김).
@@ -75,6 +79,15 @@ cd .. && backend/.venv/Scripts/python -m uvicorn backend.app.main:app --reload
 `{SUPABASE_URL}/auth/v1/.well-known/jwks.json`으로 검증한다. 서버는 service_role 키를 쓰므로 RLS가 적용되지 않아,
 모든 API가 토큰의 user_id와 데이터의 USER_ID를 직접 비교한다(`core.auth.ensure_owner`).
 
+## AI 연동
+`clients/ai_gateway.py`만 `ai.*`를 import한다. 이 브랜치에는 `ai/`가 없어 `GEMINI_API_KEY`가 있어도 AI 기능은 503
+(`AI_UNAVAILABLE`)이고, main에서 feat/ai와 합쳐지면 실제 함수를 부른다. AI 코드가 11/01 기준으로 바뀌기 전까지 어댑터가 맞춘다:
+추출 결과 `override_coaching_min = 0` → `override_skip_coaching = TRUE`(10은 11/01에 없어 버림), 토큰 입력의 `tomorrow_coaching_min`은 비움.
+
+밤 흐름: 토큰 발급 때 내일 울릴 알람(시각, 루틴이면 지금 쓰는 항목 이름)을 지시문에 넣는다 → 원문 저장 → 백그라운드에서
+`extract_night_record` → 하루 한정 변경 대상 알람 지정 → `parse_routine_changes` → `apply_conversation` → `set_alarm_routine`.
+루틴 변경이 실패해도 밤 기록 저장은 유지한다. 추출이 실패하면 `FAILED`로 두고 원문은 남긴다(재추출 배치는 6단계).
+
 ## 정의서에서 정하지 않아 기본안으로 구현한 것 (팀 확인 필요)
 - AI 판정 `not_done` → `STEP_STATUS = SKIPPED` (AI 파트 CONTRACTS 1-3 제안). `ambiguous`/`other`는 상태를 바꾸지 않고 `AI_VERDICT`만 남긴다.
 - 하루 한정 변경 대상 알람(`OVERRIDE_ALARM_ID`): 밤 기록이 적용되는 아침(`APPLY_DATE`)에 가장 먼저 울리는 켜진 알람. 그날 울릴 알람이 없으면 변경값을 저장하지 않는다.
@@ -84,5 +97,7 @@ cd .. && backend/.venv/Scripts/python -m uvicorn backend.app.main:app --reload
 - 콘텐츠 고정 시간(`RS_APP_CONFIG.CONTENT_DURATION_SEC`)이 비어 있으면 600초로 진행한다.
 - 밤 대화로 루틴 항목을 빼거나 다시 넣으면 **다음 날 아침에 울릴 알람**(하루 한정 변경과 같은 대상)에만 적용한다.
   빼기 = 0초, 다시 넣기 = 기본 시간. 규칙(합계 상한·최소 한 항목)에 걸리는 요청은 반영하지 않는다(`routine_rules.apply_conversation`).
+- 밤 대화에서 하루 한정 변경에 동의했는데 다음 날 아침에 울릴 알람이 없으면 변경값을 저장하지 않는다.
+- 대화 원문 role은 `user` / `assistant`만 받는다(AI CONTRACTS 2-2 권고). 사용자 발화가 없으면 422(`EMPTY_TRANSCRIPT`).
 - `MUSIC_GENRE`는 NOT NULL인데 기본값이 없어 온보딩에서 안 보내면 `POP`.
 - 메모리 시드의 고정 스크립트는 표시(`[stretch_short]`, `[lymph]`)만 있다. 실제 문구는 DB 시드에 있다.

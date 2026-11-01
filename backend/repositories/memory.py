@@ -1,9 +1,12 @@
 """메모리 저장소 — 테스트와 DB 없이 서버를 띄울 때 쓴다. 동작은 base.py의 규칙과 DB 트리거를 따른다."""
 import uuid
 from dataclasses import fields, replace
+from datetime import timedelta
 
-from backend.core.timeutil import now_kst
-from backend.domain.models import Alarm, AppConfig, RoutineTemplate, TemplateItem, User, UserSetting
+from backend.core.errors import ValidationFailed
+from backend.core.timeutil import apply_date, now_kst, record_date
+from backend.domain.models import (Alarm, AppConfig, DiaryPhoto, NightRaw, NightRecord, RoutineTemplate, TemplateItem,
+                                   User, UserSetting)
 from backend.domain.routine_rules import build_routine
 
 from .seed import seed_templates
@@ -124,8 +127,113 @@ class MemoryAlarmRepository:
         return self.get_alarm_routine(user_id, alarm_id)
 
 
-def memory_repositories(seed: bool = True, config: AppConfig | None = None):
+class MemoryNightRepository:
+    """rs_night_record + rs_night_raw. record_date·apply_date는 DB 트리거처럼 저장 시각(clock)으로 계산한다."""
+
+    def __init__(self, clock=now_kst):
+        self.records: dict[str, NightRecord] = {}
+        self.raws: dict[str, NightRaw] = {}
+        self.clock = clock
+
+    def _own(self, user_id, night_record_id):
+        r = self.records.get(night_record_id)
+        return r if r and r.user_id == user_id else None
+
+    def save_night_raw(self, user_id, transcript, started_at, ended_at):
+        now = self.clock()
+        rdate = record_date(now)
+        existing = next((r for r in self.records.values() if r.user_id == user_id and r.record_date == rdate), None)
+        if existing:   # 같은 밤에 다시 저장하면 덮어쓴다
+            rec = replace(existing, extract_status="PENDING", updated_at=now)
+        else:
+            rec = NightRecord(str(uuid.uuid4()), user_id, rdate, apply_date(rdate), created_at=now, updated_at=now)
+        self.records[rec.night_record_id] = rec
+        self.raws[rec.night_record_id] = NightRaw(rec.night_record_id, list(transcript), None, started_at, ended_at,
+                                                  now + timedelta(days=30))
+        return rec.night_record_id
+
+    def save_night_extract(self, user_id, night_record_id, fields, override_alarm_id):
+        rec = self._own(user_id, night_record_id)
+        if (fields.get("override_wake_time") or fields.get("override_skip_coaching")) and not override_alarm_id:
+            raise ValidationFailed("하루 한정 변경에는 대상 알람이 필요해요")   # CHECK rs_night_override_alarm
+        rec = replace(rec, **{**fields, "tomorrow_notes": tuple(fields.get("tomorrow_notes") or ())},
+                      override_alarm_id=override_alarm_id, extract_status="DONE", updated_at=self.clock())
+        self.records[night_record_id] = rec
+        return rec
+
+    def mark_extract_failed(self, user_id, night_record_id):
+        rec = self._own(user_id, night_record_id)
+        if rec:
+            self.records[night_record_id] = replace(rec, extract_status="FAILED", updated_at=self.clock())
+
+    def get_night(self, user_id, night_record_id):
+        return self._own(user_id, night_record_id)
+
+    def get_night_raw(self, night_record_id):
+        return self.raws.get(night_record_id)
+
+    def list_failed_extracts(self, limit):
+        return [(r.user_id, r.night_record_id) for r in self.records.values() if r.extract_status == "FAILED"][:limit]
+
+    def get_night_for_morning(self, user_id, apply_date):
+        return next((r for r in self.records.values() if r.user_id == user_id and r.apply_date == apply_date), None)
+
+    def get_night_by_date(self, user_id, record_date):
+        return next((r for r in self.records.values() if r.user_id == user_id and r.record_date == record_date), None)
+
+    def set_voice_path(self, user_id, night_record_id):
+        rec = self._own(user_id, night_record_id)
+        path = f"{user_id}/{rec.record_date.isoformat()}.m4a"
+        self.records[night_record_id] = replace(rec, voice_audio_path=path)
+        return path
+
+    def purge_expired_raw(self, now):
+        paths = []
+        for k, raw in self.raws.items():
+            if raw.expires_at and raw.expires_at < now and (raw.transcript is not None or raw.audio_path):
+                if raw.audio_path:
+                    paths.append(raw.audio_path)
+                self.raws[k] = replace(raw, transcript=None, audio_path=None)
+        return paths
+
+
+class MemoryStorageClient:
+    def __init__(self):
+        self.files: dict[tuple[str, str], bytes] = {}
+        self.photos: dict[tuple[str, object], DiaryPhoto] = {}
+
+    def upload_voice(self, user_id, record_date, data):
+        path = f"{user_id}/{record_date.isoformat()}.m4a"
+        self.files[("voice", path)] = data
+        return path
+
+    def upload_photo(self, user_id, diary_date, data):
+        path = f"{user_id}/{diary_date.isoformat()}.jpg"
+        self.files[("photo", path)] = data
+        old = self.photos.get((user_id, diary_date))
+        photo = DiaryPhoto(old.diary_photo_id if old else str(uuid.uuid4()), user_id, diary_date, path, now_kst())
+        self.photos[(user_id, diary_date)] = photo
+        return photo
+
+    def get_photo(self, user_id, diary_date):
+        return self.photos.get((user_id, diary_date))
+
+    def list_photos(self, user_id, since, until):
+        return sorted((p for (u, d), p in self.photos.items() if u == user_id and since <= d <= until), key=lambda p: p.diary_date)
+
+    def signed_url(self, bucket, path, expires_in=3600):
+        return f"memory://{bucket}/{path}?expires_in={expires_in}"
+
+    def delete_user_files(self, user_id):
+        keys = [k for k in self.files if k[1].startswith(f"{user_id}/")]
+        for k in keys:
+            del self.files[k]
+        return len(keys)
+
+
+def memory_repositories(seed: bool = True, config: AppConfig | None = None, clock=now_kst):
     from .registry import Repositories
     templates, items = seed_templates() if seed else ([], [])
     presets = MemoryPresetRepository(templates, items, config)
-    return Repositories(users=MemoryUserRepository(), presets=presets, alarms=MemoryAlarmRepository(presets))
+    return Repositories(users=MemoryUserRepository(), presets=presets, alarms=MemoryAlarmRepository(presets),
+                        nights=MemoryNightRepository(clock), storage=MemoryStorageClient())
