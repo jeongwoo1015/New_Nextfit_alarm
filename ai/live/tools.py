@@ -10,7 +10,7 @@ END_SESSION = {
 
 START_ROUTINE = {
     "name": "start_routine",
-    "description": "'다음 루틴(콘텐츠 또는 기본 루틴)을 시작할 준비가 됐는지' 물었고, 사용자가 그 질문에 준비됐다고 분명히 답한 다음 응답에서만 호출한다. 질문을 한 같은 응답에서는 호출하지 않는다. 호출하면 앱이 다음 세션을 시작한다.",
+    "description": "'다음 세션(루틴 또는 콘텐츠)을 시작할 준비가 됐는지' 물었고, 사용자가 그 질문에 준비됐다고 분명히 답한 다음 응답에서만 호출한다. 질문을 한 같은 응답에서는 호출하지 않는다. 호출하면 앱이 다음 세션을 시작한다.",
     "parameters": {"type": "OBJECT", "properties": {}},
 }
 
@@ -37,12 +37,9 @@ _BY_KIND = {
 def tools_for(kind: str, inp=None) -> list[dict]:
     """kind: night / briefing / coaching → Live setup의 tools 값.
 
-    입력에 따라 다르다: 브리핑은 다음에 이어질 세션(콘텐츠 또는 기본 루틴)이 있을 때만 start_routine을 넣고,
-    단계 세션(coaching)은 뒤에 기본 루틴이 이어질 때만 start_routine을 넣는다.
+    입력에 따라 다르다: 브리핑은 코칭을 하는 날에만 start_routine을 넣는다(코칭 안 하는 날은 브리핑만 한다).
     """
     if kind == "briefing" and inp is not None:
-        follows = getattr(inp, "coaching_min", 20) > 0 and (bool(getattr(inp, "content_name", "")) or getattr(inp, "routine_follows", True))
+        follows = not getattr(inp, "coaching_skipped", False)
         return [{"functionDeclarations": ([START_ROUTINE] if follows else []) + [END_SESSION]}]
-    if kind == "coaching" and inp is not None and getattr(inp, "routine_follows", False):
-        return [{"functionDeclarations": [REPORT_STEP_RESULT, START_ROUTINE, END_SESSION]}]
     return [{"functionDeclarations": list(_BY_KIND[kind])}]

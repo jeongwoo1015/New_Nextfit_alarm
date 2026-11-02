@@ -94,10 +94,10 @@ def test_briefing_without_weather_or_night():
 
 
 def test_briefing_content_alarm_and_no_coaching():
-    c = briefing_prompt(BriefingInput(content_name="퀴즈", routine_follows=False))
+    c = briefing_prompt(BriefingInput(content_name="퀴즈"))
     assert "오늘의 콘텐츠(퀴즈) 시작할 준비가 됐는지 묻는" in c and "start_routine" in c
-    assert "콘텐츠나 루틴의 진행은 이 대화에서 하지 않는다(다음 세션에서 한다)" in c
-    z = briefing_prompt(BriefingInput(coaching_min=0))
+    assert "루틴이나 콘텐츠의 진행은 이 대화에서 하지 않는다(다음 세션에서 한다)" in c
+    z = briefing_prompt(BriefingInput(coaching_skipped=True))
     assert "코칭을 하지 않는 날" in z and "시작할 준비가 됐는지 묻는 질문도 하지 않는다" in z and "준비가 됐는지 묻는 질문 한 문장을 한다" not in z
 
 
@@ -222,15 +222,14 @@ def test_tools_follow_the_session_plan():
     names = lambda kind, inp: [d["name"] for d in tools_for(kind, inp)[0]["functionDeclarations"]]
     assert names("briefing", BriefingInput()) == ["start_routine", "end_session"]                          # 기본 루틴이 이어짐
     assert names("briefing", BriefingInput(content_name="퀴즈")) == ["start_routine", "end_session"]        # 콘텐츠 세션이 이어짐
-    assert names("briefing", BriefingInput(coaching_min=0, content_name="퀴즈")) == ["end_session"]         # 수행 안 함
-    assert names("briefing", BriefingInput(routine_follows=False)) == ["end_session"]                       # 이어질 세션이 없음
+    assert names("briefing", BriefingInput(coaching_skipped=True, content_name="퀴즈")) == ["end_session"]  # 코칭 안 하는 날
+    assert names("briefing", BriefingInput(coaching_skipped=True)) == ["end_session"]
     assert names("coaching", CoachingInput(steps=q)) == ["report_step_result", "end_session"]               # 기본 루틴 세션
     assert names("coaching", CoachingInput(morning_call_type="CONTENT", steps=q)) == ["report_step_result", "end_session"]
-    assert names("coaching", CoachingInput(morning_call_type="CONTENT", steps=q, routine_follows=True)) == ["report_step_result", "start_routine", "end_session"]
     assert [d["name"] for d in build_setup("briefing", BriefingInput(content_name="퀴즈"))["tools"][0]["functionDeclarations"]] == ["start_routine", "end_session"]
 
 
-def test_briefing_asks_about_content_first_and_does_not_run_it():
+def test_briefing_asks_about_content_when_content_alarm_and_does_not_run_it():
     p = briefing_prompt(BriefingInput(program_name="현실 모닝루틴", content_name="퀴즈"))
     assert "이제 퀴즈 시간을 시작할 준비가 됐어요?" in p and "'현실 모닝루틴' 시작할 준비가 됐는지 묻는" not in p     # 콘텐츠가 있으면 콘텐츠가 먼저
     assert "report_step_result" not in p.split("[현재 시각]")[0] or "콘텐츠 진행 규칙" not in p                     # 브리핑 세션은 단계를 진행하지 않는다
@@ -238,14 +237,21 @@ def test_briefing_asks_about_content_first_and_does_not_run_it():
 
 def test_content_session_prompt():
     q = (Step(4, "퀴즈 1번", 60, "SPEECH", "문제: Q\n정답: A"),)
-    p = coaching_prompt(CoachingInput(morning_call_type="CONTENT", steps=q, routine_follows=True, next_program_name="현실 모닝루틴"))
+    p = coaching_prompt(CoachingInput(morning_call_type="CONTENT", steps=q))
     assert "함께 진행해 주는 친근한 진행자" in p and "[오늘 콘텐츠 단계]\n4. 퀴즈 1번 (SPEECH, 1분)" in p
-    assert "'현실 모닝루틴' 시작할 준비가 됐는지 묻는 질문 한 문장으로 끝내고 멈춘다" in p and "질문을 한 응답에서는 start_routine을 호출하지 않는다" in p
     assert "정답:' 줄은 AI만 보는 정보" in p                                                              # 코칭과 같은 단계 규칙
-    only = coaching_prompt(CoachingInput(morning_call_type="CONTENT", steps=q))
-    assert "시작할 준비가 됐는지 묻는 질문 한 문장으로 끝내고" not in only and "대화는 사용자가 끝낸다" in only      # 루틴이 없으면 사용자가 끝낼 때까지
+    assert "start_routine" not in p and "시작할 준비가 됐는지 묻는" not in p and "대화는 사용자가 끝낸다" in p   # 뒤에 이어지는 세션이 없다
     routine = coaching_prompt(CoachingInput(steps=q))
     assert "아침 루틴을 옆에서 코칭해 주는" in routine and "[오늘 코칭 단계]" in routine
+
+
+def test_weather_location_is_included_only_with_weather_values():
+    p = briefing_prompt(BriefingInput(weather=Weather("비", temp_c=11, location_name="광진구")))
+    assert "[오늘 날씨]\n- 지역 광진구, 비, 현재 11도" in p and '"오늘 ○○ 날씨는"' in p
+    only_place = briefing_prompt(BriefingInput(weather=Weather(location_name="광진구")))
+    assert "지역 광진구" not in only_place and "[오늘 날씨]\n없음" in only_place
+    no_place = briefing_prompt(BriefingInput(weather=Weather("맑음")))
+    assert "[오늘 날씨]\n- 맑음" in no_place and "- 지역" not in no_place
 
 
 def test_night_examples_follow_the_tone_setting():
