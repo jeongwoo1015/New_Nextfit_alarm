@@ -1,5 +1,5 @@
 """온보딩, 내 정보, 설정."""
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 
 from backend.app.deps import user_service
 from backend.core.auth import current_user_id
@@ -33,6 +33,13 @@ def onboard(body: OnboardingIn, user_id: str = Depends(current_user_id), svc: Us
 @router.patch("/users/me", response_model=UserOut)
 def patch_me(body: UserPatch, user_id: str = Depends(current_user_id), svc: UserService = Depends(user_service)):
     return svc.update_user(user_id, body.model_dump(exclude_none=True))
+
+
+@router.delete("/users/me", status_code=status.HTTP_204_NO_CONTENT)
+def delete_me(user_id: str = Depends(current_user_id), svc: UserService = Depends(user_service)):
+    """탈퇴: 목소리·원본 음성·사진 파일을 지우고 Auth 계정을 지운다(DB 행은 CASCADE). 되돌릴 수 없다."""
+    svc.delete_account(user_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/settings", response_model=SettingOut)

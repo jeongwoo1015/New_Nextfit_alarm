@@ -21,4 +21,4 @@ def test_presets_need_login(client):
 
 def test_limits(client, repos):
     assert client.get("/config/limits", headers=auth(USER_A)).json() == {
-        "routine_max_sec": 900, "duration_step_sec": 30, "content_duration_sec": 600}
+        "routine_max_sec": 900, "duration_step_sec": 30, "content_duration_sec": 300}

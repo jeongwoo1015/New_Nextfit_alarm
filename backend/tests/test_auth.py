@@ -41,7 +41,7 @@ def test_missing_or_malformed_header(client, headers):
 
 
 @pytest.mark.parametrize("bad", [
-    token(exp=int(time.time()) - 10),          # 만료
+    token(exp=int(time.time()) - 60),          # 만료 (허용 범위 30초 밖)
     token(aud="anon"),                          # 다른 audience
     jwt.encode({"sub": USER, "aud": "authenticated"}, "other-secret-at-least-32-bytes-long", algorithm="HS256"),
     token(sub=None),                            # sub 없음
@@ -49,6 +49,17 @@ def test_missing_or_malformed_header(client, headers):
 def test_invalid_tokens(client, bad):
     r = client.get("/me", headers={"Authorization": f"Bearer {bad}"})
     assert r.status_code == 401
+
+
+def test_small_clock_skew_is_allowed(client):
+    """서버 시계가 Supabase보다 조금 느려 iat가 미래로 보여도 30초 안이면 통과한다."""
+    now = int(time.time())
+    ok = token(iat=now + 10, exp=now + 600)
+    assert client.get("/me", headers={"Authorization": f"Bearer {ok}"}).status_code == 200
+    too_far = token(iat=now + 120, exp=now + 600)
+    assert client.get("/me", headers={"Authorization": f"Bearer {too_far}"}).status_code == 401
+    just_expired = token(exp=now - 10)                       # 만료 직후 10초도 허용 범위
+    assert client.get("/me", headers={"Authorization": f"Bearer {just_expired}"}).status_code == 200
 
 
 def test_no_verification_config_is_rejected():

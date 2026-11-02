@@ -3,7 +3,7 @@ from datetime import date
 from typing import Iterable, Protocol
 
 from . import codes
-from .models import Alarm, AlarmRoutineItem, AppConfig, NightRecord, SessionSnapshot, StepPlan
+from .models import Alarm, AlarmRoutineItem, AppConfig, MorningSession, NightRecord, SessionSnapshot, StepPlan
 
 
 def override_applies(alarm: Alarm, night: NightRecord | None, session_date: date) -> bool:
@@ -64,3 +64,10 @@ def content_steps(steps: Iterable[ContentStep], coaching_skipped: bool = False) 
 def planned_total_sec(steps: Iterable[StepPlan]) -> int:
     """RS_MORNING_SESSION.PLANNED_TOTAL_SEC (그날 만든 단계 시간 합계)."""
     return sum(s.planned_duration_sec or 0 for s in steps)
+
+
+def judge_wake(s: MorningSession) -> bool:
+    """기상 성공 (11/01 팀 확정): 브리핑 전 확인 멘트(2~3개)에 모두 응답했고, 그때까지
+    ① 스누즈("5분 뒤 다시 울리기")를 한 번도 하지 않았고 ② 무응답으로 AI 재기상 음악이 한 번도 나오지 않았다.
+    확인 멘트를 마친 시점(wake_checked_at)에 부른다. 그 뒤의 재기상·스누즈는 판정을 바꾸지 않는다."""
+    return s.first_response_at is not None and s.snooze_count == 0 and s.rewake_count == 0

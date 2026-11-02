@@ -42,10 +42,22 @@ class ValidationFailed(AppError):
     code = "VALIDATION_FAILED"
 
 
+class UnsupportedMediaType(AppError):
+    status_code = 415
+    code = "UNSUPPORTED_MEDIA_TYPE"
+
+
 class ServiceUnavailable(AppError):
     """DB 연결 실패·시간 초과 (Repository 구현이 던진다)."""
     status_code = 503
     code = "DB_UNAVAILABLE"
+
+
+def check_media_type(content_type: str | None, allowed: tuple[str, ...]) -> None:
+    """업로드 Content-Type(파라미터 제외)이 허용 목록에 있는지. Storage에는 서버가 정한 형식으로 올라가므로 여기서 막는다."""
+    mime = (content_type or "").split(";")[0].strip().lower()
+    if mime not in allowed:
+        raise UnsupportedMediaType(f"Content-Type은 {', '.join(allowed)} 중 하나여야 해요: {mime or '없음'}")
 
 
 def install_error_handlers(app: FastAPI) -> None:

@@ -2,7 +2,7 @@ from datetime import datetime, time
 
 import pytest
 
-from backend.clients.ai_gateway import NightExtract
+from backend.clients.ai_gateway import ItemChange, NightExtract, RoutineChangeRequest
 from backend.core.errors import ServiceUnavailable
 from backend.core.timeutil import KST
 from backend.repositories.seed import template_id
@@ -144,27 +144,65 @@ def test_content_alarm_steps_from_ai(client, morning, ai):
     assert ai.calls[-1][1].content_name == "퀴즈" and ai.calls[-1][1].program_name == ""
     steps = client.post(url(v, "/coaching-token"), headers=auth(USER_A)).json()["steps"]
     assert [s["template_item_id"] for s in steps] == [None, None, None]
-    assert ("content", ("QUIZ", "HISTORY", 600)) in ai.calls
+    assert ("content", ("QUIZ", "HISTORY", 300)) in ai.calls
     ctx = ai.calls[-1][1]
     assert ctx.morning_call_type == "CONTENT" and ctx.steps[0].response_type == "SPEECH" and "정답:" in ctx.steps[0].script
-    assert client.get(url(v), headers=auth(USER_A)).json()["session"]["planned_total_sec"] == 600
+    assert client.get(url(v), headers=auth(USER_A)).json()["session"]["planned_total_sec"] == 300
 
 
-def test_rewake_response_end(client, morning, clock):
+def test_response_and_wake_check_success(client, morning, clock):
+    """확인 멘트에 모두 답하고(wake-check) 스누즈·재기상이 없으면 기상 성공, 시각은 첫 응답."""
     v = start(client, morning).json()
-    assert client.post(url(v, "/rewake"), headers=auth(USER_A)).json() == {"rewake_count": 1}
-    assert client.post(url(v, "/rewake"), headers=auth(USER_A)).json() == {"rewake_count": 2}
     clock.now = datetime(2026, 11, 6, 7, 2, tzinfo=KST)
     first = client.post(url(v, "/response"), headers=auth(USER_A)).json()["first_response_at"]
     clock.now = datetime(2026, 11, 6, 7, 4, tzinfo=KST)
-    assert client.post(url(v, "/response"), headers=auth(USER_A)).json()["first_response_at"] == first
+    assert client.post(url(v, "/response"), headers=auth(USER_A)).json()["first_response_at"] == first   # 처음 한 번만
+    s = client.post(url(v, "/wake-check"), headers=auth(USER_A)).json()["session"]
+    assert s["wake_success"] is True and s["wake_checked_at"].startswith("2026-11-06T07:04") and s["first_response_at"] == first
+    client.post(url(v, "/rewake"), headers=auth(USER_A))                         # 판정 뒤의 재기상은 상관없음
     s = client.post(url(v, "/end"), headers=auth(USER_A)).json()["session"]
     assert s["wake_success"] is True and s["session_end_at"].startswith("2026-11-06T07:04")
 
 
-def test_no_response_is_not_wake_success(client, morning):
+def test_rewake_before_check_fails(client, morning):
     v = start(client, morning).json()
-    assert client.post(url(v, "/end"), headers=auth(USER_A)).json()["session"]["wake_success"] is False
+    assert client.post(url(v, "/rewake"), headers=auth(USER_A)).json() == {"rewake_count": 1}
+    client.post(url(v, "/response"), headers=auth(USER_A))
+    s = client.post(url(v, "/wake-check"), headers=auth(USER_A)).json()["session"]
+    assert s["wake_success"] is False and s["wake_checked_at"] is not None       # 실패해도 판정 시각은 남음
+    assert client.post(url(v, "/coaching-token"), headers=auth(USER_A)).status_code == 200   # 브리핑·루틴은 그대로 진행
+
+
+def test_snooze_fails_and_reuses_session(client, morning, clock):
+    v = start(client, morning).json()
+    assert client.post(url(v, "/snooze"), headers=auth(USER_A)).json() == {"snooze_count": 1}
+    assert client.post(url(v, "/snooze"), headers=auth(USER_A)).json() == {"snooze_count": 2}   # 횟수 제한 없음
+    clock.now = datetime(2026, 11, 6, 7, 10, tzinfo=KST)                         # 5분 뒤 다시 울림 → 같은 세션
+    again = start(client, morning).json()["session"]
+    assert again["session_id"] == v["session"]["session_id"] and again["alarm_rang_at"] == v["session"]["alarm_rang_at"]
+    client.post(url(v, "/response"), headers=auth(USER_A))
+    assert client.post(url(v, "/wake-check"), headers=auth(USER_A)).json()["session"]["wake_success"] is False
+
+
+def test_wake_check_is_judged_once(client, morning):
+    v = start(client, morning).json()
+    client.post(url(v, "/response"), headers=auth(USER_A))
+    assert client.post(url(v, "/wake-check"), headers=auth(USER_A)).json()["session"]["wake_success"] is True
+    client.post(url(v, "/snooze"), headers=auth(USER_A))
+    assert client.post(url(v, "/wake-check"), headers=auth(USER_A)).json()["session"]["wake_success"] is True
+
+
+def test_wake_check_fills_missing_first_response(client, morning):
+    v = start(client, morning).json()
+    s = client.post(url(v, "/wake-check"), headers=auth(USER_A)).json()["session"]
+    assert s["wake_success"] is True and s["first_response_at"] == s["wake_checked_at"]
+
+
+def test_end_without_wake_check_is_failure(client, morning):
+    v = start(client, morning).json()
+    client.post(url(v, "/response"), headers=auth(USER_A))                       # 응답은 했지만 확인 멘트를 끝내지 못함
+    s = client.post(url(v, "/end"), headers=auth(USER_A)).json()["session"]
+    assert s["wake_success"] is False and s["wake_checked_at"] is None
 
 
 def test_today_and_isolation(client, morning):
@@ -173,4 +211,40 @@ def test_today_and_isolation(client, morning):
     assert client.get("/morning/sessions/today", headers=auth(USER_A)).json()["session"]["session_id"] == v["session"]["session_id"]
     assert client.get(url(v), headers=auth(USER_B)).status_code == 404
     assert client.post(url(v, "/coaching-token"), headers=auth(USER_B)).status_code == 404
+    assert client.post(url(v, "/snooze"), headers=auth(USER_B)).status_code == 404
+    assert client.post(url(v, "/wake-check"), headers=auth(USER_B)).status_code == 404
     assert start(client, morning, user=USER_B).status_code == 404
+
+
+def test_steps_use_last_night_tomorrow_only_changes(client, morning, clock, ai):
+    items = client.get(f"/alarms/{morning['alarm_id']}/routine-items", headers=auth(USER_A)).json()["items"]
+    clock.now = datetime(2026, 11, 5, 23, 30, tzinfo=KST)
+    ai.routine = RoutineChangeRequest([ItemChange(items[3]["template_item_id"], 0), ItemChange(items[0]["template_item_id"], 60)])
+    client.post("/night/transcript", json={"transcript": TALK}, headers=auth(USER_A))
+    clock.now = FRIDAY_7
+    v = start(client, morning).json()
+    steps = client.post(url(v, "/coaching-token"), headers=auth(USER_A)).json()["steps"]
+    assert [s["step_name"] for s in steps] == ["스트레칭 (축소)", "햇빛 보기", "물 한 잔", "세수·양치", "오늘 할 일 3개 말하기"]
+    assert steps[0]["planned_duration_sec"] == 60
+    # 다음 날(토)은 알람 설정 그대로
+    clock.now = datetime(2026, 11, 7, 7, 0, tzinfo=KST)
+    v2 = start(client, morning).json()
+    assert len(client.post(url(v2, "/coaching-token"), headers=auth(USER_A)).json()["steps"]) == 6
+
+
+def test_today_duration_change(client, morning):
+    v = start(client, morning).json()
+    client.post(url(v, "/coaching-token"), headers=auth(USER_A))
+    r = client.patch(url(v, "/steps/1/duration"), json={"duration_sec": 60}, headers=auth(USER_A)).json()
+    assert r["steps"][0]["planned_duration_sec"] == 60 and r["session"]["planned_total_sec"] == 480
+    r = client.patch(url(v, "/steps/4/duration"), json={"duration_sec": 0}, headers=auth(USER_A)).json()   # 오늘만 빼기
+    assert r["steps"][3]["step_status"] == "SKIPPED" and r["session"]["planned_total_sec"] == 420
+    over = client.patch(url(v, "/steps/2/duration"), json={"duration_sec": 600}, headers=auth(USER_A))    # 420-60+600 = 960
+    assert over.status_code == 422 and over.json()["error"]["code"] == "ROUTINE_OVER_LIMIT"
+    assert client.patch(url(v, "/steps/2/duration"), json={"duration_sec": 45}, headers=auth(USER_A)).status_code == 422
+    done = client.patch(url(v, "/steps/4/duration"), json={"duration_sec": 60}, headers=auth(USER_A))     # 이미 체크한 단계
+    assert done.status_code == 409 and done.json()["error"]["code"] == "STEP_ALREADY_CHECKED"
+    assert client.patch(url(v, "/steps/9/duration"), json={"duration_sec": 60}, headers=auth(USER_A)).status_code == 404
+    assert client.patch(url(v, "/steps/1/duration"), json={"duration_sec": 60}, headers=auth(USER_B)).status_code == 404
+    alarm = client.get(f"/alarms/{morning['alarm_id']}/routine-items", headers=auth(USER_A)).json()
+    assert alarm["total_sec"] == 600                                                        # 알람 설정은 그대로

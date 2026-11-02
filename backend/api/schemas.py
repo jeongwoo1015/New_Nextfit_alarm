@@ -270,6 +270,8 @@ class SessionOut(Out):
     alarm_rang_at: datetime | None
     first_response_at: datetime | None
     rewake_count: int
+    snooze_count: int
+    wake_checked_at: datetime | None    # 확인 멘트를 마친 시각 (이때 기상 성공을 정함)
     wake_success: bool
     session_end_at: datetime | None
 
@@ -296,5 +298,78 @@ class StepStatusIn(BaseModel):
     step_status: Literal[codes.STEP_STATUSES]
 
 
+class StepDurationIn(BaseModel):
+    duration_sec: int = Field(ge=0, multiple_of=30)   # 0 = 오늘만 빼기
+
+
 class RewakeOut(BaseModel):
     rewake_count: int
+
+
+class SnoozeOut(BaseModel):
+    snooze_count: int
+
+
+# ---------- 리포트·일기 ----------
+class TotalsOut(Out):
+    n_sessions: int
+    wake_success_rate: float | None      # 0~1, 기록이 없으면 null
+    avg_wake_clock: str | None           # 평균 기상 시각 "HH:MM" (첫 응답 기준)
+    routine_done: int
+    routine_total: int
+    routine_completion_rate: float | None
+
+
+class BucketOut(TotalsOut):
+    label: str                           # 주: 월~일, 월: 1주~5주, 연: 1월~12월
+    start: date
+    end: date                            # 포함하지 않는 끝 날짜
+
+
+class ReportOut(Out):
+    period: str
+    start: date
+    end: date
+    overall: TotalsOut                   # 화면 상단 도넛: 전체 기간 누적 기상 성공률·루틴 성공률
+    totals: TotalsOut                    # 선택한 기간: 그래프 영역의 평균 기상 시각·루틴 완료율(52/70)
+    series: list[BucketOut]
+    current_streak: int
+    best_streak: int
+
+
+class CalendarDayOut(BaseModel):
+    date: date
+    photo_url: str | None                # 사진을 올린 날 (없으면 루틴 성공률을 보여 준다)
+    routine_completion_rate: float | None
+    routine_done: int
+    routine_total: int
+    has_session: bool
+    has_night_record: bool
+
+
+class DiarySessionOut(BaseModel):
+    session: SessionOut
+    steps: list[StepOut]
+
+
+class DiaryDayOut(BaseModel):
+    date: date
+    summary: TotalsOut
+    night: NightRecordOut | None         # RECORD_DATE = 이 날짜인 밤 기록 (한 줄 일기, 요약, 컨디션)
+    sessions: list[DiarySessionOut]      # SESSION_DATE = 이 날짜인 아침 세션
+    photo_url: str | None
+
+
+class PhotoOut(BaseModel):
+    date: date
+    photo_url: str | None
+
+
+# ---------- AI 음악 ----------
+class MusicOut(BaseModel):
+    music_id: str
+    music_type: str                     # REWAKE / SLEEP
+    genre: str | None                   # REWAKE일 때
+    mood: str | None                    # SLEEP일 때
+    url: str                            # 서명된 임시 URL (music 버킷, mp3)
+    expires_in: int                     # 초. 재기상 음악은 밤에 미리 받아 둘 수 있게 12시간

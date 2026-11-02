@@ -7,11 +7,12 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from backend.clients.ai_gateway import AIGateway, CalendarEvent, LiveToken, NightContext, Persona
-from backend.core.errors import AppError, NotFound, ValidationFailed
+from backend.core.errors import AppError, NotFound, ValidationFailed, check_media_type
 from backend.core.timeutil import now_kst, to_kst
+from backend.domain import codes
 from backend.domain.alarm_rules import pick_override_alarm
 from backend.domain.models import Alarm, NightRecord
-from backend.domain.routine_rules import apply_conversation
+from backend.domain.routine_rules import apply_changes, overrides_of, tomorrow_rows
 from backend.repositories.registry import Repositories
 
 log = logging.getLogger(__name__)
@@ -24,8 +25,8 @@ class ExtractOutcome:
     status: str                                     # DONE / FAILED
     override_alarm_id: str | None = None
     dropped_override: bool = False                  # 변경에 동의했지만 내일 울릴 알람이 없어 저장하지 않음
-    routine_removed: list[str] = field(default_factory=list)
-    routine_restored: list[str] = field(default_factory=list)
+    routine_tomorrow: list[str] = field(default_factory=list)     # 내일만 바꾼 항목 (rs_night_routine_item)
+    routine_always: list[str] = field(default_factory=list)       # 앞으로 계속 바꾼 항목 (알람 설정)
     routine_rejected: list[str] = field(default_factory=list)
     error: str = ""
 
@@ -41,7 +42,8 @@ class NightService:
         return Persona(s.user_call_name, s.tone, s.speech_style, s.voice_type)
 
     def _tomorrow_alarm(self, user_id: str, at: datetime) -> Alarm | None:
-        """하루 한정 변경과 대화로 바꾼 루틴 항목을 적용할 알람 = 밤 기록이 적용되는 아침에 가장 먼저 울리는 알람."""
+        """하루 한정 변경과 대화로 바꾼 루틴 항목을 적용할 알람 = 밤 기록이 적용되는 아침에 가장 먼저 울리는 알람.
+        이 알람을 밤 기록의 OVERRIDE_ALARM_ID로 항상 남긴다(변경값이 없어도) — 내일만 바꾼 항목이 이 알람에 묶이기 때문."""
         return pick_override_alarm(self.r.alarms.list_alarms(user_id), at)
 
     def issue_token(self, user_id: str, events_today: list[CalendarEvent], events_tomorrow: list[CalendarEvent]) -> LiveToken:
@@ -85,25 +87,41 @@ class NightService:
         dropped = wants_override and alarm is None
         if dropped:   # 대상 알람 없이 변경값만 저장할 수 없다 (CHECK rs_night_override_alarm)
             fields.update(override_wake_time=None, override_skip_coaching=False)
-        self.r.nights.save_night_extract(user_id, night_record_id, fields, alarm.alarm_id if alarm and wants_override else None)
+        target = alarm.alarm_id if alarm else None
+        self.r.nights.save_night_extract(user_id, night_record_id, fields, target)
 
-        outcome = ExtractOutcome("DONE", alarm.alarm_id if alarm and wants_override else None, dropped)
+        outcome = ExtractOutcome("DONE", target, dropped)
         if alarm and alarm.morning_call_type == "ROUTINE":
-            outcome = self._apply_routine_changes(user_id, alarm, raw.transcript, outcome)
+            outcome = self._apply_routine_changes(user_id, night_record_id, alarm, raw.transcript, outcome)
         return outcome
 
-    def _apply_routine_changes(self, user_id: str, alarm: Alarm, transcript: list, outcome: ExtractOutcome) -> ExtractOutcome:
-        """루틴 변경은 부가 기능이라 실패해도 밤 기록 저장은 그대로 둔다."""
+    def _apply_routine_changes(self, user_id: str, night_record_id: str, alarm: Alarm, transcript: list,
+                               outcome: ExtractOutcome) -> ExtractOutcome:
+        """대화로 바꾼 루틴 항목을 범위별로 저장한다 (정의서 11/01 변경 범위).
+        앞으로 계속 → 알람 설정(rs_alarm_routine_item), 내일만 → rs_night_routine_item(알람 설정 위에 덮어씀).
+        규칙(30초 단위·합계 상한·최소 한 항목)에 걸리는 요청은 건너뛴다. 실패해도 밤 기록 저장은 그대로 둔다."""
         try:
-            items = self.r.alarms.get_alarm_routine(user_id, alarm.alarm_id) or []
+            items = self.r.nights.get_night_routine(user_id, night_record_id) or []
             req = self.ai.parse_routine_changes(transcript, items)
-            if req.status != "DONE" or not (req.remove or req.restore):
+            if req.status != "DONE" or not req.changes:
                 return outcome
-            change = apply_conversation(items, req.remove, req.restore, self.r.presets.get_app_config().routine_max_sec)
-            if change.removed or change.restored:
-                self.r.alarms.replace_alarm_routine(user_id, alarm.alarm_id, change.overrides)
+            max_sec = self.r.presets.get_app_config().routine_max_sec
+            always = [(c.template_item_id, c.duration_sec) for c in req.changes if c.scope == "ALWAYS"]
+            tomorrow = [(c.template_item_id, c.duration_sec) for c in req.changes if c.scope != "ALWAYS"]
+            done_always, done_tomorrow, rejected = [], [], []
+            if always:
+                r = apply_changes(self.r.alarms.get_alarm_routine(user_id, alarm.alarm_id) or [], always, max_sec)
+                if r.applied:
+                    self.r.alarms.replace_alarm_routine(user_id, alarm.alarm_id, overrides_of(r.items))
+                done_always, rejected = r.applied, rejected + r.rejected
+            if tomorrow:   # 알람 설정이 바뀌었을 수 있으니 다시 읽는다
+                r = apply_changes(self.r.nights.get_night_routine(user_id, night_record_id) or [], tomorrow, max_sec,
+                                  restore_to_alarm=True)
+                if r.applied:
+                    self.r.nights.replace_night_routine(user_id, night_record_id, tomorrow_rows(r.items))
+                done_tomorrow, rejected = r.applied, rejected + r.rejected
             return ExtractOutcome(outcome.status, outcome.override_alarm_id, outcome.dropped_override,
-                                  change.removed, change.restored, change.rejected)
+                                  done_tomorrow, done_always, rejected)
         except AppError as e:
             log.warning("루틴 변경 반영 실패 user=%s alarm=%s: %s", user_id, alarm.alarm_id, e.message)
             return outcome
@@ -120,13 +138,14 @@ class NightService:
             raise NotFound("그날 밤 기록이 없어요", "NIGHT_RECORD_NOT_FOUND")
         return rec
 
-    def save_voice(self, user_id: str, night_record_id: str, data: bytes) -> NightRecord:
+    def save_voice(self, user_id: str, night_record_id: str, data: bytes, content_type: str | None = "audio/mp4") -> NightRecord:
         """AI가 "한 번 더 말해 달라"고 해 녹음한 목소리 → voice/{user_id}/{record_date}.m4a"""
         rec = self.get_record(user_id, night_record_id)
         if not data:
             raise ValidationFailed("목소리 파일이 비어 있어요")
         if len(data) > MAX_VOICE_BYTES:
             raise ValidationFailed(f"목소리 파일은 {MAX_VOICE_BYTES // (1024 * 1024)}MB 이하여야 해요")
+        check_media_type(content_type, codes.VOICE_MIME_TYPES)
         self.r.storage.upload_voice(user_id, rec.record_date, data)
         self.r.nights.set_voice_path(user_id, night_record_id)
         return self.get_record(user_id, night_record_id)

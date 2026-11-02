@@ -52,5 +52,5 @@ def get_record_by_date(record_date: date, user_id: str = Depends(current_user_id
             openapi_extra={"requestBody": {"content": {"audio/mp4": {"schema": {"type": "string", "format": "binary"}}}}})
 async def put_voice(night_record_id: str, request: Request, user_id: str = Depends(current_user_id),
                     svc: NightService = Depends(night_service)):
-    """목소리 파일(m4a)을 본문 그대로 보낸다 (Content-Type: audio/mp4). 다시 올리면 덮어쓴다."""
-    return _record(svc, svc.save_voice(user_id, night_record_id, await request.body()))
+    """목소리 파일(m4a)을 본문 그대로 보낸다 (Content-Type: audio/mp4·audio/x-m4a·audio/m4a·audio/aac). 다시 올리면 덮어쓴다."""
+    return _record(svc, svc.save_voice(user_id, night_record_id, await request.body(), request.headers.get("content-type")))

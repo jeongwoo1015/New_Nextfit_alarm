@@ -5,7 +5,7 @@ from datetime import date, timedelta
 
 from backend.core.errors import ValidationFailed
 from backend.core.timeutil import apply_date, now_kst, record_date
-from backend.domain.models import (Alarm, AppConfig, DiaryPhoto, MorningSession, NightRaw, NightRecord, RecentRecords,
+from backend.domain.models import (AiMusic, Alarm, AppConfig, DiaryPhoto, MorningSession, NightRaw, NightRecord, RecentRecords,
                                    RoutineTemplate, SessionStep, StrategyLog, TemplateItem, User, UserSetting)
 from backend.domain.routine_rules import build_routine
 
@@ -55,6 +55,7 @@ class MemoryPresetRepository:
         self.templates = {t.template_id: t for t in templates}
         self.items = {i.template_item_id: i for i in items}
         self.config = config or AppConfig()
+        self.music: list[AiMusic] = []                # rs_ai_music (테스트에서 채운다)
 
     def list_templates(self, active_only=True):
         return [t for t in self.templates.values() if t.is_active or not active_only]
@@ -69,7 +70,9 @@ class MemoryPresetRepository:
         return self.config
 
     def pick_music(self, music_type, genre=None, mood=None):
-        return None
+        found = [m for m in self.music if m.music_type == music_type and (genre is None or m.genre == genre)
+                 and (mood is None or m.mood == mood)]
+        return found[0] if found else None             # Supabase 구현은 같은 조건에서 무작위 1개
 
 
 class MemoryAlarmRepository:
@@ -77,6 +80,7 @@ class MemoryAlarmRepository:
         self.alarms: dict[str, Alarm] = {}
         self.overrides: dict[str, dict[str, int]] = {}    # alarm_id → {template_item_id: duration_sec} (rs_alarm_routine_item)
         self._presets = presets
+        self.nights = None                                # MemoryNightRepository (트리거 흉내용, memory_repositories가 연결)
 
     def _own(self, user_id, alarm_id):
         a = self.alarms.get(alarm_id)
@@ -101,6 +105,8 @@ class MemoryAlarmRepository:
         alarm = replace(current, updated_at=now_kst(), **changes)
         if alarm.template_id != current.template_id:          # DB 트리거 rs_alarm_template_changed
             self.overrides.pop(alarm_id, None)
+            if self.nights:
+                self.nights.clear_night_items_for_alarm(alarm_id)
         self.alarms[alarm_id] = alarm
         return alarm
 
@@ -108,6 +114,9 @@ class MemoryAlarmRepository:
         if self._own(user_id, alarm_id):
             del self.alarms[alarm_id]
             self.overrides.pop(alarm_id, None)                # ON DELETE CASCADE
+            if self.nights:                                   # rs_alarm_clear_overrides + FK SET NULL
+                self.nights.clear_night_items_for_alarm(alarm_id)
+                self.nights.detach_alarm(alarm_id)
 
     def get_alarm_routine(self, user_id, alarm_id):
         alarm = self._own(user_id, alarm_id)
@@ -132,10 +141,12 @@ class MemoryAlarmRepository:
 class MemoryNightRepository:
     """rs_night_record + rs_night_raw. record_date·apply_date는 DB 트리거처럼 저장 시각(clock)으로 계산한다."""
 
-    def __init__(self, clock=now_kst):
+    def __init__(self, clock=now_kst, alarms=None):
         self.records: dict[str, NightRecord] = {}
         self.raws: dict[str, NightRaw] = {}
+        self.night_items: dict[str, dict[str, int]] = {}  # night_record_id → {template_item_id: duration_sec} (rs_night_routine_item)
         self.clock = clock
+        self._alarms = alarms
 
     def _own(self, user_id, night_record_id):
         r = self.records.get(night_record_id)
@@ -158,6 +169,8 @@ class MemoryNightRepository:
         rec = self._own(user_id, night_record_id)
         if (fields.get("override_wake_time") or fields.get("override_skip_coaching")) and not override_alarm_id:
             raise ValidationFailed("하루 한정 변경에는 대상 알람이 필요해요")   # CHECK rs_night_override_alarm
+        if rec.override_alarm_id != override_alarm_id:        # 트리거 rs_night_alarm_changed
+            self.night_items.pop(night_record_id, None)
         rec = replace(rec, **{**fields, "tomorrow_notes": tuple(fields.get("tomorrow_notes") or ())},
                       override_alarm_id=override_alarm_id, extract_status="DONE", updated_at=self.clock())
         self.records[night_record_id] = rec
@@ -173,6 +186,37 @@ class MemoryNightRepository:
 
     def get_night_raw(self, night_record_id):
         return self.raws.get(night_record_id)
+
+    def get_night_routine(self, user_id, night_record_id):
+        rec = self._own(user_id, night_record_id)
+        if not rec:
+            return None
+        items = self._alarms.get_alarm_routine(user_id, rec.override_alarm_id) if rec.override_alarm_id else None
+        tomorrow = self.night_items.get(night_record_id, {})
+        return [replace(i, duration_sec=tomorrow.get(i.template_item_id, i.duration_sec), alarm_duration_sec=i.duration_sec)
+                for i in (items or [])]
+
+    def replace_night_routine(self, user_id, night_record_id, overrides):
+        items = self.get_night_routine(user_id, night_record_id)
+        if items is None:
+            return None
+        alarm_sec = {i.template_item_id: i.alarm_duration_sec for i in items}
+        rows = {k: v for k, v in overrides.items() if alarm_sec.get(k) != v}     # 알람 설정과 같은 값은 행 없음
+        if rows:
+            self.night_items[night_record_id] = rows
+        else:
+            self.night_items.pop(night_record_id, None)
+        return self.get_night_routine(user_id, night_record_id)
+
+    def clear_night_items_for_alarm(self, alarm_id):
+        for r in self.records.values():
+            if r.override_alarm_id == alarm_id:
+                self.night_items.pop(r.night_record_id, None)
+
+    def detach_alarm(self, alarm_id):
+        for k, r in list(self.records.items()):
+            if r.override_alarm_id == alarm_id:
+                self.records[k] = replace(r, override_alarm_id=None, override_wake_time=None, override_skip_coaching=False)
 
     def list_failed_extracts(self, limit):
         return [(r.user_id, r.night_record_id) for r in self.records.values() if r.extract_status == "FAILED"][:limit]
@@ -228,6 +272,11 @@ class MemorySessionRepository:
         self.sessions[session_id] = replace(s, **changes)
         return self.sessions[session_id]
 
+    def add_snooze(self, user_id, session_id):
+        s = self._own(user_id, session_id)
+        self.sessions[session_id] = replace(s, snooze_count=s.snooze_count + 1)
+        return s.snooze_count + 1
+
     def add_rewake(self, user_id, session_id):
         s = self._own(user_id, session_id)
         self.sessions[session_id] = replace(s, rewake_count=s.rewake_count + 1)
@@ -244,6 +293,15 @@ class MemorySessionRepository:
                                p.planned_duration_sec, p.step_detail)
             self.steps[step.step_id] = step
         return self.list_steps(user_id, session_id)
+
+    def update_step_duration(self, user_id, session_id, step_order, duration_sec):
+        if duration_sec <= 0:
+            raise ValidationFailed("단계 시간은 0보다 커야 해요. 오늘 빼려면 SKIPPED로 바꿔 주세요")
+        step = next((s for s in self.list_steps(user_id, session_id) if s.step_order == step_order), None)
+        if not step:
+            return None
+        self.steps[step.step_id] = replace(step, planned_duration_sec=duration_sec)
+        return self.steps[step.step_id]
 
     def list_steps(self, user_id, session_id):
         return sorted((s for s in self.steps.values() if s.session_id == session_id and s.user_id == user_id),
@@ -314,7 +372,15 @@ class MemoryStorageClient:
         return sorted((p for (u, d), p in self.photos.items() if u == user_id and since <= d <= until), key=lambda p: p.diary_date)
 
     def signed_url(self, bucket, path, expires_in=3600):
+        if (bucket, path) not in self.files:
+            return None                                       # 없는 파일 (Supabase 구현과 같음)
         return f"memory://{bucket}/{path}?expires_in={expires_in}"
+
+    def delete_files(self, bucket, paths):
+        removed = [k for k in ((bucket, p) for p in paths) if k in self.files]
+        for k in removed:
+            del self.files[k]
+        return len(removed)
 
     def delete_user_files(self, user_id):
         keys = [k for k in self.files if k[1].startswith(f"{user_id}/")]
@@ -327,7 +393,9 @@ def memory_repositories(seed: bool = True, config: AppConfig | None = None, cloc
     from .registry import Repositories
     templates, items = seed_templates() if seed else ([], [])
     presets = MemoryPresetRepository(templates, items, config)
-    nights = MemoryNightRepository(clock)
-    return Repositories(users=MemoryUserRepository(), presets=presets, alarms=MemoryAlarmRepository(presets),
+    alarms = MemoryAlarmRepository(presets)
+    nights = MemoryNightRepository(clock, alarms)
+    alarms.nights = nights
+    return Repositories(users=MemoryUserRepository(), presets=presets, alarms=alarms,
                         nights=nights, sessions=MemorySessionRepository(nights),
                         personalization=MemoryPersonalizationRepository(), storage=MemoryStorageClient())

@@ -57,35 +57,42 @@ def apply_durations(items: Iterable[AlarmRoutineItem], durations: Mapping[str, i
 
 
 @dataclass(frozen=True)
-class ConversationChange:
-    overrides: dict[str, int]          # 저장할 새 행
-    removed: list[str]                 # 실제로 뺀 항목
-    restored: list[str]                # 실제로 다시 넣은 항목
-    rejected: list[str]                # 규칙에 걸려 반영하지 않은 항목 (모두 빼기, 상한 초과, 모르는 항목)
+class ChangeResult:
+    items: list[AlarmRoutineItem]      # 적용한 뒤의 항목
+    applied: list[str]                 # 반영한 항목
+    rejected: list[str]                # 규칙에 걸려 반영하지 않은 항목 (모두 빼기, 상한 초과, 단위, 모르는 항목)
 
 
-def apply_conversation(items: Iterable[AlarmRoutineItem], remove: Iterable[str], restore: Iterable[str],
-                       max_sec: int) -> ConversationChange:
-    """밤 대화에서 "스트레칭 빼줘 / 다시 넣어줘" (AI parse_routine_changes의 remove·restore). items는 현재 알람 항목.
-
-    빼기 = 0초, 다시 넣기 = 기본 시간(행 삭제). 하나씩 적용하며 규칙에 걸리는 요청은 건너뛴다
-    (예: 다른 항목을 늘려 둔 상태에서 다시 넣으면 상한을 넘는 경우).
-    """
+def apply_changes(items: Iterable[AlarmRoutineItem], changes: Iterable[tuple[str, int | None]], max_sec: int,
+                  restore_to_alarm: bool = False) -> ChangeResult:
+    """대화로 바꾼 항목 시간을 하나씩 적용한다. 값 None = 되돌리기(앞으로 계속이면 프리셋 기본 시간,
+    내일만이면 알람 설정 시간 — restore_to_alarm). 규칙에 걸리는 요청은 건너뛴다
+    (예: 다른 항목을 늘려 둔 상태에서 다시 넣으면 상한을 넘는 경우)."""
     current = list(items)
     known = {r.template_item_id for r in current}
-    removed, restored, rejected = [], [], []
-    for item_id, action in [(i, "remove") for i in remove] + [(i, "restore") for i in restore]:
+    applied, rejected = [], []
+    for item_id, sec in changes:
         if item_id not in known:
             rejected.append(item_id)
             continue
-        trial = [replace(r, duration_sec=0 if action == "remove" else r.default_duration_sec) if r.template_item_id == item_id else r
-                 for r in current]
+
+        def target(r):
+            if sec is not None:
+                return sec
+            return r.alarm_duration_sec if restore_to_alarm and r.alarm_duration_sec is not None else r.default_duration_sec
+
+        trial = [replace(r, duration_sec=target(r)) if r.template_item_id == item_id else r for r in current]
         try:
             check_routine(trial, max_sec)
         except ValidationFailed:
             rejected.append(item_id)
             continue
         current = trial
-        (removed if action == "remove" else restored).append(item_id)
-    return ConversationChange(overrides_of(current), removed, restored, rejected)
+        applied.append(item_id)
+    return ChangeResult(current, applied, rejected)
 
+
+def tomorrow_rows(items: Iterable[AlarmRoutineItem]) -> dict[str, int]:
+    """내일만 저장할 행 = 알람 설정 시간과 다른 항목만 (rs_night_routine_item)."""
+    return {r.template_item_id: r.duration_sec for r in items
+            if r.alarm_duration_sec is not None and r.duration_sec != r.alarm_duration_sec}

@@ -139,8 +139,49 @@ def test_night(repos, uid, other, alarm):
     assert repos.nights.save_night_extract(other, nid, {"tomorrow_goal": "x"}, None) is None
     assert repos.nights.set_voice_path(uid, nid) == f"{uid}/{rec.record_date.isoformat()}.m4a"
 
+    db = repos.users.db                                                              # 30일 정리: 만료일을 과거로
+    db.table("rs_night_raw").update({"expires_at": "2026-01-01T00:00:00+09:00", "audio_path": f"{uid}/x.m4a"}) \
+      .eq("night_record_id", nid).execute()
+    assert f"{uid}/x.m4a" in repos.nights.purge_expired_raw(now_kst())
+    raw = repos.nights.get_night_raw(nid)
+    assert raw.transcript is None and raw.audio_path is None
+    assert repos.nights.get_night(uid, nid).tomorrow_goal == "발표"                 # 요약은 남는다
 
-def test_session_and_steps(repos, uid, other, alarm):
+
+def test_night_routine_tomorrow_only(repos, uid, other, alarm):
+    """밤 대화로 내일 하루만 항목 시간 바꾸기·빼기. 알람 설정은 그대로 남는다."""
+    items = repos.alarms.get_alarm_routine(uid, alarm.alarm_id)
+    stretch, bed = items[0].template_item_id, items[3].template_item_id
+    repos.alarms.replace_alarm_routine(uid, alarm.alarm_id, {stretch: 300})          # 알람 설정: 스트레칭 5분(합계 720)
+    nid = repos.nights.save_night_raw(uid, [{"role": "user", "text": "내일 스트레칭 줄여 줘", "at": ""}], None, None)
+    assert repos.nights.get_night_routine(uid, nid) == []                           # 대상 알람이 아직 없음
+    with pytest.raises(ValidationFailed):
+        repos.nights.replace_night_routine(uid, nid, {stretch: 180})
+    repos.nights.save_night_extract(uid, nid, {}, alarm.alarm_id)
+
+    tomorrow = repos.nights.replace_night_routine(uid, nid, {stretch: 180, bed: 0})   # 내일만 3분, 이불 정리 빼기
+    assert sum(i.duration_sec for i in tomorrow) == 720 - 120 - 60
+    assert sum(i.duration_sec for i in repos.alarms.get_alarm_routine(uid, alarm.alarm_id)) == 720   # 알람 설정은 그대로
+    rows = repos.users.db.table("rs_night_routine_item").select("template_item_id").eq("night_record_id", nid).execute().data
+    assert len(rows) == 2
+    assert len(repos.nights.replace_night_routine(uid, nid, {stretch: 300})) == 6     # 알람 설정과 같은 값은 저장 안 함
+    assert repos.users.db.table("rs_night_routine_item").select("template_item_id").eq("night_record_id", nid).execute().data == []
+
+    with pytest.raises(ValidationFailed) as e:
+        repos.nights.replace_night_routine(uid, nid, {i.template_item_id: 180 for i in items})
+    assert e.value.code == "ROUTINE_OVER_LIMIT"
+    with pytest.raises(ValidationFailed) as e:
+        repos.nights.replace_night_routine(uid, nid, {i.template_item_id: 0 for i in items})
+    assert e.value.code == "ROUTINE_ALL_REMOVED"
+    assert repos.nights.replace_night_routine(other, nid, {stretch: 60}) is None
+    assert repos.nights.get_night_routine(other, nid) is None
+
+    repos.nights.replace_night_routine(uid, nid, {stretch: 120})
+    repos.alarms.update_alarm(uid, alarm.alarm_id, {"template_id": M})                # 알람 프리셋이 바뀌면 내일 변경도 무효
+    assert repos.users.db.table("rs_night_routine_item").select("template_item_id").eq("night_record_id", nid).execute().data == []
+
+
+def test_session_and_steps(repos, uid, other, alarm, monkeypatch):
     today = now_kst().date()
     snap = SessionSnapshot(uid, alarm.alarm_id, today, "ROUTINE", N, None, None, time(7, 0), time(7, 0))
     s = repos.sessions.get_or_create_session(snap)
@@ -159,13 +200,32 @@ def test_session_and_steps(repos, uid, other, alarm):
     assert done.step_status == "DONE" and done.checked_at
     assert repos.sessions.save_step(other, steps[1]) is None
 
+    changed = repos.sessions.update_step_duration(uid, s.session_id, 2, 30)          # 코칭 중 "오늘 좀 적게"
+    assert changed.planned_duration_sec == 30 and changed.step_status == "PENDING"
+    assert repos.sessions.update_step_duration(other, s.session_id, 2, 30) is None
+    assert repos.sessions.update_step_duration(uid, s.session_id, 99, 30) is None
+    with pytest.raises(ValidationFailed):
+        repos.sessions.update_step_duration(uid, s.session_id, 2, 0)
+
     assert repos.sessions.add_rewake(uid, s.session_id) == 1
     assert repos.sessions.add_rewake(uid, s.session_id) == 2
-    s2 = repos.sessions.update_session(uid, s.session_id, {"planned_total_sec": 300, "wake_success": True})
-    assert (s2.planned_total_sec, s2.wake_success) == (300, True)
+    assert repos.sessions.add_snooze(uid, s.session_id) == 1
+    assert repos.sessions.add_snooze(uid, s.session_id) == 2
+    checked = now_kst()
+    s2 = repos.sessions.update_session(uid, s.session_id, {"planned_total_sec": 300, "wake_success": True,
+                                                           "wake_checked_at": checked})
+    assert (s2.planned_total_sec, s2.wake_success, s2.rewake_count, s2.snooze_count) == (300, True, 2, 2)
+    assert abs((s2.wake_checked_at - checked).total_seconds()) < 1
 
     rec = repos.sessions.recent_records(uid, today - timedelta(days=7), today + timedelta(days=1))
     assert len(rec.sessions) == 1 and len(rec.steps) == 2
+    assert [p.step_order for p in rec.steps] == [1, 2]
+
+    import backend.repositories.supabase as sb                                      # 한 번에 1행씩 받아도 끝까지 받는다
+    monkeypatch.setattr(sb, "PAGE", 1)
+    paged = repos.sessions.recent_records(uid, today - timedelta(days=7), today + timedelta(days=1))
+    assert [p.step_id for p in paged.steps] == [p.step_id for p in rec.steps]
+    assert repos.sessions.recent_records(uid, today + timedelta(days=1), today + timedelta(days=2)).steps == []
 
 
 def test_content_step_detail(repos, uid):
@@ -201,6 +261,14 @@ def test_storage(repos, uid):
     assert repos.storage.upload_photo(uid, d, b"\xff\xd8\xff\xd9").diary_photo_id == photo.diary_photo_id   # 덮어쓰기
     assert [p.diary_date for p in repos.storage.list_photos(uid, date(2026, 11, 1), date(2026, 11, 30))] == [d]
     assert repos.storage.signed_url("photo", photo.photo_path, 60).startswith("http")
+    assert repos.storage.signed_url("photo", f"{uid}/1999-01-01.jpg", 60) is None              # 없는 파일
+
+    with pytest.raises(ValidationFailed):                                                      # 버킷 제한: 10MB 초과
+        repos.storage.upload_voice(uid, d, b"\x00" * (10 * 1024 * 1024 + 1))
+    with pytest.raises(ValidationFailed):                                                      # 버킷 제한: jpeg가 아닌 형식
+        repos.storage._upload("photo", f"{uid}/2026-11-02.jpg", b"\x89PNG", "image/png")
+    path = repos.storage.upload_voice(uid, d, b"\x00\x00")
+    assert repos.storage.delete_files("voice", [path]) == 1
     repos.storage.upload_voice(uid, d, b"\x00\x00")
     assert repos.storage.delete_user_files(uid) == 2
 

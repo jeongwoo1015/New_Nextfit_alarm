@@ -1,11 +1,12 @@
-from dataclasses import dataclass
-from datetime import date, time
+from dataclasses import dataclass, replace
+from datetime import date, datetime, time
 
 import pytest
 
-from backend.domain.models import Alarm, AppConfig, NightRecord
+from backend.core.timeutil import KST
+from backend.domain.models import Alarm, AppConfig, MorningSession, NightRecord
 from backend.domain.routine_rules import build_routine
-from backend.domain.session_rules import (content_duration_sec, content_steps, planned_total_sec, resolve_snapshot,
+from backend.domain.session_rules import (content_duration_sec, content_steps, judge_wake, planned_total_sec, resolve_snapshot,
                                           routine_steps)
 from backend.repositories.seed import seed_templates, template_id
 
@@ -81,5 +82,14 @@ def test_content_alarm_snapshot_and_fixed_duration():
     a = Alarm("a2", "u1", time(6, 30), "CONTENT", content_type="QUIZ", content_option="HISTORY")
     s = resolve_snapshot(a, None, TODAY)
     assert (s.morning_call_type, s.template_id, s.content_type, s.content_option) == ("CONTENT", None, "QUIZ", "HISTORY")
-    assert content_duration_sec(AppConfig()) == 600                     # 팀 확정 전 기본안
+    assert content_duration_sec(AppConfig()) == 300                     # 팀 확정 5분
     assert content_duration_sec(AppConfig(content_duration_sec=480)) == 480
+
+
+def test_judge_wake():
+    base = MorningSession("s", "u1", "a1", TODAY, "ROUTINE", template_id("N"), None, None, time(7), time(7),
+                          first_response_at=datetime(2026, 11, 2, 7, 3, tzinfo=KST))
+    assert judge_wake(base) is True
+    assert judge_wake(replace(base, snooze_count=1)) is False                  # 스누즈 한 번이라도
+    assert judge_wake(replace(base, rewake_count=1)) is False                  # 무응답으로 재기상 음악
+    assert judge_wake(replace(base, first_response_at=None)) is False

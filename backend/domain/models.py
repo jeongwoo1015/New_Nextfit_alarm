@@ -86,6 +86,7 @@ class AlarmRoutineItem:
     """알람에서 실제로 쓰는 항목 = 프리셋 항목 + 알람별 설정(RS_ALARM_ROUTINE_ITEM). 0초면 뺀 항목.
 
     DB 함수 rs_alarm_routine_items(alarm_id)의 한 줄 + default_duration_sec.
+    내일만 바꾼 값을 덮어쓴 목록(rs_night_routine_items)이면 alarm_duration_sec에 알람 설정 시간이 들어 있다.
     """
     template_item_id: str
     item_order: int
@@ -94,6 +95,7 @@ class AlarmRoutineItem:
     duration_sec: int
     response_type: str = "PLAY"
     script: str | None = None
+    alarm_duration_sec: int | None = None      # 내일만 목록에서: 알람 설정 시간 (내일만 저장은 이 값과 다른 항목만)
 
     @property
     def customized(self) -> bool:
@@ -168,6 +170,8 @@ class MorningSession:
     alarm_rang_at: datetime | None = None
     first_response_at: datetime | None = None
     rewake_count: int = 0
+    snooze_count: int = 0                  # "5분 뒤 다시 울리기" 횟수 (11/01 기상 성공 기준, DB 컬럼 추가 요청)
+    wake_checked_at: datetime | None = None  # 브리핑 전 확인 멘트를 모두 마친 시각 = 기상 성공 판정 시점 (DB 컬럼 추가 요청)
     wake_success: bool = False
     session_end_at: datetime | None = None
 

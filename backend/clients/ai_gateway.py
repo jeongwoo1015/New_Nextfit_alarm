@@ -132,10 +132,20 @@ class NightExtract:
     error: str = ""
 
 
+SCOPES = ("TOMORROW", "ALWAYS")        # 내일만(밤 대화 기본) / 앞으로 계속(사용자가 그렇게 말했을 때)
+
+
+@dataclass(frozen=True)
+class ItemChange:
+    """밤 대화로 바꾼 루틴 항목 하나. duration_sec: 0 = 빼기, None = 되돌리기."""
+    template_item_id: str
+    duration_sec: int | None
+    scope: str = "TOMORROW"
+
+
 @dataclass(frozen=True)
 class RoutineChangeRequest:
-    remove: list[str] = field(default_factory=list)    # 뺄 template_item_id
-    restore: list[str] = field(default_factory=list)   # 다시 넣을 template_item_id
+    changes: list[ItemChange] = field(default_factory=list)
     status: str = "DONE"
     note: str = ""
 
@@ -175,6 +185,19 @@ def _wake(v) -> time | None:
         return time(int(h), int(m))
     except ValueError:
         return None
+
+
+def to_item_changes(res) -> list[ItemChange]:
+    """AI parse_routine_changes 결과 → ItemChange 목록. 새 형식(changes: [{template_item_id, duration_sec, scope}])과
+    지금 형식(remove·restore)을 모두 받는다. 빼기를 먼저 적용해야 다시 넣을 때 상한에 덜 걸린다."""
+    if getattr(res, "changes", None):
+        out = []
+        for c in res.changes:
+            get = c.get if isinstance(c, dict) else lambda k, d=None, c=c: getattr(c, k, d)
+            scope = str(get("scope") or "TOMORROW").upper()
+            out.append(ItemChange(str(get("template_item_id")), get("duration_sec"), scope if scope in SCOPES else "TOMORROW"))
+        return out
+    return [ItemChange(i, 0) for i in getattr(res, "remove", [])] + [ItemChange(i, None) for i in getattr(res, "restore", [])]
 
 
 def to_night_record_fields(row: dict) -> dict:
@@ -228,9 +251,11 @@ class RealAIGateway:
         return NightExtract(res.status, to_night_record_fields(res.to_row()), res.error)
 
     def parse_routine_changes(self, transcript: list, items: list[AlarmRoutineItem]) -> RoutineChangeRequest:
+        """items = 내일 진행할 항목(알람 설정 + 내일만 바꾼 값). AI가 범위·시간(changes)을 주면 그대로,
+        지금처럼 빼기·다시 넣기만 주면 정의서 기본값인 '내일만'으로 바꾼다(빼기 = 0초, 다시 넣기 = 알람 설정대로)."""
         from ai.tasks.routine_changes import RoutineItem, parse_routine_changes
         res = parse_routine_changes(transcript, [RoutineItem(i.template_item_id, i.item_name, i.duration_sec > 0) for i in items], self.llm)
-        return RoutineChangeRequest(list(res.remove), list(res.restore), res.status, res.note)
+        return RoutineChangeRequest(to_item_changes(res), res.status, res.note)
 
     # ---------- 아침 ----------
     @staticmethod

@@ -1,7 +1,9 @@
 import pytest
 
 from backend.core.errors import ValidationFailed
-from backend.domain.routine_rules import apply_conversation, apply_durations, build_routine
+from dataclasses import replace
+
+from backend.domain.routine_rules import apply_changes, apply_durations, build_routine, overrides_of, tomorrow_rows
 from backend.repositories.seed import seed_templates, template_id
 
 _, ITEMS = seed_templates()
@@ -42,17 +44,25 @@ def test_apply_durations_rejects(durations, code):
     assert e.value.code == code
 
 
-def test_conversation_remove_and_restore():
-    c = apply_conversation(Q, remove=[STRETCH], restore=[], max_sec=900)
-    assert c.overrides == {STRETCH: 0} and c.removed == [STRETCH]
-    c = apply_conversation(build_routine(Q_ITEMS, c.overrides), remove=[], restore=[STRETCH], max_sec=900)
-    assert c.overrides == {} and c.restored == [STRETCH]
+def test_always_changes_remove_shorten_restore():
+    r = apply_changes(Q, [(STRETCH, 0), (CARDIO, 300)], max_sec=900)
+    assert r.applied == [STRETCH, CARDIO] and overrides_of(r.items) == {STRETCH: 0, CARDIO: 300}
+    r = apply_changes(r.items, [(STRETCH, None)], max_sec=900)                     # 되돌리기 = 프리셋 기본 시간
+    assert overrides_of(r.items) == {CARDIO: 300}
 
 
-def test_conversation_skips_requests_that_break_rules():
-    c = apply_conversation(Q, remove=[STRETCH, WATER, CARDIO, "nope"], restore=[], max_sec=900)
-    assert c.removed == [STRETCH, WATER] and c.rejected == [CARDIO, "nope"]          # 마지막 항목은 남김
-    # 유산소를 늘려 둔 상태(0+60+840=900)에서 스트레칭을 다시 넣으면 1080초 → 반영하지 않음
-    c = apply_conversation(build_routine(Q_ITEMS, {STRETCH: 0, CARDIO: 840}), remove=[], restore=[STRETCH], max_sec=900)
-    assert c.rejected == [STRETCH] and c.overrides == {STRETCH: 0, CARDIO: 840}
+def test_changes_skip_requests_that_break_rules():
+    r = apply_changes(Q, [(STRETCH, 0), (WATER, 0), (CARDIO, 0), ("nope", 0), (WATER, 45)], max_sec=900)
+    assert r.applied == [STRETCH, WATER] and r.rejected == [CARDIO, "nope", WATER]   # 마지막 항목은 남김, 30초 단위
+    # 유산소를 늘려 둔 상태(0+60+840=900)에서 스트레칭을 되돌리면 1080초 → 반영하지 않음
+    r = apply_changes(build_routine(Q_ITEMS, {STRETCH: 0, CARDIO: 840}), [(STRETCH, None)], max_sec=900)
+    assert r.rejected == [STRETCH] and overrides_of(r.items) == {STRETCH: 0, CARDIO: 840}
 
+
+def test_tomorrow_changes_are_relative_to_alarm_setting():
+    alarm = build_routine(Q_ITEMS, {CARDIO: 420})                                  # 알람 설정: 유산소 7분
+    night = [replace(i, alarm_duration_sec=i.duration_sec) for i in alarm]          # 내일만 목록 (아직 바꾼 것 없음)
+    r = apply_changes(night, [(STRETCH, 60), (WATER, 0)], max_sec=900, restore_to_alarm=True)
+    assert tomorrow_rows(r.items) == {STRETCH: 60, WATER: 0}
+    r = apply_changes(r.items, [(WATER, None), (CARDIO, 420)], max_sec=900, restore_to_alarm=True)
+    assert tomorrow_rows(r.items) == {STRETCH: 60}                                   # 되돌리기 = 알람 설정 시간
