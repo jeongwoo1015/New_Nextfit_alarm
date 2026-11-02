@@ -24,8 +24,8 @@ private const val TAG = "Live"
 class LiveAudioOut {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var track: AudioTrack? = null
-    private var queue = Channel<ByteArray>(Channel.UNLIMITED)
-    private var job: Job? = null
+    @Volatile private var queue = Channel<ByteArray>(Channel.UNLIMITED)
+    @Volatile private var job: Job? = null
 
     private val queuedBytes = AtomicLong(0)
     @Volatile private var playUntilMs = 0L     // 지금까지 보낸 소리가 끝나는 예상 시각
@@ -88,8 +88,9 @@ class LiveAudioOut {
 
     /** 서버에서 받은 PCM 조각을 재생 대기열에 넣음 (바로 반환) */
     fun write(pcm: ByteArray) {
+        if (job == null) return     // 정지 후 늦게 도착한 조각은 버림 (isSpeaking이 계속 true로 남지 않도록)
         queuedBytes.addAndGet(pcm.size.toLong())
-        queue.trySend(pcm)
+        if (queue.trySend(pcm).isFailure) queuedBytes.addAndGet(-pcm.size.toLong())
     }
 
     /** 끼어들기: 대기 중인 소리와 재생 버퍼를 모두 버림 */

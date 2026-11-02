@@ -30,8 +30,9 @@ private const val TAG = "Live"
 /**
  * Gemini Live 통화 한 건을 관리: 연결, 마이크 송신, AI 음성 재생, 자막, 끼어들기, 함수 호출, 재연결.
  *
- * 사용 순서: LiveClient(context) → onToolCall 지정 → start(setup, kickoff) → ... → stop() → release()
+ * 사용 순서: LiveClient(context) → onToolCall 지정 → start { 서버에서 토큰 받기 } → ... → stop() → release()
  * 화면은 status / aiSpeaking / userLevel / transcript / toolLog / message 를 collect 해서 그림.
+ * 같은 LiveClient로 stop() 뒤 다른 토큰으로 다시 start() 할 수 있음 (브리핑 → 코칭 전환).
  */
 class LiveClient(context: Context) {
     enum class Status { Idle, Connecting, Live, Reconnecting, Error, Ended }
@@ -63,7 +64,11 @@ class LiveClient(context: Context) {
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
-    var onToolCall: (FunctionCall) -> JSONObject = { JSONObject().put("ok", true) }
+    /**
+     * 함수 호출 처리. 돌려준 값을 functionResponse.response로 그대로 보냄.
+     * null을 돌려주면 응답을 보내지 않음 (end_session, start_routine — AI CONTRACTS 2-3).
+     */
+    var onToolCall: suspend (FunctionCall) -> JSONObject? = { JSONObject().put("result", "ok") }
 
     /** 통화 시작/종료 시각 */
     var startedAtMs: Long = 0L
@@ -71,10 +76,8 @@ class LiveClient(context: Context) {
     var endedAtMs: Long = 0L
         private set
 
-    private lateinit var baseSetup: LiveSetup
-    private var kickoff: String? = null
-    private var kickoffSent = false
-    private var lastHandle: String? = null
+    private var tokens: suspend () -> LiveAuth? = { null }
+    @Volatile private var startSignal: String? = null
     private var micStarted = false
     private var tickerJob: Job? = null
 
@@ -88,15 +91,13 @@ class LiveClient(context: Context) {
 
     // ---------------- 외부에서 쓰는 함수 ----------------
 
-    /** 통화 시작. */
-    fun start(setup: LiveSetup, kickoffText: String? = null) {
+    /** 통화 시작. tokenSource는 연결(재연결 포함)할 때마다 불러 새 1회용 토큰을 받음. */
+    fun start(tokenSource: suspend () -> LiveAuth?) {
         val s = _status.value
         if (s == Status.Connecting || s == Status.Live || s == Status.Reconnecting) return
 
-        baseSetup = setup
-        kickoff = kickoffText
-        kickoffSent = false
-        lastHandle = null
+        tokens = tokenSource
+        startSignal = null
         stopping = false
         micStarted = false
         _transcript.value = emptyList()
@@ -150,14 +151,15 @@ class LiveClient(context: Context) {
         if (routed) applySpeaker()
     }
 
-    /** 테스트용 텍스트 입력 */
+    /** 말 대신 버튼으로 대답할 때. 음성 받아쓰기에 잡히지 않으므로 대화 원문에 직접 넣음. */
     fun sendText(text: String) {
-        session.sendText(text)
+        if (session.sendText(text)) appendLine(Role.User, text)
     }
 
-    /** 테스트용: 연결을 강제로 끊어 재연결 경로를 시험 */
-    fun debugDropConnection() {
-        session.debugDrop()
+    /** AI가 하던 말(남은 음성)을 다 재생할 때까지 기다림. end_session 뒤 작별 인사를 끝까지 들려주기 위함. */
+    suspend fun awaitSpeechEnd(maxWaitMs: Long = 8_000L) {
+        delay(600)      // 함수 호출 직후 도착하는 마지막 음성 조각을 기다림
+        withTimeoutOrNull(maxWaitMs) { _aiSpeaking.first { !it } }
     }
 
     /** 서버 저장용 대화 원문: [{role, text, at}] (RS_NIGHT_RAW.TRANSCRIPT 형식) */
@@ -180,13 +182,21 @@ class LiveClient(context: Context) {
     // ---------------- 연결 / 재연결 ----------------
 
     private suspend fun connectOnce(): Boolean {
-        val auth = LiveTokenProvider.fetch()
+        val auth = try {
+            tokens()
+        } catch (e: Exception) {
+            Log.w(TAG, "토큰 요청 실패: ${e.message}")
+            _message.value = e.message
+            null
+        }
+        if (stopping) return false
         if (auth == null) {
-            _message.value = "토큰을 받지 못했어요"
+            if (_message.value == null) _message.value = "서버에서 통화 토큰을 받지 못했어요"
             return false
         }
         connectOutcome.tryReceive()      // 이전 연결의 잔여 결과 버리기
-        session.connect(auth, baseSetup.copy(resumeHandle = lastHandle), ::onEvent)
+        startSignal = auth.startSignal
+        session.connect(auth, ::onEvent)
         val ok = withTimeoutOrNull(LiveConfig.SETUP_TIMEOUT_MS) { connectOutcome.receive() } == true
         if (!ok && _message.value == null) _message.value = "연결 시간이 초과되었어요"
         return ok
@@ -198,7 +208,7 @@ class LiveClient(context: Context) {
         scope.launch {
             try {
                 _status.value = Status.Reconnecting
-                Log.w(TAG, "재연결 시작 (handle=${lastHandle != null})")
+                Log.w(TAG, "재연결 시작 (새 토큰)")
                 if (maxWaitMs > 0) withTimeoutOrNull(maxWaitMs) { _aiSpeaking.first { !it } }
 
                 var ok = false
@@ -232,11 +242,8 @@ class LiveClient(context: Context) {
                 _status.value = Status.Live
                 connectOutcome.trySend(true)
                 ensureMic()
-                // 첫 연결에서만 AI가 먼저 말을 걸도록 함. (재개된 세션에는 보내지 않음)
-                if (!kickoffSent) {
-                    kickoffSent = true
-                    kickoff?.let { session.sendText(it) }
-                }
+                // 토큰마다 새 세션이므로 연결될 때마다 시작 신호를 보냄. 사용자 말이 아니라 받아쓰기에 넣지 않음.
+                startSignal?.takeIf { it.isNotBlank() }?.let { session.sendText(it) }
             }
 
             is LiveEvent.Audio -> audioOut.write(e.pcm)
@@ -244,7 +251,6 @@ class LiveClient(context: Context) {
             is LiveEvent.OutputText -> append(Role.Assistant, e.text)
             LiveEvent.Interrupted -> audioOut.clear()
             LiveEvent.TurnComplete -> Unit
-            is LiveEvent.ResumptionHandle -> lastHandle = e.handle
             is LiveEvent.GoAway -> reconnect(maxOf(e.timeLeftMs - 8_000L, 0L))
             is LiveEvent.Failure -> _message.value = e.message
 
@@ -255,18 +261,23 @@ class LiveClient(context: Context) {
             }
 
             is LiveEvent.ToolCall -> scope.launch {
-                val results = e.calls.map { call ->
+                val results = e.calls.mapNotNull { call ->
                     _toolLog.update { it + "${call.name}(${call.args})" }
                     val out = try {
                         onToolCall(call)
                     } catch (ex: Exception) {
                         JSONObject().put("error", ex.message ?: "error")
                     }
-                    ToolResult(call.id, call.name, JSONObject().put("result", out))
+                    out?.let { ToolResult(call.id, call.name, it) }
                 }
-                session.sendToolResponse(results)
+                if (results.isNotEmpty() && !stopping) session.sendToolResponse(results)
             }
         }
+    }
+
+    /** 버튼 대답처럼 따로 들어온 말은 앞 줄에 이어 붙이지 않고 새 줄로 넣음 */
+    private fun appendLine(role: Role, text: String) {
+        _transcript.update { it + Line(role, text, System.currentTimeMillis()) }
     }
 
     private fun append(role: Role, text: String) {

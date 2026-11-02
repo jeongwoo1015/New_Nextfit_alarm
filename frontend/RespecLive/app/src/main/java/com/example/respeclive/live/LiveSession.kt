@@ -2,6 +2,7 @@ package com.example.respeclive.live
 
 import android.util.Base64
 import android.util.Log
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -18,13 +19,15 @@ data class FunctionCall(val id: String, val name: String, val args: JSONObject)
 
 class ToolResult(val id: String, val name: String, val response: JSONObject)
 
-/** 세션 설정. */
-data class LiveSetup(
-    val systemPrompt: String,
-    val tools: JSONArray? = null,
-    val voice: String = LiveConfig.VOICE,
-    val model: String = LiveConfig.MODEL,
-    val resumeHandle: String? = null
+/**
+ * 서버(POST /night/token, /morning/sessions/{id}/briefing-token, coaching-token)가 발급한 1회용 임시 토큰.
+ * 지시문·함수 선언·목소리는 토큰에 고정돼 있어 앱은 model만 보낸다. 재연결할 때는 새 토큰을 받아야 한다.
+ */
+class LiveAuth(
+    val token: String,
+    val wsUrl: String,
+    val model: String,
+    val startSignal: String     // 연결 직후 realtimeInput.text로 보내는 시작 신호 (받아쓰기에 넣지 않음)
 )
 
 sealed interface LiveEvent {
@@ -36,7 +39,6 @@ sealed interface LiveEvent {
     object TurnComplete : LiveEvent
     class ToolCall(val calls: List<FunctionCall>) : LiveEvent
     class GoAway(val timeLeftMs: Long) : LiveEvent      // 곧 연결이 끊긴다는 예고
-    class ResumptionHandle(val handle: String) : LiveEvent
     class Closed(val code: Int, val reason: String) : LiveEvent
     class Failure(val message: String) : LiveEvent
 }
@@ -55,19 +57,20 @@ class LiveSession {
     val isReady: Boolean get() = ready
 
     @Synchronized
-    fun connect(auth: LiveAuth, setup: LiveSetup, onEvent: (LiveEvent) -> Unit) {
+    fun connect(auth: LiveAuth, onEvent: (LiveEvent) -> Unit) {
         close()
         val gen = ++generation
-        val url = when (auth) {
-            is LiveAuth.ApiKey -> LiveConfig.URL_API_KEY + auth.key
-            is LiveAuth.Ephemeral -> LiveConfig.URL_EPHEMERAL + auth.token
-        }
+        // OkHttp는 ws(s)://도 받지만 쿼리를 안전하게 붙이려고 http(s)로 바꿔서 조립
+        val url = auth.wsUrl.replaceFirst(Regex("^ws", RegexOption.IGNORE_CASE), "http").toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("access_token", auth.token)
+            .build()
 
         val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (gen != generation) return
-                Log.d(TAG, "ws 연결됨 → setup 전송 (model=${setup.model}, resume=${setup.resumeHandle != null})")
-                webSocket.send(buildSetup(setup).toString())
+                Log.d(TAG, "ws 연결됨 → setup 전송 (model=${auth.model})")
+                webSocket.send(buildSetup(auth.model).toString())
             }
 
             // 서버는 JSON을 텍스트 또는 바이너리 프레임으로 보낼 수 있어 둘 다 처리
@@ -109,11 +112,6 @@ class LiveSession {
         ready = false
         socket?.close(1000, "bye")
         socket = null
-    }
-
-    /** 테스트용: 연결을 비정상적으로 끊어 재연결 경로를 시험 */
-    fun debugDrop() {
-        socket?.cancel()
     }
 
     // ---------------- 보내기 ----------------
@@ -158,34 +156,10 @@ class LiveSession {
 
     // ---------------- 설정 / 받기 ----------------
 
-    private fun buildSetup(s: LiveSetup): JSONObject {
-        val voice = JSONObject().put(
-            "voiceConfig",
-            JSONObject().put("prebuiltVoiceConfig", JSONObject().put("voiceName", s.voice))
-        )
-        val setup = JSONObject()
-            .put("model", "models/${s.model}")
-            .put(
-                "generationConfig",
-                JSONObject()
-                    .put("responseModalities", JSONArray().put("AUDIO"))
-                    .put("speechConfig", voice)
-            )
-            .put(
-                "systemInstruction",
-                JSONObject().put("parts", JSONArray().put(JSONObject().put("text", s.systemPrompt)))
-            )
-            .put("inputAudioTranscription", JSONObject())      // 사용자 말 받아쓰기
-            .put("outputAudioTranscription", JSONObject())     // AI 말 받아쓰기 (자막)
-            .put("contextWindowCompression", JSONObject().put("slidingWindow", JSONObject()))
-
-        // 세션 재개: 핸들을 주면 이전 대화를 이어서 시작
-        val resumption = JSONObject()
-        s.resumeHandle?.let { resumption.put("handle", it) }
-        setup.put("sessionResumption", resumption)
-
-        s.tools?.let { setup.put("tools", it) }
-        return JSONObject().put("setup", setup)
+    /** 나머지 설정은 토큰에 고정돼 있으므로 model만 보낸다 (AI CONTRACTS 2-1). */
+    private fun buildSetup(model: String): JSONObject {
+        val name = if (model.startsWith("models/")) model else "models/$model"
+        return JSONObject().put("setup", JSONObject().put("model", name))
     }
 
     private fun handle(raw: String, emit: (LiveEvent) -> Unit) {
@@ -236,11 +210,6 @@ class LiveSession {
             val ms = parseDurationMs(it.optString("timeLeft"))
             Log.w(TAG, "goAway timeLeft=${ms}ms")
             emit(LiveEvent.GoAway(ms))
-        }
-
-        msg.optJSONObject("sessionResumptionUpdate")?.let { u ->
-            val handle = u.optString("newHandle")
-            if (u.optBoolean("resumable") && handle.isNotEmpty()) emit(LiveEvent.ResumptionHandle(handle))
         }
     }
 

@@ -25,7 +25,13 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField("String", "GEMINI_DEV_KEY", "\"${localProps.getProperty("GEMINI_DEV_KEY", "")}\"")
+        // Gemini 키는 서버에만 둔다 (앱은 서버가 발급한 1회용 Live 토큰으로 연결)
+        fun local(name: String) = "\"${localProps.getProperty(name, "")}\""
+        buildConfigField("String", "API_BASE_URL", local("API_BASE_URL"))
+        buildConfigField("String", "SUPABASE_URL", local("SUPABASE_URL"))
+        buildConfigField("String", "SUPABASE_ANON_KEY", local("SUPABASE_ANON_KEY"))
+        buildConfigField("String", "SUPABASE_DEV_EMAIL", local("SUPABASE_DEV_EMAIL"))
+        buildConfigField("String", "SUPABASE_DEV_PASSWORD", local("SUPABASE_DEV_PASSWORD"))
     }
 
     buildTypes {
@@ -55,7 +61,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation(libs.androidx.compose.material.icons.extended)
+    implementation(libs.androidx.navigation.compose)
+    implementation(libs.okhttp)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
