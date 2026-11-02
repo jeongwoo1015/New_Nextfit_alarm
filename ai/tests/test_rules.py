@@ -106,7 +106,7 @@ def test_night_override_proposal_may_use_three_sentences():
 
 
 # ---------- 브리핑 ----------
-WAKE_Q = "예준 님 좋은 아침이에요. 일어났어요?"
+WAKE_Q = "예준 님 좋은 아침이에요. 잘 주무셨어요?"
 BRIEF = ("지금 7시 2분이에요. 오늘은 비가 오니 우산을 챙기세요. 오전 9시 반에 주간 회의가 있어요. "
          "어젯밤 정리한 컨디션을 생각해 부담 없이 시작해요. 이제 아침 루틴을 시작할 준비가 됐어요?")
 
@@ -122,12 +122,27 @@ def test_briefing_passes():
     assert not failed(r) and not failed(r, SOFT)
 
 
-def test_briefing_must_ask_wake_first_then_brief():
+def test_briefing_must_ask_one_check_question_first_then_brief():
     s = scn("briefing")
     direct = log("briefing", [T("좋은 아침이에요. 오늘은 비가 와요. 우산을 챙기세요. 일정이 있어요. 힘내요.")])
-    assert "브리핑: 먼저 일어났는지만 묻기" in failed(check(direct, s))
+    assert "브리핑: 확인 질문 하나만 묻기" in failed(check(direct, s))
     no_brief = log("briefing", [T(WAKE_Q)])
-    assert "브리핑: 일어났다는 답 뒤에 브리핑함" in failed(check(no_brief, s))
+    assert "브리핑: 확인 질문에 답한 뒤 브리핑함" in failed(check(no_brief, s))
+    name = "브리핑: 확인 질문 하나만 묻기"
+    assert name not in failed(check(briefing_log(), s))
+    assert name in failed(check(log("briefing", [T("잘 주무셨어요? 지금 몸은 좀 깼어요?"), T(BRIEF, heard="네")]), s))      # 한 번에 두 가지
+    assert name in failed(check(log("briefing", [T("오늘 날씨가 궂은데 잘 주무셨어요?"), T(BRIEF, heard="네")]), s))          # 날씨를 섞음
+
+
+def test_sleepy_answer_still_counts_as_answer():
+    sleepy = [T(WAKE_Q), T(BRIEF, heard="음... 아직 졸려요"), T("좋아요, 시작해요.", [START], heard="네 준비됐어요")]
+    assert not failed(check(log("briefing", sleepy, "start_routine"), scn("briefing", expect_start=True)))
+
+
+def test_briefing_must_not_call_a_wake_function():
+    called = briefing_log()
+    called.turns[1].calls.append({"name": "wake_check_done", "args": {}})          # 기상 확인은 앱이 판단한다: 알 수 없는 함수 호출은 실패
+    assert "함수 호출 형식" in failed(check(called, scn("briefing")))
 
 
 def test_briefing_no_alarm_words_and_question_rules():
@@ -228,11 +243,11 @@ def test_scenarios_build_valid_setup(name):
     setup = build_setup(s.kind, s.inp)
     assert setup["systemInstruction"]["parts"][0]["text"]
     assert isinstance(s.inp, {"night": NightInput, "briefing": BriefingInput}.get(s.kind, object))
-    assert s.utterances                                              # 새 흐름에서는 브리핑도 사용자 답(일어났어/준비됐어)이 필요하다
+    assert s.utterances                                              # 새 흐름에서는 브리핑도 사용자 답(확인 질문 답/준비됐어)이 필요하다
     if s.expect.get("farewell"):
         assert s.utterances[-1] and any(w in s.utterances[-1] for w in ("잘게", "끊을게", "끝낼게"))   # 끝내는 쪽은 항상 사용자
     if s.kind == "briefing":
-        assert "일어났" in s.utterances[0] and len(s.utterances) == 2                                    # 일어났어요 + (준비됐어요 또는 작별)
+        assert len(s.utterances) == 2                                                                    # 확인 질문 답 + (준비됐어요 또는 작별)
     if s.kind == "coaching":
         n = len(s.inp.steps)
         assert set(s.expect["verdicts"]) == {st.order for st in s.inp.steps} and len(s.utterances) == n + 1   # 단계 수 + (작별 인사 또는 루틴 준비)

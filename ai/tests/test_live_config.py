@@ -85,7 +85,8 @@ def test_briefing_contents():
     assert "[기상 알람]" not in p and "알람 시각이나 알람이 울렸다는 말은 하지 않는다" in p     # 이미 일어난 뒤라 알람 시각은 말하지 않는다
     assert "컨디션: 피곤함, 지침" in p
     assert "'현실 모닝루틴' 시작할 준비가 됐는지 묻는" in p and "start_routine" in p
-    assert "일어났는지 묻는 한 문장만 말하고 멈춘다" in p and "일어났다고 답하기 전에는 브리핑을 시작하지 않는다" in p
+    assert "확인 질문 한 개를 한 문장으로 하고 멈춘다" in p and "사용자가 답하기 전에는 브리핑으로 넘어가지 않는다" in p
+    assert "wake_check_done" not in p                     # 기상 확인은 앱이 사용자의 첫 대답으로 판단한다(함수 호출 없음)
 
 
 def test_briefing_without_weather_or_night():
@@ -189,13 +190,13 @@ def test_night_flow_new_design():
 
 def test_briefing_flow_new_design():
     p = briefing_prompt(BriefingInput(program_name="현실 모닝루틴", now_hhmm="07:02", events_today=EVENTS))
-    assert p.index("일어났는지 묻는 한 문장만 말하고 멈춘다") < p.index("준비가 됐는지 묻는 질문")
+    assert p.index("확인 질문 한 개를 한 문장으로") < p.index("준비가 됐는지 묻는 질문")
     assert "start_routine을 호출하지 않는다" in p and "4~6문장" in p
     assert "대화는 사용자가 끝낸다" in p
 
 
 def test_start_signals_updated():
-    assert "일어났는지만 묻고" in start_signal("briefing")
+    assert "확인 질문 하나만 하고" in start_signal("briefing")
 
 
 def test_briefing_ready_question_and_start_are_separate_turns():

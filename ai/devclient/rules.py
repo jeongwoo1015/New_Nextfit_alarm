@@ -119,11 +119,11 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
     elif kind == "briefing":
         skipped = bool(e.get("coaching_skipped"))      # 코칭을 안 하는 날은 브리핑만 한다
         first = texts[0] if texts else ""
-        add("브리핑: 먼저 일어났는지만 묻기", HARD, first.count("?") == 1 and len(sentences(first)) <= 2 and not re.search(r"날씨|일정|우산", first), first)
-        add("브리핑: 일어났다는 답 전에 시작하지 않음", HARD, "start_routine" not in _names(turns[0]) if turns else True, "")
+        add("브리핑: 확인 질문 하나만 묻기", HARD, first.count("?") == 1 and len(sentences(first)) <= 2 and not re.search(r"날씨|일정|우산", first), first)
+        add("브리핑: 확인 질문 답 전에 시작하지 않음", HARD, "start_routine" not in _names(turns[0]) if turns else True, "")
         brief = texts[1] if len(texts) > 1 else ""
         n = len(sentences(brief))
-        add("브리핑: 일어났다는 답 뒤에 브리핑함", HARD, bool(brief.strip()), "브리핑이 없음")
+        add("브리핑: 확인 질문에 답한 뒤 브리핑함", HARD, bool(brief.strip()), "브리핑이 없음")
         if brief.strip():
             add("브리핑: 알람 시각·알람 언급 없음", HARD, not ALARM_WORDS.search(brief), brief)
             short = bool(e.get("short_briefing"))       # 전략이 '짧게'인 날은 2~3문장(+준비 확인 질문)
