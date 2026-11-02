@@ -9,7 +9,7 @@ from ..tasks.routine_changes import RoutineItem
 
 EVENTS = (CalendarEvent("주간 회의", "09:30", "10:30"), CalendarEvent("발표 리허설", "15:00", "16:00"),
           CalendarEvent("치과", "18:30", "19:30"))
-WEATHER = Weather("비", temp_c=11, high_c=14, low_c=8, precip_prob=80)
+WEATHER = Weather("비", temp_c=11, high_c=14, low_c=8, precip_prob=80, location_name="광진구")
 NIGHT_REC = NightRecordView(ai_summary="회의가 많아 피곤했지만 발표 준비를 마무리함", tomorrow_goal="발표 잘 마치기",
                             tomorrow_notes=("오전 10시 반 치과",), condition_label="TIRED", condition_text="지쳤지만 뿌듯함",
                             encouragement="오늘도 수고 많았어요", insight="준비한 만큼 충분히 해낼 수 있어요")
@@ -33,11 +33,11 @@ def _night(**kw):
                       tomorrow_coaching_min=20, **kw)
 
 
-QUIZ = fallback_steps("QUIZ", "GENERAL", 10)
+QUIZ = fallback_steps("QUIZ", "GENERAL")
 COACH_STEPS = (Step(1, "물 한 잔", 60, "QA"), Step(2, "스트레칭", 120, "PLAY", "1. 목을 천천히 좌우로 돌려요.\n2. 어깨를 크게 돌려요."),
                Step(3, "오늘 할 일 3개 말하기", 120, "SPEECH"))
 
-COACH_STEPS_AFTER_CONTENT = tuple(Step(s.order + 3, s.name, s.planned_sec, s.response_type, s.script) for s in COACH_STEPS)   # 콘텐츠 3단계 뒤에 이어지는 루틴 단계 번호
+COACH_STEPS_RESUMED = tuple(Step(s.order + 3, s.name, s.planned_sec, s.response_type, s.script) for s in COACH_STEPS)   # 재연결: 앞 3단계를 끝내고 남은 단계 (번호가 4부터)
 
 SCENARIOS = {s.name: s for s in [
     Scenario("night_events", "night", _night(events_today=EVENTS),
@@ -64,39 +64,34 @@ SCENARIOS = {s.name: s for s in [
              expect={"routine_remove": ["id-read"], "farewell": True, "extract": {"override_wake_time": None}}),
     Scenario("briefing_full", "briefing",
              BriefingInput(persona=Persona("예준", "FORMAL", "KIND"), morning_call_type="ROUTINE", program_name="현실 모닝루틴",
-                           coaching_min=20, now_hhmm="07:02", events_today=EVENTS, weather=WEATHER, night=NIGHT_REC),
+                           now_hhmm="07:02", events_today=EVENTS, weather=WEATHER, night=NIGHT_REC),
              ("응 일어났어요", "네 준비됐어요"),
-             expect={"coaching_min": 20, "weather_words": ["비", "우산"], "event_words": ["회의", "리허설"], "now_words": ["7시", "일곱"], "expect_start": True}),
+             expect={"weather_words": ["비", "우산"], "location_words": ["광진구"], "event_words": ["회의", "리허설"], "now_words": ["7시", "일곱"], "expect_start": True}),
     Scenario("briefing_to_content", "briefing",
-             BriefingInput(persona=Persona("예준", "FORMAL", "KIND"), program_name="현실 모닝루틴", coaching_min=20, content_name="퀴즈", routine_follows=True,
+             BriefingInput(persona=Persona("예준", "FORMAL", "KIND"), morning_call_type="CONTENT", content_name="퀴즈",
                            now_hhmm="07:02", events_today=EVENTS, weather=WEATHER, night=NIGHT_REC),
              ("응 일어났어요", "네 퀴즈 시작할 준비됐어요"),
-             expect={"coaching_min": 20, "weather_words": ["비", "우산"], "event_words": ["회의", "리허설"], "now_words": ["7시", "일곱"],
+             expect={"weather_words": ["비", "우산"], "event_words": ["회의", "리허설"], "now_words": ["7시", "일곱"],
                      "ready_words": ["퀴즈"], "expect_start": True}),
     Scenario("briefing_casual_nocoach", "briefing",
-             BriefingInput(persona=Persona("예준", "CASUAL", "FIRM", "MALE"), morning_call_type="CONTENT", program_name="퀴즈",
-                           coaching_min=0, now_hhmm="07:02", events_today=EVENTS, weather=WEATHER, night=None),
+             BriefingInput(persona=Persona("예준", "CASUAL", "FIRM", "MALE"), morning_call_type="CONTENT", content_name="퀴즈",
+                           coaching_skipped=True, now_hhmm="07:02", events_today=EVENTS, weather=WEATHER, night=None),
              ("응 일어났어", "고마워 이만 끊을게"), tone="CASUAL",
-             expect={"coaching_min": 0, "weather_words": ["비", "우산"], "event_words": ["회의", "리허설"], "now_words": ["7시", "일곱"], "farewell": True}),
+             expect={"coaching_skipped": True, "weather_words": ["비", "우산"], "event_words": ["회의", "리허설"], "now_words": ["7시", "일곱"], "farewell": True}),
     Scenario("briefing_no_data", "briefing",
-             BriefingInput(persona=Persona("예준"), morning_call_type="ROUTINE", program_name="현실 모닝루틴", coaching_min=20, now_hhmm="07:02"),
+             BriefingInput(persona=Persona("예준"), morning_call_type="ROUTINE", program_name="현실 모닝루틴", now_hhmm="07:02"),
              ("응 일어났어요", "네 준비됐어요"),
-             expect={"coaching_min": 20, "now_words": ["7시", "일곱"], "expect_start": True}),
+             expect={"now_words": ["7시", "일곱"], "expect_start": True}),
     Scenario("coaching_routine", "coaching", CoachingInput(persona=Persona("예준"), steps=COACH_STEPS, night=NIGHT_REC),
              ("물 한 잔 마셨어요", "스트레칭은 오늘 건너뛸게요", "오늘 할 일은 보고서 쓰기, 운동하기, 장보기예요", "고마워요 이만 끝낼게요"),
              expect={"verdicts": {1: "done", 2: "skipped", 3: "done"}, "step_names": [s.name for s in COACH_STEPS], "farewell": True}),
-    Scenario("content_session_then_routine", "coaching",
-             CoachingInput(persona=Persona("예준"), morning_call_type="CONTENT", steps=tuple(QUIZ), routine_follows=True, next_program_name="현실 모닝루틴"),
-             ("서울이에요", "열두 달이요", "세종대왕이요", "네 루틴 시작할 준비됐어요"),
-             expect={"verdicts": {1: "done", 2: "done", 3: "done"}, "step_names": [s.name for s in QUIZ], "answers": ["서울", "열두 달", "세종대왕"],
-                     "routine_follows": True, "expect_start": True}),
-    Scenario("content_session_only", "coaching",
-             CoachingInput(persona=Persona("예준"), morning_call_type="CONTENT", steps=tuple(QUIZ), routine_follows=False),
+    Scenario("content_session", "coaching",
+             CoachingInput(persona=Persona("예준"), morning_call_type="CONTENT", steps=tuple(QUIZ)),
              ("서울이에요", "열두 달이요", "세종대왕이요", "고마워요 이만 끝낼게요"),
              expect={"verdicts": {1: "done", 2: "done", 3: "done"}, "step_names": [s.name for s in QUIZ], "answers": ["서울", "열두 달", "세종대왕"], "farewell": True}),
-    Scenario("coaching_after_content", "coaching", CoachingInput(persona=Persona("예준"), steps=COACH_STEPS_AFTER_CONTENT, night=NIGHT_REC),
+    Scenario("coaching_resumed", "coaching", CoachingInput(persona=Persona("예준"), steps=COACH_STEPS_RESUMED, resumed=True, night=NIGHT_REC),
              ("물 한 잔 마셨어요", "스트레칭은 오늘 건너뛸게요", "오늘 할 일은 보고서 쓰기, 운동하기, 장보기예요", "고마워요 이만 끝낼게요"),
-             expect={"verdicts": {4: "done", 5: "skipped", 6: "done"}, "step_names": [s.name for s in COACH_STEPS_AFTER_CONTENT], "farewell": True}),
+             expect={"verdicts": {4: "done", 5: "skipped", 6: "done"}, "step_names": [s.name for s in COACH_STEPS_RESUMED], "farewell": True}),
     Scenario("coaching_quiz", "coaching", CoachingInput(persona=Persona("예준"), steps=tuple(QUIZ)),
              ("서울이에요", "열두 달이요", "세종대왕이요", "고마워요 이만 끝낼게요"),
              expect={"verdicts": {1: "done", 2: "done", 3: "done"}, "step_names": [s.name for s in QUIZ],

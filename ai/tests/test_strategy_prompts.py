@@ -43,7 +43,7 @@ def test_short_strategy_replaces_the_length_rule_instead_of_stacking_two():
 
 
 def test_short_with_no_coaching_day_keeps_closing_rule():
-    p = briefing_prompt(BriefingInput(coaching_min=0, strategy_block=SHORT))
+    p = briefing_prompt(BriefingInput(coaching_skipped=True, strategy_block=SHORT))
     assert LENGTH_SHORT in p and "코칭을 하지 않는 날" in p
 
 
@@ -92,8 +92,8 @@ SHORT_BRIEF = "지금 7시 2분이에요. 오늘은 비가 오니 우산을 챙�
 
 
 def test_short_briefing_range_is_applied_only_when_flagged():
-    flagged = scn("briefing", coaching_min=20, short_briefing=True)
-    normal = scn("briefing", coaching_min=20)
+    flagged = scn("briefing", short_briefing=True)
+    normal = scn("briefing")
     assert not failed(check(briefing_log(SHORT_BRIEF), flagged))                       # 3문장: 짧은 날엔 통과
     assert "브리핑: 4~7문장(마지막은 준비 확인 질문)" in failed(check(briefing_log(SHORT_BRIEF), normal))   # 기본 날엔 그대로 실패
     assert not failed(check(briefing_log(BRIEF), normal))
@@ -101,9 +101,9 @@ def test_short_briefing_range_is_applied_only_when_flagged():
 
 
 def test_short_briefing_without_coaching():
-    flagged = scn("briefing", coaching_min=0, short_briefing=True)
+    flagged = scn("briefing", coaching_skipped=True, short_briefing=True)
     ok = "지금 7시 2분이에요. 오늘은 비가 오니 우산을 챙기세요. 좋은 하루 보내세요."
     r = check(log("briefing", [T(WAKE_Q), T(ok, heard="응 일어났어요")]), flagged)
     assert not any("문장" in x for x in failed(r))
     r = check(log("briefing", [T(WAKE_Q), T(ok + " 힘내요. 잘될 거예요. 파이팅이에요.", heard="응 일어났어요")]), flagged)
-    assert "브리핑: 코칭 0분이면 2~3문장, 질문 없음" in failed(r)
+    assert "브리핑: 코칭 안 하는 날이면 2~3문장, 질문 없음" in failed(r)

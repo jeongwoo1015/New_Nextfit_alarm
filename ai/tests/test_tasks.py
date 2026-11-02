@@ -2,7 +2,7 @@
 import pytest
 
 from ai.tasks import music
-from ai.tasks.content_steps import (CONTENT_OPTIONS, compose_content_steps, fallback_steps, validate_steps, _fit_seconds)
+from ai.tasks.content_steps import (CONTENT_OPTIONS, CONTENT_TOTAL_SEC, compose_content_steps, fallback_steps, validate_steps, _fit_seconds)
 from ai.tasks.llm import GeminiText, HTTPFailure, LLMError, parse_json, response_text
 from ai.tasks.night_record import EMPTY, extract_night_record
 from ai.tasks.routine_changes import RoutineItem, parse_routine_changes
@@ -135,11 +135,10 @@ def quiz_steps(n=5, secs=100):
     return {"steps": [{"name": f"퀴즈 {i}번", "seconds": secs, "response_type": "SPEECH", "script": f"문제: Q{i}\n정답: A{i}"} for i in range(1, n + 1)]}
 
 
-def test_content_steps_sum_equals_coaching_length():
-    for minutes in (10, 20):
-        r = compose_content_steps("QUIZ", "HISTORY", minutes, FakeLLM(quiz_steps(5, 77)))
-        assert r.source == "ai" and sum(s.planned_sec for s in r.steps) == minutes * 60
-        assert [s.order for s in r.steps] == [1, 2, 3, 4, 5] and all(s.planned_sec >= 10 for s in r.steps)
+def test_content_steps_sum_equals_fixed_five_minutes():
+    r = compose_content_steps("QUIZ", "HISTORY", FakeLLM(quiz_steps(5, 77)))
+    assert r.source == "ai" and sum(s.planned_sec for s in r.steps) == CONTENT_TOTAL_SEC == 300
+    assert [s.order for s in r.steps] == [1, 2, 3, 4, 5] and all(s.planned_sec >= 10 for s in r.steps)
 
 
 def test_fit_seconds_exact_and_min():
@@ -148,45 +147,37 @@ def test_fit_seconds_exact_and_min():
         assert sum(out) == 600 and min(out) >= 10
 
 
-def test_content_zero_minutes_no_steps_and_no_call():
-    llm = FakeLLM(quiz_steps())
-    assert compose_content_steps("QUIZ", "GENERAL", 0, llm).steps == [] and llm.calls == 0
-
-
 def test_content_invalid_input():
     with pytest.raises(ValueError):
-        compose_content_steps("DANCE", None, 10, FakeLLM({}))
-    with pytest.raises(ValueError):
-        compose_content_steps("QUIZ", None, 15, FakeLLM({}))
+        compose_content_steps("DANCE", None, FakeLLM({}))
 
 
 def test_content_falls_back_when_ai_fails():
     llm = FakeLLM(LLMError("503"))
-    r = compose_content_steps("QUIZ", "GENERAL", 10, llm)
-    assert r.source == "fallback" and llm.calls == 2 and len(r.steps) == 3 and sum(s.planned_sec for s in r.steps) == 600
+    r = compose_content_steps("QUIZ", "GENERAL", llm)
+    assert r.source == "fallback" and llm.calls == 2 and len(r.steps) == 3 and sum(s.planned_sec for s in r.steps) == 300
     assert all("문제:" in s.script and "정답:" in s.script for s in r.steps)
 
 
 def test_content_falls_back_on_bad_shape():
     bad_quiz = {"steps": [{"name": "퀴즈 1번", "seconds": 300, "response_type": "SPEECH", "script": "그냥 문제"},
                           {"name": "퀴즈 2번", "seconds": 300, "response_type": "SPEECH", "script": "그냥 문제2"}]}
-    assert compose_content_steps("QUIZ", None, 10, FakeLLM(bad_quiz)).source == "fallback"
-    assert compose_content_steps("EXERCISE", "STRETCH", 10, FakeLLM({"steps": [{"name": "x", "seconds": 600, "script": "y"}]})).source == "fallback"  # 1단계뿐
+    assert compose_content_steps("QUIZ", None, FakeLLM(bad_quiz)).source == "fallback"
+    assert compose_content_steps("EXERCISE", "STRETCH", FakeLLM({"steps": [{"name": "x", "seconds": 600, "script": "y"}]})).source == "fallback"  # 1단계뿐
 
 
 def test_content_unknown_response_type_gets_default():
     data = {"steps": [{"name": "목 돌리기", "seconds": 300, "response_type": "???", "script": "돌려요"},
                       {"name": "어깨", "seconds": 300, "script": "돌려요"}]}
-    steps = compose_content_steps("EXERCISE", "STRETCH", 10, FakeLLM(data)).steps
+    steps = compose_content_steps("EXERCISE", "STRETCH", FakeLLM(data)).steps
     assert [s.response_type for s in steps] == ["PLAY", "PLAY"]
 
 
 @pytest.mark.parametrize("ctype", CONTENT_OPTIONS)
-@pytest.mark.parametrize("minutes", (10, 20))
-def test_every_fallback_is_valid(ctype, minutes):
+def test_every_fallback_is_valid(ctype):
     for option in (*CONTENT_OPTIONS[ctype], None):
-        steps = fallback_steps(ctype, option, minutes)
-        assert len(steps) >= 2 and sum(s.planned_sec for s in steps) == minutes * 60 and all(s.script for s in steps)
+        steps = fallback_steps(ctype, option)
+        assert len(steps) >= 2 and sum(s.planned_sec for s in steps) == CONTENT_TOTAL_SEC and all(s.script for s in steps)
 
 
 def test_validate_steps_requires_script_and_name():

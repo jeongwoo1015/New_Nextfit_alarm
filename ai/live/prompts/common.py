@@ -70,6 +70,8 @@ def weather_block(w: Weather | None) -> str:
                      else (f"최고 {w.high_c:g}도" if w.high_c is not None else f"최저 {w.low_c:g}도"))
     if w.precip_prob is not None:
         parts.append(f"강수 확률 {w.precip_prob}%")
+    if parts and w.location_name:      # 날씨 값이 없으면 지역만 있어도 날씨를 말하지 않는다
+        parts.insert(0, f"지역 {clean(w.location_name, 20)}")
     return "[오늘 날씨]\n- " + ", ".join(parts) if parts else ""
 
 

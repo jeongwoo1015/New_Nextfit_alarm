@@ -117,7 +117,7 @@ def briefing_log(brief=BRIEF, start=True):
 
 
 def test_briefing_passes():
-    s = scn("briefing", coaching_min=20, weather_words=["우산"], event_words=["회의"], now_words=["7시"], expect_start=True)
+    s = scn("briefing", weather_words=["우산"], event_words=["회의"], now_words=["7시"], expect_start=True)
     r = check(briefing_log(), s)
     assert not failed(r) and not failed(r, SOFT)
 
@@ -131,7 +131,7 @@ def test_briefing_must_ask_wake_first_then_brief():
 
 
 def test_briefing_no_alarm_words_and_question_rules():
-    s = scn("briefing", coaching_min=20)
+    s = scn("briefing")
     with_alarm = BRIEF.replace("지금 7시 2분이에요.", "알람은 7시로 맞춰져 있어요.")
     assert "브리핑: 알람 시각·알람 언급 없음" in failed(check(briefing_log(with_alarm), s))
     no_q = BRIEF.replace("준비가 됐어요?", "준비해요.")
@@ -141,7 +141,7 @@ def test_briefing_no_alarm_words_and_question_rules():
 
 
 def test_briefing_start_only_after_ready_answer():
-    s = scn("briefing", coaching_min=20, expect_start=True)
+    s = scn("briefing", expect_start=True)
     early = log("briefing", [T(WAKE_Q), T(BRIEF, [START], heard="응 일어났어요")], "start_routine")
     assert "브리핑: 준비됐다는 답 뒤에만 시작" in failed(check(early, s))
     assert "브리핑: 준비됐다고 하면 start_routine 호출" in failed(check(briefing_log(start=False), s))
@@ -150,14 +150,14 @@ def test_briefing_start_only_after_ready_answer():
 def test_briefing_zero_coaching():
     zero = ("지금 7시 2분이야. 비가 오니까 우산 챙겨. 오전 9시 반에 주간 회의가 있어. 어제 피곤했으니 부담 없이 시작해. 오늘도 힘내길 바랄게.")
     ok = log("briefing", [T("좋은 아침이야. 일어났어?"), T(zero, heard="응 일어났어"), T("잘 가, 좋은 하루.", [END], heard="고마워 이만 끊을게")], "end_session")
-    r = check(ok, scn("briefing", "CASUAL", coaching_min=0, farewell=True))
+    r = check(ok, scn("briefing", "CASUAL", coaching_skipped=True, farewell=True))
     assert not failed(r)
     invite = zero.replace("오늘도 힘내길 바랄게.", "이제 루틴을 시작하자.")
     bad = log("briefing", [T("좋은 아침이야. 일어났어?"), T(invite, heard="응")])
-    assert "브리핑: 코칭 0분이면 시작 권유 없음" in failed(check(bad, scn("briefing", "CASUAL", coaching_min=0)))
+    assert "브리핑: 코칭 안 하는 날이면 시작 권유 없음" in failed(check(bad, scn("briefing", "CASUAL", coaching_skipped=True)))
     asks = zero.replace("오늘도 힘내길 바랄게.", "준비됐어?")
     bad2 = log("briefing", [T("좋은 아침이야. 일어났어?"), T(asks, heard="응")])
-    assert "브리핑: 코칭 0분이면 4~6문장, 질문 없음" in failed(check(bad2, scn("briefing", "CASUAL", coaching_min=0)))
+    assert "브리핑: 코칭 안 하는 날이면 4~6문장, 질문 없음" in failed(check(bad2, scn("briefing", "CASUAL", coaching_skipped=True)))
 
 
 # ---------- 코칭 ----------
@@ -253,18 +253,17 @@ def test_quiz_scenario_answers_match_steps():
 QUIZ_VERDICTS = {1: "done", 2: "done", 3: "done"}
 
 
-def content_log(skip_ready_q=False, ahead=False, start_in_question_turn=False, farewell=False):
+def content_log(ahead=False):
     turns = [T("먼저 첫 문제예요. 대한민국의 수도는 어디일까요?"),
              T("맞아요. 다음 문제예요. 1년은 몇 개월일까요?", [rep(1, "done")] + ([rep(2, "done")] if ahead else []), heard="서울이에요"),
              T("맞아요. 마지막 문제예요. 한글을 만든 임금님은 누구일까요?", [rep(2, "done")], heard="열두 달이요"),
-             T("잘하셨어요. 이제 아침 루틴을 시작할 준비가 됐어요?" if not skip_ready_q else "잘하셨어요. 좋은 하루 보내세요.",
-               [rep(3, "done")] + ([START] if start_in_question_turn else []), heard="세종대왕이요"),
-             T("좋아요, 시작할게요.", [START], heard="네 루틴 시작할 준비됐어요")]
-    return log("coaching", turns, "start_routine")
+             T("잘하셨어요. 좋은 하루 보내세요.", [rep(3, "done")], heard="세종대왕이요"),
+             T("안녕히 계세요.", [END], heard="고마워요 이만 끝낼게요")]
+    return log("coaching", turns, "end_session")
 
 
 def content_scn(**kw):
-    base = dict(verdicts=QUIZ_VERDICTS, answers=["서울", "열두 달", "세종대왕"], routine_follows=True, expect_start=True)
+    base = dict(verdicts=QUIZ_VERDICTS, answers=["서울", "열두 달", "세종대왕"], farewell=True)
     base.update(kw)
     return scn("coaching", **base)
 
@@ -276,32 +275,13 @@ def test_content_session_passes():
 
 def test_content_session_failures():
     assert "코칭: 한 턴에 방금 답한 단계만 판정" in failed(check(content_log(ahead=True), content_scn()))
-    assert "콘텐츠 세션: 마지막 단계 뒤 루틴 준비 확인 질문" in failed(check(content_log(skip_ready_q=True), content_scn()))
-    assert "콘텐츠 세션: 질문과 start_routine을 한 턴에 하지 않음" in failed(check(content_log(start_in_question_turn=True), content_scn()))
     leak = content_log()
     leak.turns[0].said = "대한민국의 수도는 서울인데 어디일까요?"
     assert "코칭: 0번째 말에서 정답 미공개" in failed(check(leak, content_scn()))
-    not_started = content_log()
-    not_started.turns[-1].calls = []
-    not_started.ended_by = "turnComplete"
-    assert "콘텐츠 세션: 준비됐다고 하면 start_routine 호출" in failed(check(not_started, content_scn()))
-
-
-def test_content_session_start_only_after_ready_answer():
-    early = content_log()
-    early.turns[2].calls.append(START)                                 # 콘텐츠 중간에 루틴을 시작해 버림
-    early.turns[2].heard = "응 준비됐어요"
-    assert "콘텐츠 세션: 준비됐다는 답 뒤에만 루틴 시작" in failed(check(early, content_scn()))
-
-
-def test_content_only_session_ends_with_the_user():
-    s = scn("coaching", verdicts=QUIZ_VERDICTS, answers=["서울", "열두 달", "세종대왕"], farewell=True)
-    turns = content_log().turns[:4] + [T("안녕히 계세요.", [END], heard="고마워요 이만 끝낼게요")]
-    assert not failed(check(log("coaching", turns, "end_session"), s))
 
 
 def test_briefing_does_not_run_steps():
-    s = scn("briefing", coaching_min=20, ready_words=["퀴즈"], expect_start=True)
+    s = scn("briefing", ready_words=["퀴즈"], expect_start=True)
     brief = ("지금 7시 2분이에요. 비가 오니 우산을 챙기세요. 오전 9시 반에 주간 회의가 있어요. 어젯밤 정리한 컨디션을 생각해 부담 없이 시작해요. 이제 퀴즈 시간을 시작할 준비가 됐어요?")
     ok = log("briefing", [T(WAKE_Q), T(brief, heard="응 일어났어요"), T("좋아요, 시작해요.", [START], heard="네 퀴즈 시작할 준비됐어요")], "start_routine")
     r = check(ok, s)

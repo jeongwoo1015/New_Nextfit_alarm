@@ -117,7 +117,7 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
             add("항목 빼기 파싱", HARD, rc.status == "DONE" and sorted(rc.remove) == sorted(e.get("routine_remove", [])), f"{rc}")
 
     elif kind == "briefing":
-        coaching = e.get("coaching_min", 20)
+        skipped = bool(e.get("coaching_skipped"))      # 코칭을 안 하는 날은 브리핑만 한다
         first = texts[0] if texts else ""
         add("브리핑: 먼저 일어났는지만 묻기", HARD, first.count("?") == 1 and len(sentences(first)) <= 2 and not re.search(r"날씨|일정|우산", first), first)
         add("브리핑: 일어났다는 답 전에 시작하지 않음", HARD, "start_routine" not in _names(turns[0]) if turns else True, "")
@@ -127,16 +127,16 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
         if brief.strip():
             add("브리핑: 알람 시각·알람 언급 없음", HARD, not ALARM_WORDS.search(brief), brief)
             short = bool(e.get("short_briefing"))       # 전략이 '짧게'인 날은 2~3문장(+준비 확인 질문)
-            if coaching > 0:
+            if not skipped:
                 lo, hi = (2, 4) if short else (4, 7)
                 add(f"브리핑: {lo}~{hi}문장(마지막은 준비 확인 질문)", HARD, lo <= n <= hi and brief.count("?") == 1 and brief.strip().endswith("?"), f"{n}문장, 물음표 {brief.count('?')}개")
             else:
                 lo, hi = (2, 3) if short else (4, 6)
-                add(f"브리핑: 코칭 0분이면 {lo}~{hi}문장, 질문 없음", HARD, lo <= n <= hi and "?" not in brief, f"{n}문장, 물음표 {brief.count('?')}개")
-                add("브리핑: 코칭 0분이면 시작 권유 없음", HARD, not re.search(r"(루틴|콘텐츠|코칭|퀴즈).{0,10}시작", brief), brief)
+                add(f"브리핑: 코칭 안 하는 날이면 {lo}~{hi}문장, 질문 없음", HARD, lo <= n <= hi and "?" not in brief, f"{n}문장, 물음표 {brief.count('?')}개")
+                add("브리핑: 코칭 안 하는 날이면 시작 권유 없음", HARD, not re.search(r"(루틴|콘텐츠|코칭|퀴즈).{0,10}시작", brief), brief)
             if e.get("now_words"):
                 add("브리핑: 지금 시각 언급", SOFT, any(w in brief for w in e["now_words"]), brief)
-            for key, label in (("weather_words", "날씨"), ("event_words", "일정")):
+            for key, label in (("weather_words", "날씨"), ("location_words", "날씨 지역"), ("event_words", "일정")):
                 if e.get(key):
                     add(f"브리핑: {label} 언급", SOFT, any(w in brief for w in e[key]), brief)
             add("브리핑: 수면·기상 단정 없음", SOFT, not re.search(r"잘 (잤|주무|일어났)|푹 (잤|주무)", brief), brief)
@@ -151,7 +151,7 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
 
     elif kind == "coaching":
         add("코칭: 사용자 답 전에 판정 호출 없음", HARD, not (turns and turns[0].calls), str(turns[0].calls if turns else ""))
-        orders = sorted(e.get("verdicts", {}))           # 단계 번호는 세션 전체 번호라 1부터가 아닐 수 있다(콘텐츠 뒤에 이어지는 루틴)
+        orders = sorted(e.get("verdicts", {}))           # 재연결이면 남은 단계부터라 단계 번호가 1부터가 아닐 수 있다
         wrong_turn = [(i, c["args"].get("step_order")) for i, t in enumerate(turns) for c in t.calls
                       if c["name"] == "report_step_result" and i >= 1 and orders and c["args"].get("step_order") != (orders[i - 1] if i - 1 < len(orders) else None)]
         add("코칭: 한 턴에 방금 답한 단계만 판정", HARD, not wrong_turn, f"(턴, 판정한 단계)={wrong_turn}")
@@ -168,16 +168,6 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
                 continue
             mentioned = [nm for nm in names if nm in t.said]
             add(f"코칭: {i}번째 안내가 단계 하나만", SOFT, len(mentioned) <= 1, f"{mentioned}")
-        if e.get("routine_follows"):                    # 콘텐츠 세션: 마지막 단계 뒤에 기본 루틴 시작 준비를 묻고, 답을 들은 뒤 start_routine
-            n = len(orders)
-            if len(turns) > n:
-                add("콘텐츠 세션: 마지막 단계 뒤 루틴 준비 확인 질문", HARD, turns[n].said.strip().endswith("?"), turns[n].said)
-                add("콘텐츠 세션: 질문과 start_routine을 한 턴에 하지 않음", HARD, "start_routine" not in _names(turns[n]), turns[n].said)
-            for i, t in enumerate(turns):
-                if "start_routine" in _names(t):
-                    add("콘텐츠 세션: 준비됐다는 답 뒤에만 루틴 시작", HARD, i > n and bool(READY.search(t.heard)), f"{i}번째 턴, 사용자 말={t.heard!r}")
-            if e.get("expect_start"):
-                add("콘텐츠 세션: 준비됐다고 하면 start_routine 호출", HARD, log.ended_by == "start_routine", f"종료 방식={log.ended_by}")
         answers = e.get("answers", [])
         for i, t in enumerate(turns):
             leaked = [a for a in answers[i:] if a in t.said]

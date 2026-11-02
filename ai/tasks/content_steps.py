@@ -17,14 +17,10 @@ CONTENT_OPTIONS = {
 RESPONSE_TYPES = {"PLAY", "QA", "SPEECH"}
 DEFAULT_RESPONSE = {"MEDITATION": "PLAY", "EXERCISE": "PLAY", "LANGUAGE": "SPEECH", "QUIZ": "SPEECH"}
 MIN_STEPS, MAX_STEPS = 2, 8
+CONTENT_TOTAL_SEC = 300      # 콘텐츠 알람은 고정 5분 (정의서 11/01, RS_APP_CONFIG.CONTENT_DURATION_SEC)
 
-# 종류별 분량 안내 (코칭 10분은 짧게, 20분은 길게)
-COUNTS = {
-    "MEDITATION": {10: "2~3단계", 20: "3~4단계"},
-    "EXERCISE": {10: "3~4동작", 20: "4~6동작"},
-    "LANGUAGE": {10: "3개 표현", 20: "5개 표현"},
-    "QUIZ": {10: "3문제", 20: "5문제"},
-}
+# 종류별 분량 안내 (5분에 맞춘 값)
+COUNTS = {"MEDITATION": "2~3단계", "EXERCISE": "3동작", "LANGUAGE": "3개 표현", "QUIZ": "3문제"}
 TYPE_GUIDE = {
     "MEDITATION": "각 단계의 script에 AI가 차분히 읽어 줄 안내 문장(호흡 횟수, 집중할 부위 등)을 적는다. response_type은 PLAY.",
     "EXERCISE": "각 단계는 동작 하나다. name은 동작 이름, script에 방법을 한두 문장으로 적는다. 아침에 안전하게 할 수 있는 가벼운 동작만. response_type은 PLAY.",
@@ -111,7 +107,7 @@ FALLBACKS = {
              ("퀴즈 4번", "문제: 태양계에서 가장 큰 행성은 무엇일까요?\n정답: 목성"),
              ("퀴즈 5번", "문제: 물은 보통 몇 도에서 끓을까요? (1기압)\n정답: 100도")],
 }
-FALLBACK_COUNT = {10: {"QUIZ": 3, "EXERCISE": 3}, 20: {}}
+FALLBACK_COUNT = {"QUIZ": 3, "EXERCISE": 3}
 LANGUAGE_FALLBACKS = {
     "JAPANESE": [("표현 1", "おはようございます / 좋은 아침이에요. / 오하요 고자이마스"),
                  ("표현 2", "ありがとうございます / 감사합니다. / 아리가토 고자이마스"),
@@ -122,26 +118,22 @@ LANGUAGE_FALLBACKS = {
 }
 
 
-def fallback_steps(content_type: str, content_option: str | None, coaching_min: int) -> list[Step]:
+def fallback_steps(content_type: str, content_option: str | None) -> list[Step]:
     rows = LANGUAGE_FALLBACKS.get(content_option) if content_type == "LANGUAGE" and content_option in LANGUAGE_FALLBACKS \
         else FALLBACKS[content_type]
-    rows = rows[:FALLBACK_COUNT[coaching_min].get(content_type, len(rows))]
-    secs = _fit_seconds([1] * len(rows), coaching_min * 60)
+    rows = rows[:FALLBACK_COUNT.get(content_type, len(rows))]
+    secs = _fit_seconds([1] * len(rows), CONTENT_TOTAL_SEC)
     return [Step(i, n, s, DEFAULT_RESPONSE[content_type], script) for i, ((n, script), s) in enumerate(zip(rows, secs), 1)]
 
 
-def compose_content_steps(content_type: str, content_option: str | None, coaching_min: int, llm, today: date | None = None,
+def compose_content_steps(content_type: str, content_option: str | None, llm, today: date | None = None,
                           retries: int = 1) -> ContentStepsResult:
-    """코칭 길이(10/20분) 동안 진행할 단계를 구성한다. 0분이면 단계가 없다. AI 호출이 실패해도 기본 단계를 돌려준다."""
+    """고정 5분(CONTENT_TOTAL_SEC) 동안 진행할 단계를 구성한다. AI 호출이 실패해도 기본 단계를 돌려준다."""
     if content_type not in CONTENT_OPTIONS:
         raise ValueError(f"CONTENT_TYPE은 {'/'.join(CONTENT_OPTIONS)} 중 하나예요: {content_type!r}")
-    if coaching_min == 0:
-        return ContentStepsResult([], "ai")
-    if coaching_min not in (10, 20):
-        raise ValueError(f"코칭 길이는 0/10/20분이에요: {coaching_min!r}")
-    total = coaching_min * 60
+    total = CONTENT_TOTAL_SEC
     topic = OPTION_GUIDE.get(content_option or "", "")
-    system = SYSTEM.format(count=COUNTS[content_type][coaching_min], total=total, guide=TYPE_GUIDE[content_type],
+    system = SYSTEM.format(count=COUNTS[content_type], total=total, guide=TYPE_GUIDE[content_type],
                            today=(today or date.today()).isoformat())
     user = f"콘텐츠 종류: {content_type}" + (f"\n세부: {content_option} ({topic})" if topic else "")
     last = ""
@@ -150,4 +142,4 @@ def compose_content_steps(content_type: str, content_option: str | None, coachin
             return ContentStepsResult(validate_steps(llm.generate_json(system, user), content_type, total), "ai")
         except (LLMError, ValueError) as e:
             last = str(e)
-    return ContentStepsResult(fallback_steps(content_type, content_option, coaching_min), "fallback", last)
+    return ContentStepsResult(fallback_steps(content_type, content_option), "fallback", last)
