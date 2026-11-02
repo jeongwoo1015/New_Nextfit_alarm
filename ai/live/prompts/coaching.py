@@ -34,6 +34,13 @@ STEP_RULES = """[{label}]를 번호 순서대로 한 번에 하나씩 안내하�
 - other: 단계 수행과 무관한 질문이나 잡담. 한두 문장으로 답한 뒤 다시 '했어요/못 했어요'로 답하면 되는 질문을 한다. 잡담이 세 번 이어지면 그 단계는 다시 묻지 않고 넘어간다.
 - 사용자가 말하지 않은 것을 추측해 done으로 판정하지 않는다."""
 
+TIME_RULES = """시간 변경(오늘만):
+- 사용자가 아직 판정하지 않은 단계를 오늘은 줄이거나 빼 달라고 하면("오늘 좀 적게", "스트레칭은 오늘 1분만", "독서는 오늘 빼 줘") adjust_step_time(step_order, seconds)을 호출한다. seconds는 30초 단위의 초 값이고 0은 오늘만 그 단계를 빼는 것이다.
+- 몇 분으로 할지 말하지 않았으면 한 번만 묻고, 말한 뒤에 호출한다. 시간을 말했으면 되묻지 않고 바로 호출한다.
+- 호출한 응답에서 "오늘만 ○○ 1분으로 바꿨어요"처럼 한 문장으로 알리고(기본 설정은 바뀌지 않는다) 이어서 안내한다(이 응답은 3문장까지 허용). 이후 그 단계를 안내할 때는 바뀐 시간을 쓴다. 0초로 뺀 단계는 안내하지 않고 report_step_result도 부르지 않는다.
+- 이미 안내한 단계에 대해 '못 했어요', '패스할게요'라고 답하는 것은 시간 변경이 아니라 판정이므로 report_step_result로 기록한다. 같은 단계에 두 함수를 함께 부르지 않는다.
+- 단계 시간의 합계가 15분을 넘게 늘려 달라는 요청은 어렵다고 짧게 말한다."""
+
 COACH_CLOSING = """마무리: 모든 단계를 판정했으면 단계별 결과 전체를 반영해 최대 2문장으로 마무리한다(대부분 했으면 한 일을 칭찬하고, 일부만 했으면 한 단계를 짚어 격려하고, 거의 못 했어도 탓하지 않고 일어나 시작한 것을 격려한다). 하지 않은 단계를 한 것처럼 말하지 않는다. 하루를 응원한 뒤에는 대화를 스스로 끝내지 않고 사용자가 이어서 말하면 짧게 받아 준다.
 
 대화는 사용자가 끝낸다. 사용자가 끝내겠다고 분명히 말하면(예: 이만 끝낼게요, 고마워요 안녕) 짧은 작별 인사 뒤 end_session을 호출한다. AI가 먼저 끝내거나 호출하지 않으며, 아직 판정하지 않은 단계가 있을 때 사용자가 끝내겠다고 해도 그 단계를 판정 없이 두고 작별 인사만 한다."""
@@ -58,7 +65,8 @@ def coaching_prompt(inp: CoachingInput) -> str:
     label = "오늘 콘텐츠 단계" if content else "오늘 코칭 단계"
     steps = steps_block(label, inp.steps)
     return join_blocks(
-        CONTENT_INTRO if content else COACH_INTRO, STEP_RULES.format(label=label, resume_line=RESUME_LINE if inp.resumed else ""), COACH_CLOSING,
+        CONTENT_INTRO if content else COACH_INTRO, STEP_RULES.format(label=label, resume_line=RESUME_LINE if inp.resumed else ""),
+        "" if content else TIME_RULES, COACH_CLOSING,
         SAFETY_RULES, VOICE_RULES, persona_block(inp.persona), steps,
         night_record_block(inp.night) if inp.night else "",
         inp.strategy_block,

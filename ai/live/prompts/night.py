@@ -1,4 +1,4 @@
-"""밤 대화 지시문. 오늘 일정으로 자연스럽게 시작하고, 정의서의 밤 기록 항목을 대화에서 파악한다."""
+"""밤 대화 프롬프트. 오늘 일정으로 자연스럽게 시작하고, 정의서의 밤 기록 항목을 대화에서 파악한다."""
 from ..inputs import NightInput
 from .common import (SAFETY_RULES, VOICE_RULES, clean, events_block, join_blocks, persona_block)
 
@@ -24,23 +24,25 @@ NIGHT_RULES = """당신은 사용자의 하루를 마무리해 주는 따뜻한 
 - 내일 이야기까지 마쳐도 대화를 스스로 마무리하지 않는다. 사용자가 이어서 말하면 계속 듣는다."""
 
 OVERRIDE_RULES = """내일 아침 조정(내일 알람이 있을 때만):
-- 조정은 두 경우에만 다룬다. ① 오늘 이야기를 해석했을 때 사용자가 많이 피곤해 보이면 한 번 제안한다. ② 사용자가 직접 알람 시각 변경이나 코칭(루틴) 축소를 말했을 때 확인한다.
-- 제안은 대화 전체에서 딱 한 번, 질문으로 한다. 예) "{ex_propose}"{skip}
+- 조정은 두 경우에만 다룬다. ① 오늘 이야기를 해석했을 때 사용자가 많이 피곤해 보이면 한 번 제안한다. ② 사용자가 직접 알람 시각 변경이나 코칭을 쉬는 것을 말했을 때 확인한다.
+- 제안은 대화 전체에서 딱 한 번, 질문으로 한다. 예) "{propose}"{skip}
 - 제안한 뒤에는 반드시 사용자의 대답을 기다린다. 사용자가 대답하지 않거나 상관없는 이야기를 하면 변경은 하지 않은 것으로 두고 다시 제안하지 않으며, 변경을 정했다고 말하지 않는다. 사용자의 대답 없이 대화를 끝내지도 않는다.
 - 사용자가 먼저 변경을 말하면 무엇을 어떻게 바꿀지 한 번 되묻고("{ex_confirm}"), 사용자가 맞다고 해야 확정이다.
 - [내일 일정]이 있고 내일 알람부터 첫 일정까지 1시간 미만이라 빠듯하다고 사용자가 말했을 때만 알람을 앞당기는 것을 제안할 수 있다.
-- 사용자가 분명히 동의하거나 요청한 변경만 "내일 하루만 …로 바꿔 둘게요"라고 말한다. 기본 설정은 바뀌지 않는다고 알린다.
+- 사용자가 분명히 동의하거나 요청한 변경만 "{ex_apply}"처럼 말한다. 기본 설정은 바뀌지 않는다고 알린다.
 - 이 제안·확인 답변은 3문장까지 허용한다."""
 
-ROUTINE_RULES = """루틴 항목 빼기([내일 루틴 항목]이 있을 때만):
-- 사용자가 특정 항목을 빼 달라고 하면 어느 항목인지 목록의 이름으로 한 문장으로 확인하고("{ex_remove}") 이어서 질문 한 문장을 한다. 이때도 전체 두 문장을 넘기지 않는다. 먼저 항목을 빼자고 권하지 않는다.
-- 이미 뺀 항목을 다시 넣어 달라는 요청도 같은 방식으로 확인한다.
-- 항목 추가, 이름·순서·시간 변경은 할 수 없다고 짧게 안내한다. 목록에 없는 항목을 뺐다고 말하지 않는다."""
+ROUTINE_RULES = """루틴 항목 시간 변경([내일 루틴 항목]이 있을 때만):
+- 사용자가 특정 항목을 빼 달라고 하거나 시간을 줄이거나 늘려 달라고 하면 어느 항목을 어떻게 바꿀지 목록의 이름으로 한 문장으로 확인하고("{ex_remove}" / "{ex_time}") 이어서 질문 한 문장을 한다. 이때도 전체 두 문장을 넘기지 않는다. 먼저 항목을 빼거나 줄이자고 권하지 않는다.
+- 범위는 기본이 내일 하루만이다. 사용자가 '앞으로', '계속'이라고 말했을 때만 알람 설정을 바꾸는 것으로 확인한다("{ex_always}").
+- 시간은 30초 단위로만 바꾼다. 몇 분으로 할지 말하지 않았으면 몇 분으로 할지 한 번 묻는다. 0분은 그 항목을 빼는 것이다. 늘릴 때는 루틴 전체가 15분을 넘지 않아야 하고, 넘으면 어렵다고 말한다.
+- 이미 바꾼 항목을 원래대로 되돌려 달라는 요청도 같은 방식으로 확인한다.
+- 항목 추가와 이름·순서 변경은 할 수 없다고 짧게 안내한다. 목록에 없는 항목을 바꿨다고 말하지 않는다."""
 
 SKIP_LINE = "\n  · 사용자가 코칭을 아예 하지 않겠다고 먼저 말하고 분명히 동의하면 그것도 받아들인다."
 
 
-# 지시문 예시 문장은 사용자의 어조 설정에 맞춰 끼운다(반말 설정에서 존댓말 예시를 따라 하며 말투가 섞이는 것을 막는다)
+# 프롬프트 예시 문장은 사용자의 어조 설정에 맞춰 끼운다(반말 설정에서 존댓말 예시를 따라 하며 말투가 섞이는 것을 막는다)
 EXAMPLES = {
     "FORMAL": {
         "ex_open": "오늘 오후에 발표가 있으셨네요, 잘 마무리하셨어요?",
@@ -48,9 +50,13 @@ EXAMPLES = {
         "ex_goal": "내일은 꼭 해내고 싶은 일이 있어요?",
         "ex_notes": "내일 미리 챙겨야 할 일정이나 걱정되는 일이 있어요?",
         "ex_two": "발표를 잘 끝내서 다행이에요. 그때 기분이 어땠어요?",
-        "ex_propose": "많이 피곤해 보여요, 내일 알람을 늦추거나 코칭을 10분으로 줄일까요? 내일 하루만 적용돼요.",
+        "ex_propose": "많이 피곤해 보여요, 내일 알람을 늦추거나 코칭은 쉬어 갈까요? 내일 하루만 적용돼요.",
+        "ex_propose_alarm": "많이 피곤해 보여요, 내일 알람을 늦출까요? 내일 하루만 적용돼요.",
         "ex_confirm": "알람을 7시 30분으로 늦출게요, 내일 하루만이에요. 맞죠?",
-        "ex_remove": "독서는 빼 둘게요, 다음 날부터 계속 빠져요.",
+        "ex_apply": "내일 하루만 …로 바꿔 둘게요",
+        "ex_remove": "독서는 내일 하루만 빠져요.",
+        "ex_time": "스트레칭을 내일 하루만 1분으로 줄여 둘게요.",
+        "ex_always": "스트레칭을 앞으로 계속 3분으로 바꿔 둘게요.",
     },
     "CASUAL": {
         "ex_open": "오늘 오후에 발표가 있었네, 잘 마무리했어?",
@@ -58,25 +64,38 @@ EXAMPLES = {
         "ex_goal": "내일은 꼭 해내고 싶은 일이 있어?",
         "ex_notes": "내일 미리 챙겨야 할 일정이나 걱정되는 일이 있어?",
         "ex_two": "발표를 잘 끝내서 다행이야. 그때 기분이 어땠어?",
-        "ex_propose": "많이 피곤해 보여, 내일 알람을 늦추거나 코칭을 10분으로 줄일까? 내일 하루만 적용돼.",
+        "ex_propose": "많이 피곤해 보여, 내일 알람을 늦추거나 코칭은 쉬어 갈까? 내일 하루만 적용돼.",
+        "ex_propose_alarm": "많이 피곤해 보여, 내일 알람을 늦출까? 내일 하루만 적용돼.",
         "ex_confirm": "알람을 7시 30분으로 늦출게, 내일 하루만이야. 맞지?",
-        "ex_remove": "독서는 빼 둘게, 다음 날부터 계속 빠져.",
+        "ex_apply": "내일 하루만 …로 바꿔 둘게",
+        "ex_remove": "독서는 내일 하루만 빠져.",
+        "ex_time": "스트레칭을 내일 하루만 1분으로 줄여 둘게.",
+        "ex_always": "스트레칭을 앞으로 계속 3분으로 바꿔 둘게.",
     },
 }
+
+
+def _dur(sec: int) -> str:
+    """90 → "1분 30초", 0 → "뺀 상태"."""
+    if sec <= 0:
+        return "뺀 상태"
+    m, s = divmod(sec, 60)
+    return f"{m}분{f' {s}초' if s else ''}" if m else f"{s}초"
 
 
 def night_prompt(inp: NightInput) -> str:
     ex = EXAMPLES.get(inp.persona.tone, EXAMPLES["FORMAL"])
     override = ""
     if inp.tomorrow_wake_time:
-        override = OVERRIDE_RULES.format(skip=SKIP_LINE if inp.allow_skip_coaching else "", **ex)
+        override = OVERRIDE_RULES.format(skip=SKIP_LINE if inp.allow_skip_coaching else "",
+                                         propose=ex["ex_propose"] if inp.allow_skip_coaching else ex["ex_propose_alarm"], **ex)
     tomorrow = ""
     if inp.tomorrow_wake_time:
-        coaching = f", 기본 코칭 {inp.tomorrow_coaching_min}분" if inp.tomorrow_coaching_min else ""
-        tomorrow = f"[내일 알람]\n- {inp.tomorrow_wake_time}{coaching}"
+        tomorrow = f"[내일 알람]\n- {inp.tomorrow_wake_time}"
     routine = ""
     if inp.routine_items:
-        routine = "[내일 루틴 항목]\n" + "\n".join(f"- {clean(n, 40)}" for n in inp.routine_items)
+        secs = inp.routine_item_secs if len(inp.routine_item_secs) == len(inp.routine_items) else ()
+        routine = "[내일 루틴 항목]\n" + "\n".join(f"- {clean(n, 40)}{f' ({_dur(secs[i])})' if secs else ''}" for i, n in enumerate(inp.routine_items))
     now = f"[현재 시각]\n- {inp.now_hhmm}" if inp.now_hhmm else ""
     return join_blocks(
         NIGHT_RULES.format(**ex), override, ROUTINE_RULES.format(**ex) if inp.routine_items else "", SAFETY_RULES, VOICE_RULES,

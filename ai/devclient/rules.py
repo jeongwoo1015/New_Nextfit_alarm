@@ -65,9 +65,11 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
     add("마크다운 없음", HARD, not re.search(r"\*\*|^#|`|^\s*[-*]\s", all_ai, re.M), "마크다운 기호가 있음")
     eng = re.search(r"(?:[A-Za-z]{3,}[ ,.!]+){3,}", all_ai) if not e.get("allow_english") else None
     add("영어 덧붙임 없음", HARD, not eng, eng.group(0) if eng else "")
-    known = ("end_session", "report_step_result", "start_routine")
+    known = ("end_session", "report_step_result", "start_routine", "adjust_step_time")
     bad_calls = [c for c in log.calls() if c["name"] not in known
-                 or (c["name"] == "report_step_result" and (c["args"].get("verdict") not in VERDICTS or not isinstance(c["args"].get("step_order"), int)))]
+                 or (c["name"] == "report_step_result" and (c["args"].get("verdict") not in VERDICTS or not isinstance(c["args"].get("step_order"), int)))
+                 or (c["name"] == "adjust_step_time" and not (isinstance(c["args"].get("step_order"), int) and isinstance(c["args"].get("seconds"), int)
+                                                              and c["args"]["seconds"] >= 0 and c["args"]["seconds"] % 30 == 0))]
     add("함수 호출 형식", HARD, not bad_calls, str(bad_calls))
     sents = [s for t in texts for s in sentences(t) if not _from_script(s, scn)]       # 고정 스크립트는 그대로 읽는 것이 규칙이라 어조 검사에서 뺀다
     if scn.tone == "CASUAL":
@@ -114,7 +116,9 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
                 add("추출 diary_text(한 줄 일기)", HARD, bool(ex.fields.get("diary_text")), "일기가 비어 있음")
         if "routine" in extra:
             rc = extra["routine"]
-            add("항목 빼기 파싱", HARD, rc.status == "DONE" and sorted(rc.remove) == sorted(e.get("routine_remove", [])), f"{rc}")
+            got = sorted(((c.template_item_id, c.duration_sec, c.scope) for c in rc.changes), key=str)
+            want = sorted((tuple(x) for x in e.get("routine_changes", [])), key=str)
+            add("항목 변경 파싱", HARD, rc.status == "DONE" and got == want, f"실제={got} 기대={want}")
 
     elif kind == "briefing":
         skipped = bool(e.get("coaching_skipped"))      # 코칭을 안 하는 날은 브리핑만 한다
@@ -152,14 +156,22 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
     elif kind == "coaching":
         add("코칭: 사용자 답 전에 판정 호출 없음", HARD, not (turns and turns[0].calls), str(turns[0].calls if turns else ""))
         orders = sorted(e.get("verdicts", {}))           # 재연결이면 남은 단계부터라 단계 번호가 1부터가 아닐 수 있다
+        skip_turns = set(e.get("no_verdict_turns", ()))   # 시간 변경만 한 턴(그 턴에는 판정할 단계가 없다)
+        slots = [i for i in range(1, len(turns)) if i not in skip_turns]
+        turn_of = {o: slots[j] for j, o in enumerate(orders) if j < len(slots)}       # 단계 번호 → 그 단계의 답을 듣는 턴
         wrong_turn = [(i, c["args"].get("step_order")) for i, t in enumerate(turns) for c in t.calls
-                      if c["name"] == "report_step_result" and i >= 1 and orders and c["args"].get("step_order") != (orders[i - 1] if i - 1 < len(orders) else None)]
+                      if c["name"] == "report_step_result" and i >= 1 and orders and turn_of.get(c["args"].get("step_order")) != i]
         add("코칭: 한 턴에 방금 답한 단계만 판정", HARD, not wrong_turn, f"(턴, 판정한 단계)={wrong_turn}")
         last_verdict = {}
         for c in log.calls("report_step_result"):
             last_verdict[c["args"].get("step_order")] = c["args"].get("verdict")
         want = e.get("verdicts", {})
         add("코칭: 판정이 기대와 같음", HARD, last_verdict == want, f"실제={last_verdict} 기대={want}")
+        got_adj = {c["args"].get("step_order"): c["args"].get("seconds") for c in log.calls("adjust_step_time")}
+        add("코칭: 시간 변경 호출이 기대와 같음", HARD, got_adj == e.get("adjust", {}), f"실제={got_adj} 기대={e.get('adjust', {})}")
+        both = [(i, o) for i, t in enumerate(turns) for o in {c["args"].get("step_order") for c in t.calls if c["name"] == "adjust_step_time"}
+                if o in {c["args"].get("step_order") for c in t.calls if c["name"] == "report_step_result"}]
+        add("코칭: 같은 단계에 시간 변경과 판정을 함께 하지 않음", HARD, not both, f"(턴, 단계)={both}")
         dup = [k for k in last_verdict if sum(1 for c in log.calls('report_step_result') if c['args'].get('step_order') == k) > 1]
         add("코칭: 같은 단계 판정 중복 없음", SOFT, not dup, f"중복 단계={dup} (서버는 마지막 판정만 쓰면 됨)")
         names = e.get("step_names", [])

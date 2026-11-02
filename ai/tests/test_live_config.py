@@ -33,7 +33,7 @@ def test_verdicts_match_spec():
 def test_tools_per_kind():
     names = lambda k: [d["name"] for d in tools_for(k)[0]["functionDeclarations"]]
     assert names("night") == ["end_session"] and names("briefing") == ["start_routine", "end_session"]
-    assert names("coaching") == ["report_step_result", "end_session"]
+    assert names("coaching") == ["report_step_result", "adjust_step_time", "end_session"]
 
 
 @pytest.mark.parametrize("prompt", [
@@ -62,12 +62,13 @@ def test_night_without_events_falls_back():
 
 def test_night_override_only_with_tomorrow_alarm():
     assert "내일 아침 조정(내일 알람이 있을 때만):" not in night_prompt(NightInput())
-    p = night_prompt(NightInput(tomorrow_wake_time="07:00", tomorrow_coaching_min=20))
-    assert "내일 아침 조정(내일 알람이 있을 때만):" in p and "[내일 알람]\n- 07:00, 기본 코칭 20분" in p
+    p = night_prompt(NightInput(tomorrow_wake_time="07:00"))
+    assert "내일 아침 조정(내일 알람이 있을 때만):" in p and "[내일 알람]\n- 07:00\n" in p + "\n"
+    assert "코칭은 쉬어 갈까요?" in p and "10분으로 줄일까요" not in p and "기본 코칭" not in p        # 11/01: 코칭 길이 선택이 없고 쉬어 가는 것만 남음
     assert "아예 하지 않겠다고 먼저 말하고" in p            # 정의서: 사용자가 원하면 0(수행 안 함) 허용. AI가 먼저 권하는 문장은 없다
     assert "코칭을 0분" not in p and "코칭을 안 하자고" not in p
     off = night_prompt(NightInput(tomorrow_wake_time="07:00", allow_skip_coaching=False))
-    assert "아예 하지 않겠다고" not in off
+    assert "아예 하지 않겠다고" not in off and "코칭은 쉬어 갈까요?" not in off and "내일 알람을 늦출까요?" in off
 
 
 def test_event_title_cannot_inject_blocks():
@@ -153,10 +154,19 @@ def test_start_signals():
 
 
 def test_night_routine_rules_only_with_items():
-    assert "루틴 항목 빼기" not in night_prompt(NightInput())
+    assert "루틴 항목 시간 변경" not in night_prompt(NightInput())
     p = night_prompt(NightInput(routine_items=("스트레칭", "독서")))
-    assert "루틴 항목 빼기" in p and "[내일 루틴 항목]\n- 스트레칭\n- 독서" in p
-    assert "먼저 항목을 빼자고 권하지 않는다" in p and "추가, 이름·순서·시간 변경은 할 수 없다" in p
+    assert "루틴 항목 시간 변경" in p and "[내일 루틴 항목]\n- 스트레칭\n- 독서" in p
+    assert "먼저 항목을 빼거나 줄이자고 권하지 않는다" in p and "항목 추가와 이름·순서 변경은 할 수 없다" in p
+    assert "시간 변경은 할 수 없다" not in p and "내일 하루만 빠져요" in p                              # 11/01: 시간 변경을 받고, 범위는 기본이 내일 하루만
+    assert "앞으로', '계속'이라고 말했을 때만" in p and "30초 단위로만 바꾼다" in p and "15분을 넘지 않아야" in p
+
+
+def test_night_routine_items_show_current_times_when_given():
+    p = night_prompt(NightInput(routine_items=("스트레칭", "독서", "물 한 잔", "모닝일기"), routine_item_secs=(120, 90, 30, 0)))
+    assert "[내일 루틴 항목]\n- 스트레칭 (2분)\n- 독서 (1분 30초)\n- 물 한 잔 (30초)\n- 모닝일기 (뺀 상태)" in p
+    mismatch = night_prompt(NightInput(routine_items=("스트레칭", "독서"), routine_item_secs=(120,)))        # 개수가 안 맞으면 시간을 보여 주지 않는다
+    assert "[내일 루틴 항목]\n- 스트레칭\n- 독서" in mismatch
 
 
 def test_rules_added_after_real_runs():
@@ -225,9 +235,22 @@ def test_tools_follow_the_session_plan():
     assert names("briefing", BriefingInput(content_name="퀴즈")) == ["start_routine", "end_session"]        # 콘텐츠 세션이 이어짐
     assert names("briefing", BriefingInput(coaching_skipped=True, content_name="퀴즈")) == ["end_session"]  # 코칭 안 하는 날
     assert names("briefing", BriefingInput(coaching_skipped=True)) == ["end_session"]
-    assert names("coaching", CoachingInput(steps=q)) == ["report_step_result", "end_session"]               # 기본 루틴 세션
-    assert names("coaching", CoachingInput(morning_call_type="CONTENT", steps=q)) == ["report_step_result", "end_session"]
+    assert names("coaching", CoachingInput(steps=q)) == ["report_step_result", "adjust_step_time", "end_session"]   # 루틴 세션: 오늘 시간 변경 가능
+    assert names("coaching", CoachingInput(morning_call_type="CONTENT", steps=q)) == ["report_step_result", "end_session"]   # 콘텐츠는 고정 시간
     assert [d["name"] for d in build_setup("briefing", BriefingInput(content_name="퀴즈"))["tools"][0]["functionDeclarations"]] == ["start_routine", "end_session"]
+
+
+def test_adjust_step_time_declaration_and_rules():
+    decl = next(d for d in tools_for("coaching")[0]["functionDeclarations"] if d["name"] == "adjust_step_time")
+    assert decl["parameters"]["required"] == ["step_order", "seconds"] and set(decl["parameters"]["properties"]) == {"step_order", "seconds"}
+    assert "30초 단위" in decl["description"] and "0이면 오늘만 그 단계를 뺀다" in decl["description"]
+    q = (Step(1, "스트레칭", 120, "PLAY"), Step(2, "독서", 300, "PLAY"))
+    routine = coaching_prompt(CoachingInput(steps=q))
+    assert "시간 변경(오늘만):" in routine and "adjust_step_time(step_order, seconds)" in routine
+    assert "몇 분으로 할지 말하지 않았으면 한 번만 묻고" in routine and "같은 단계에 두 함수를 함께 부르지 않는다" in routine
+    assert "0초로 뺀 단계는 안내하지 않고 report_step_result도 부르지 않는다" in routine
+    content = coaching_prompt(CoachingInput(morning_call_type="CONTENT", steps=q))
+    assert "시간 변경(오늘만)" not in content and "adjust_step_time" not in content        # 콘텐츠는 고정 5분이라 시간을 바꾸지 않는다
 
 
 def test_briefing_asks_about_content_when_content_alarm_and_does_not_run_it():
@@ -259,7 +282,7 @@ def test_night_examples_follow_the_tone_setting():
     formal = night_prompt(NightInput(persona=Persona(tone="FORMAL"), tomorrow_wake_time="07:00", routine_items=("독서",)))
     casual = night_prompt(NightInput(persona=Persona(tone="CASUAL"), tomorrow_wake_time="07:00", routine_items=("독서",)))
     assert "맞죠?" in formal and "잘 마무리하셨어요?" in formal and "맞지?" not in formal
-    assert "맞지?" in casual and "잘 마무리했어?" in casual and "독서는 빼 둘게, 다음 날부터 계속 빠져." in casual
-    for polite in ("맞죠?", "잘 마무리하셨어요?", "맞아요?", "줄일까요?", "빠져요."):                         # 반말 설정의 지시문에 존댓말 예시가 남아 있으면 말투가 섞인다
+    assert "맞지?" in casual and "잘 마무리했어?" in casual and "독서는 내일 하루만 빠져." in casual
+    for polite in ("맞죠?", "잘 마무리하셨어요?", "맞아요?", "쉬어 갈까요?", "빠져요.", "줄여 둘게요", "바꿔 둘게요"):                         # 반말 설정의 지시문에 존댓말 예시가 남아 있으면 말투가 섞인다
         assert polite not in casual
     assert night_prompt(NightInput(persona=Persona(tone="???"))).count("잘 마무리하셨어요?") == 1             # 모르는 어조는 존댓말 예시

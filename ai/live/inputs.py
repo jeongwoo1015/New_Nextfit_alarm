@@ -67,9 +67,9 @@ class NightInput:
     events_today: tuple[CalendarEvent, ...] = ()
     now_hhmm: str = ""                 # 대화 시작 시각(KST). 아직 지나지 않은 일정을 끝난 것처럼 묻지 않기 위해 쓴다
     tomorrow_wake_time: str = ""       # 내일 울릴 알람 시각 "HH:MM" (하루 한정 변경 제안용)
-    tomorrow_coaching_min: int | None = None  # 내일 알람의 기본 COACHING_MIN (10/20)
     events_tomorrow: tuple[CalendarEvent, ...] = ()
-    routine_items: tuple[str, ...] = ()  # ROUTINE_MODE=CUSTOM 루틴 알람의 현재 사용 중인 항목 이름 (빼기 요청 확인용)
+    routine_items: tuple[str, ...] = ()  # 내일 진행할 루틴 항목 이름 (시간 변경·빼기 요청 확인용)
+    routine_item_secs: tuple[int, ...] = ()  # routine_items와 같은 순서의 현재 시간(초). 비어 있으면 시간 없이 이름만 보여 준다
     allow_skip_coaching: bool = True   # 사용자가 먼저 '코칭 안 할래'라고 하면 받아들인다(정의서: 하루 한정 0 허용). AI가 먼저 권하지는 않는다
 
 

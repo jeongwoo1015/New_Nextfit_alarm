@@ -19,7 +19,7 @@ SYSTEM = """아래 밤 대화 기록(사용자와 AI의 대화)을 바탕으로 
 - insight: 대화에서 AI가 실제로 짚어 주었거나 사용자가 깨달은 핵심 포인트 (한 문장). 그런 내용이 없으면 반드시 "" (일반적인 조언을 만들어 쓰지 않는다)
 - diary_text: 사용자가 오늘 한 일과 느낀 감정을 사용자 시점으로 쓴 한 줄 일기 (40자 이내). 사용자가 대화에서 말한 내용만 쓴다
 - override_wake_time: 내일 하루만 알람 시각을 바꾸기로 **사용자가** 직접 요청했거나 AI의 제안에 분명히 동의했을 때만 "HH:MM"(24시간제). 아니면 ""
-- override_coaching_min: 내일 하루만 코칭을 10분으로 줄이기로 **사용자가** 직접 요청했거나 제안에 동의했으면 10, 코칭을 하지 않기로 요청·동의했으면 0. 아니면 null
+- override_skip_coaching: 내일 하루만 코칭을 쉬기로(아침에 브리핑만 하기로) **사용자가** 직접 요청했거나 AI의 제안에 분명히 동의했으면 true. 아니면 false
 규칙:
 - 대화에 없는 내용은 지어내지 마세요. 사용자가 하지 않은 말을 사용자가 한 것처럼 쓰지 마세요.
 - 받아쓰기 오류로 보이는 단어는 문맥으로 바로잡되, 확신이 없으면 그대로 두세요.
@@ -39,7 +39,7 @@ class NightRecordResult:
 
 
 EMPTY = {"ai_summary": None, "tomorrow_goal": None, "tomorrow_notes": [], "condition_label": None, "condition_text": None,
-         "encouragement": None, "insight": None, "diary_text": None, "override_wake_time": None, "override_coaching_min": None}
+         "encouragement": None, "insight": None, "diary_text": None, "override_wake_time": None, "override_skip_coaching": False}
 
 
 def _text(v, limit: int):
@@ -52,16 +52,6 @@ def _wake(v):
     if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
         return None
     return f"{int(m.group(1)):02d}:{m.group(2)}"
-
-
-def _coaching(v):
-    if isinstance(v, bool) or v in (None, ""):
-        return None
-    try:
-        n = int(v)
-    except (TypeError, ValueError):
-        return None
-    return n if n in (0, 10) else None
 
 
 def normalize(data: dict) -> dict:
@@ -82,7 +72,7 @@ def normalize(data: dict) -> dict:
         "insight": _text(data.get("insight"), 300),
         "diary_text": _text(data.get("diary_text"), 80),
         "override_wake_time": _wake(data.get("override_wake_time")),
-        "override_coaching_min": _coaching(data.get("override_coaching_min")),
+        "override_skip_coaching": data.get("override_skip_coaching") is True,
     }
 
 

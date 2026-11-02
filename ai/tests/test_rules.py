@@ -249,13 +249,14 @@ def test_scenarios_build_valid_setup(name):
     if s.kind == "briefing":
         assert len(s.utterances) == 2                                                                    # 확인 질문 답 + (준비됐어요 또는 작별)
     if s.kind == "coaching":
-        n = len(s.inp.steps)
-        assert set(s.expect["verdicts"]) == {st.order for st in s.inp.steps} and len(s.utterances) == n + 1   # 단계 수 + (작별 인사 또는 루틴 준비)
+        removed = {k for k, v in s.expect.get("adjust", {}).items() if v == 0}                          # 오늘 뺀 단계는 판정하지 않는다
+        assert set(s.expect["verdicts"]) == {st.order for st in s.inp.steps} - removed
+        assert len(s.utterances) == len(s.expect["verdicts"]) + len(s.expect.get("no_verdict_turns", ())) + 1   # 판정 턴 + 시간 변경 턴 + 작별 인사
 
 
 def test_new_scenarios_exist():
     assert "night_ignore_proposal" in SCENARIOS                      # 제안에 답하지 않았을 때 변경이 기록되면 안 된다
-    assert SCENARIOS["night_ignore_proposal"].expect["extract"] == {"override_wake_time": None, "override_coaching_min": None}
+    assert SCENARIOS["night_ignore_proposal"].expect["extract"] == {"override_wake_time": None, "override_skip_coaching": False}
 
 
 def test_quiz_scenario_answers_match_steps():
@@ -281,6 +282,47 @@ def content_scn(**kw):
     base = dict(verdicts=QUIZ_VERDICTS, answers=["서울", "열두 달", "세종대왕"], farewell=True)
     base.update(kw)
     return scn("coaching", **base)
+
+
+# ---------- 코칭 중 오늘 시간 변경 (adjust_step_time) ----------
+def adj(step, sec):
+    return {"name": "adjust_step_time", "args": {"step_order": step, "seconds": sec}}
+
+
+def adjust_log(call=None, same_turn_verdict=False):
+    call = call or adj(2, 60)
+    turns = [T("물 한 잔 드셨나요?"),
+             T("좋아요. 스트레칭을 해 볼까요?", [rep(1, "done")], heard="물 마셨어요"),
+             T("오늘만 스트레칭을 1분으로 바꿨어요. 1분 동안 해 주세요.", [call] + ([rep(2, "done")] if same_turn_verdict else []), heard="스트레칭은 오늘 1분만 할게요"),
+             T("잘하셨어요. 오늘 할 일 세 가지를 말해 주세요.", [rep(2, "done")], heard="스트레칭 했어요")]
+    return log("coaching", turns)
+
+
+ADJ_SCN = dict(verdicts={1: "done", 2: "done"}, adjust={2: 60}, no_verdict_turns=(2,))
+
+
+def test_adjust_step_time_passes_when_it_matches():
+    r = check(adjust_log(), scn("coaching", **ADJ_SCN))
+    assert not failed(r)
+
+
+def test_adjust_step_time_checks():
+    s = scn("coaching", **ADJ_SCN)
+    assert "함수 호출 형식" in failed(check(adjust_log(adj(2, 45)), s))                          # 30초 단위가 아님
+    assert "함수 호출 형식" in failed(check(adjust_log({"name": "adjust_step_time", "args": {"step_order": 2}}), s))   # seconds 없음
+    assert "코칭: 시간 변경 호출이 기대와 같음" in failed(check(adjust_log(adj(2, 120)), s))      # 다른 시간
+    assert "코칭: 시간 변경 호출이 기대와 같음" in failed(check(adjust_log(), scn("coaching", verdicts={1: "done", 2: "done"}, no_verdict_turns=(2,))))   # 요청하지 않았는데 호출
+    assert "코칭: 같은 단계에 시간 변경과 판정을 함께 하지 않음" in failed(check(adjust_log(same_turn_verdict=True), s))
+
+
+def test_removed_step_is_not_judged():
+    turns = [T("물 한 잔 드셨나요?"), T("좋아요. 스트레칭을 해 볼까요?", [rep(1, "done")], heard="물 마셨어요"),
+             T("오늘만 마지막 단계를 뺐어요. 스트레칭은 끝나면 말씀해 주세요.", [adj(3, 0)], heard="마지막은 오늘 빼 주세요"),
+             T("잘하셨어요.", [rep(2, "done")], heard="스트레칭 했어요")]
+    s = scn("coaching", verdicts={1: "done", 2: "done"}, adjust={3: 0}, no_verdict_turns=(2,))
+    assert not failed(check(log("coaching", turns), s))
+    turns[3].calls.append(rep(3, "skipped"))          # 0초로 뺀 단계를 또 판정함
+    assert "코칭: 판정이 기대와 같음" in failed(check(log("coaching", turns), s))
 
 
 def test_content_session_passes():
