@@ -10,10 +10,11 @@ from ai.tasks.routine_changes import RoutineItem, parse_routine_changes
 # ---------- 가짜 llm ----------
 class FakeLLM:
     def __init__(self, *results):
-        self.results, self.calls = list(results), 0
+        self.results, self.calls, self.last_user = list(results), 0, ""
 
     def generate_json(self, system, user):
         self.calls += 1
+        self.last_user = user
         r = self.results.pop(0) if len(self.results) > 1 else self.results[0]
         if isinstance(r, Exception):
             raise r
@@ -82,23 +83,23 @@ def test_gemini_all_models_fail_and_non_retryable():
 # ---------- extract_night_record ----------
 GOOD = {"ai_summary": "회의가 많아 피곤했음", "tomorrow_goal": "발표 잘 마치기", "tomorrow_notes": ["10시 반 치과", "", "  "],
         "condition_label": "tired", "condition_text": "지침", "encouragement": "수고했어요", "insight": "", "diary_text": "회의가 많아 피곤한 하루",
-        "override_wake_time": "6:40", "override_coaching_min": 10}
+        "override_wake_time": "6:40", "override_skip_coaching": True}
 
 
 def test_extract_normalizes():
     r = extract_night_record(TRANSCRIPT, FakeLLM(GOOD))
     f = r.fields
     assert r.status == "DONE" and f["condition_label"] == "TIRED" and f["tomorrow_notes"] == ["10시 반 치과"]
-    assert f["override_wake_time"] == "06:40" and f["override_coaching_min"] == 10 and f["insight"] is None
+    assert f["override_wake_time"] == "06:40" and f["override_skip_coaching"] is True and f["insight"] is None
     assert r.to_row()["extract_status"] == "DONE" and "override_alarm_id" not in r.to_row()   # 알람 id는 서버가 정한다
 
 
 def test_extract_rejects_bad_values_softly():
-    bad = {**GOOD, "condition_label": "SAD", "override_wake_time": "25:99", "override_coaching_min": 5, "tomorrow_goal": "가" * 500}
+    bad = {**GOOD, "condition_label": "SAD", "override_wake_time": "25:99", "override_skip_coaching": "true", "tomorrow_goal": "가" * 500}
     f = extract_night_record(TRANSCRIPT, FakeLLM(bad)).fields
-    assert f["condition_label"] is None and f["override_wake_time"] is None and f["override_coaching_min"] is None
+    assert f["condition_label"] is None and f["override_wake_time"] is None and f["override_skip_coaching"] is False   # 문자열 "true"는 true가 아니다
     assert len(f["tomorrow_goal"]) == 200
-    assert extract_night_record(TRANSCRIPT, FakeLLM({**GOOD, "override_coaching_min": 0})).fields["override_coaching_min"] == 0
+    assert extract_night_record(TRANSCRIPT, FakeLLM({**GOOD, "override_skip_coaching": None})).fields["override_skip_coaching"] is False
 
 
 def test_extract_retries_then_succeeds_or_fails():
@@ -186,41 +187,86 @@ def test_validate_steps_requires_script_and_name():
 
 
 # ---------- parse_routine_changes ----------
-ITEMS = [RoutineItem("id-stretch", "스트레칭"), RoutineItem("id-sun", "햇빛 보기"), RoutineItem("id-read", "독서"),
-         RoutineItem("id-diary", "모닝일기", enabled=False)]
+ITEMS = [RoutineItem("id-stretch", "스트레칭", True, 120), RoutineItem("id-sun", "햇빛 보기", True, 60), RoutineItem("id-read", "독서", True, 300),
+         RoutineItem("id-diary", "모닝일기", False, 0)]
 
 
-def test_routine_remove_and_restore():
-    r = parse_routine_changes(TRANSCRIPT, ITEMS, FakeLLM({"remove": [3], "restore": [4]}))
-    assert r.status == "DONE" and r.remove == ["id-read"] and r.restore == ["id-diary"]
+def ch(r):
+    return [(c.template_item_id, c.duration_sec, c.scope) for c in r.changes]
 
 
-def test_routine_ignores_invalid_numbers_and_wrong_state():
-    r = parse_routine_changes(TRANSCRIPT, ITEMS, FakeLLM({"remove": [9, 0, "x", True, 4, 3, 3], "restore": [1, 2]}))
-    assert r.remove == ["id-read"] and r.restore == []     # 이미 뺀 항목(4)은 뺄 수 없고, 사용 중인 항목(1,2)은 다시 넣을 수 없다
+def parse(changes, items=ITEMS):
+    return parse_routine_changes(TRANSCRIPT, items, FakeLLM({"changes": changes}))
+
+
+def test_routine_remove_time_and_revert_with_scope():
+    r = parse([{"item": 1, "seconds": 180, "scope": "ALWAYS"}, {"item": 4, "seconds": None, "scope": "TOMORROW"}, {"item": 3, "seconds": 0, "scope": "TOMORROW"}])
+    assert r.status == "DONE"
+    assert ch(r) == [("id-read", 0, "TOMORROW"), ("id-stretch", 180, "ALWAYS"), ("id-diary", None, "TOMORROW")]   # 빼기가 먼저, 되돌리기(null)는 시간으로 바꾸는 것과 구분된다
+
+
+def test_routine_reductions_come_before_increases():
+    r = parse([{"item": 1, "seconds": 300, "scope": "TOMORROW"}, {"item": 3, "seconds": 120, "scope": "TOMORROW"}])
+    assert ch(r) == [("id-read", 120, "TOMORROW"), ("id-stretch", 300, "TOMORROW")]
+
+
+def test_routine_seconds_snap_to_30_and_scope_defaults_to_tomorrow():
+    r = parse([{"item": 2, "seconds": 100}, {"item": 3, "seconds": 10, "scope": "weird"}])
+    assert ch(r) == [("id-read", 30, "TOMORROW"), ("id-sun", 90, "TOMORROW")]   # 줄이는 것이 먼저
+
+
+def test_routine_ignores_unusable_requests():
+    r = parse([{"item": 9, "seconds": 0}, {"item": 0, "seconds": 0}, {"item": "x", "seconds": 0}, {"item": True, "seconds": 0},
+               {"item": 4, "seconds": 0},                       # 이미 뺀 항목은 또 뺄 수 없다
+               {"item": 3},                                       # 시간을 모르는 '줄여 줘'는 되돌리기(null)가 아니다
+               {"item": 3, "seconds": 5000}, {"item": 3, "seconds": -30}, {"item": 3, "seconds": "abc"},
+               {"item": 1, "seconds": 120, "scope": "TOMORROW"},   # 지금과 같은 시간이면 바꿀 것이 없다
+               "문자열", None])
+    assert r.status == "DONE" and ch(r) == []
+
+
+def test_routine_same_item_same_scope_keeps_the_last_one():
+    r = parse([{"item": 1, "seconds": 60, "scope": "TOMORROW"}, {"item": 1, "seconds": 90, "scope": "TOMORROW"}, {"item": 1, "seconds": 180, "scope": "ALWAYS"}])
+    assert sorted(ch(r), key=str) == sorted([("id-stretch", 90, "TOMORROW"), ("id-stretch", 180, "ALWAYS")], key=str)
 
 
 def test_routine_never_removes_everything():
-    items = [RoutineItem("a", "스트레칭"), RoutineItem("b", "독서")]
-    r = parse_routine_changes(TRANSCRIPT, items, FakeLLM({"remove": [1, 2], "restore": []}))
-    assert r.remove == [] and "모든 항목" in r.note
-    # 다시 넣는 항목이 같이 있으면 루틴이 비지 않으므로 적용된다
-    items = [RoutineItem("a", "스트레칭"), RoutineItem("b", "독서", enabled=False)]
-    r = parse_routine_changes(TRANSCRIPT, items, FakeLLM({"remove": [1], "restore": [2]}))
-    assert r.remove == ["a"] and r.restore == ["b"]
+    items = [RoutineItem("a", "스트레칭", True, 120), RoutineItem("b", "독서", True, 60)]
+    r = parse([{"item": 1, "seconds": 0}, {"item": 2, "seconds": 0}], items)
+    assert ch(r) == [] and "모든 항목" in r.note
+    # 다시 넣거나 시간을 정하는 항목이 같이 있으면 루틴이 비지 않으므로 적용된다
+    items = [RoutineItem("a", "스트레칭", True, 120), RoutineItem("b", "독서", False, 0)]
+    assert ch(parse([{"item": 1, "seconds": 0}, {"item": 2, "seconds": 60}], items)) == [("a", 0, "TOMORROW"), ("b", 60, "TOMORROW")]
+
+
+def test_routine_items_without_durations_still_work():
+    items = [RoutineItem("a", "스트레칭"), RoutineItem("b", "독서", enabled=False)]    # 서버가 시간을 채워 주기 전의 형식
+    r = parse([{"item": 1, "seconds": 0}, {"item": 2, "seconds": 60}], items)
+    assert ch(r) == [("a", 0, "TOMORROW"), ("b", 60, "TOMORROW")]
+
+
+def test_routine_changes_are_readable_by_the_server_adapter():
+    c = parse([{"item": 1, "seconds": 0, "scope": "ALWAYS"}]).changes[0]
+    assert (getattr(c, "template_item_id"), getattr(c, "duration_sec"), getattr(c, "scope")) == ("id-stretch", 0, "ALWAYS")   # ai_gateway.to_item_changes가 getattr로 읽는다
 
 
 def test_routine_no_items_or_no_speech_skips_ai():
-    llm = FakeLLM({"remove": [1]})
-    assert parse_routine_changes(TRANSCRIPT, [], llm).remove == []
-    assert parse_routine_changes([], ITEMS, llm).remove == []
+    llm = FakeLLM({"changes": [{"item": 1, "seconds": 0}]})
+    assert parse_routine_changes(TRANSCRIPT, [], llm).changes == []
+    assert parse_routine_changes([], ITEMS, llm).changes == []
     assert llm.calls == 0
 
 
 def test_routine_failure_status():
-    llm = FakeLLM({"remove": "배열 아님"})
+    llm = FakeLLM({"changes": "배열 아님"})
     r = parse_routine_changes(TRANSCRIPT, ITEMS, llm)
-    assert r.status == "FAILED" and r.remove == [] and llm.calls == 2
+    assert r.status == "FAILED" and r.changes == [] and llm.calls == 2
+
+
+def test_routine_prompt_shows_current_times():
+    llm = FakeLLM({"changes": []})
+    parse_routine_changes(TRANSCRIPT, ITEMS, llm)
+    assert "1. 스트레칭 (2분)" in llm.last_user and "3. 독서 (5분)" in llm.last_user and "4. 모닝일기 (뺀 상태)" in llm.last_user
 
 
 # ---------- music ----------

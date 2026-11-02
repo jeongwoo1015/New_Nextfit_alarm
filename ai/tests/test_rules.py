@@ -106,7 +106,7 @@ def test_night_override_proposal_may_use_three_sentences():
 
 
 # ---------- 브리핑 ----------
-WAKE_Q = "예준 님 좋은 아침이에요. 일어났어요?"
+WAKE_Q = "예준 님 좋은 아침이에요. 잘 주무셨어요?"
 BRIEF = ("지금 7시 2분이에요. 오늘은 비가 오니 우산을 챙기세요. 오전 9시 반에 주간 회의가 있어요. "
          "어젯밤 정리한 컨디션을 생각해 부담 없이 시작해요. 이제 아침 루틴을 시작할 준비가 됐어요?")
 
@@ -122,12 +122,27 @@ def test_briefing_passes():
     assert not failed(r) and not failed(r, SOFT)
 
 
-def test_briefing_must_ask_wake_first_then_brief():
+def test_briefing_must_ask_one_check_question_first_then_brief():
     s = scn("briefing")
     direct = log("briefing", [T("좋은 아침이에요. 오늘은 비가 와요. 우산을 챙기세요. 일정이 있어요. 힘내요.")])
-    assert "브리핑: 먼저 일어났는지만 묻기" in failed(check(direct, s))
+    assert "브리핑: 확인 질문 하나만 묻기" in failed(check(direct, s))
     no_brief = log("briefing", [T(WAKE_Q)])
-    assert "브리핑: 일어났다는 답 뒤에 브리핑함" in failed(check(no_brief, s))
+    assert "브리핑: 확인 질문에 답한 뒤 브리핑함" in failed(check(no_brief, s))
+    name = "브리핑: 확인 질문 하나만 묻기"
+    assert name not in failed(check(briefing_log(), s))
+    assert name in failed(check(log("briefing", [T("잘 주무셨어요? 지금 몸은 좀 깼어요?"), T(BRIEF, heard="네")]), s))      # 한 번에 두 가지
+    assert name in failed(check(log("briefing", [T("오늘 날씨가 궂은데 잘 주무셨어요?"), T(BRIEF, heard="네")]), s))          # 날씨를 섞음
+
+
+def test_sleepy_answer_still_counts_as_answer():
+    sleepy = [T(WAKE_Q), T(BRIEF, heard="음... 아직 졸려요"), T("좋아요, 시작해요.", [START], heard="네 준비됐어요")]
+    assert not failed(check(log("briefing", sleepy, "start_routine"), scn("briefing", expect_start=True)))
+
+
+def test_briefing_must_not_call_a_wake_function():
+    called = briefing_log()
+    called.turns[1].calls.append({"name": "wake_check_done", "args": {}})          # 기상 확인은 앱이 판단한다: 알 수 없는 함수 호출은 실패
+    assert "함수 호출 형식" in failed(check(called, scn("briefing")))
 
 
 def test_briefing_no_alarm_words_and_question_rules():
@@ -228,19 +243,20 @@ def test_scenarios_build_valid_setup(name):
     setup = build_setup(s.kind, s.inp)
     assert setup["systemInstruction"]["parts"][0]["text"]
     assert isinstance(s.inp, {"night": NightInput, "briefing": BriefingInput}.get(s.kind, object))
-    assert s.utterances                                              # 새 흐름에서는 브리핑도 사용자 답(일어났어/준비됐어)이 필요하다
+    assert s.utterances                                              # 새 흐름에서는 브리핑도 사용자 답(확인 질문 답/준비됐어)이 필요하다
     if s.expect.get("farewell"):
         assert s.utterances[-1] and any(w in s.utterances[-1] for w in ("잘게", "끊을게", "끝낼게"))   # 끝내는 쪽은 항상 사용자
     if s.kind == "briefing":
-        assert "일어났" in s.utterances[0] and len(s.utterances) == 2                                    # 일어났어요 + (준비됐어요 또는 작별)
+        assert len(s.utterances) == 2                                                                    # 확인 질문 답 + (준비됐어요 또는 작별)
     if s.kind == "coaching":
-        n = len(s.inp.steps)
-        assert set(s.expect["verdicts"]) == {st.order for st in s.inp.steps} and len(s.utterances) == n + 1   # 단계 수 + (작별 인사 또는 루틴 준비)
+        removed = {k for k, v in s.expect.get("adjust", {}).items() if v == 0}                          # 오늘 뺀 단계는 판정하지 않는다
+        assert set(s.expect["verdicts"]) == {st.order for st in s.inp.steps} - removed
+        assert len(s.utterances) == len(s.expect["verdicts"]) + len(s.expect.get("no_verdict_turns", ())) + 1   # 판정 턴 + 시간 변경 턴 + 작별 인사
 
 
 def test_new_scenarios_exist():
     assert "night_ignore_proposal" in SCENARIOS                      # 제안에 답하지 않았을 때 변경이 기록되면 안 된다
-    assert SCENARIOS["night_ignore_proposal"].expect["extract"] == {"override_wake_time": None, "override_coaching_min": None}
+    assert SCENARIOS["night_ignore_proposal"].expect["extract"] == {"override_wake_time": None, "override_skip_coaching": False}
 
 
 def test_quiz_scenario_answers_match_steps():
@@ -266,6 +282,47 @@ def content_scn(**kw):
     base = dict(verdicts=QUIZ_VERDICTS, answers=["서울", "열두 달", "세종대왕"], farewell=True)
     base.update(kw)
     return scn("coaching", **base)
+
+
+# ---------- 코칭 중 오늘 시간 변경 (adjust_step_time) ----------
+def adj(step, sec):
+    return {"name": "adjust_step_time", "args": {"step_order": step, "seconds": sec}}
+
+
+def adjust_log(call=None, same_turn_verdict=False):
+    call = call or adj(2, 60)
+    turns = [T("물 한 잔 드셨나요?"),
+             T("좋아요. 스트레칭을 해 볼까요?", [rep(1, "done")], heard="물 마셨어요"),
+             T("오늘만 스트레칭을 1분으로 바꿨어요. 1분 동안 해 주세요.", [call] + ([rep(2, "done")] if same_turn_verdict else []), heard="스트레칭은 오늘 1분만 할게요"),
+             T("잘하셨어요. 오늘 할 일 세 가지를 말해 주세요.", [rep(2, "done")], heard="스트레칭 했어요")]
+    return log("coaching", turns)
+
+
+ADJ_SCN = dict(verdicts={1: "done", 2: "done"}, adjust={2: 60}, no_verdict_turns=(2,))
+
+
+def test_adjust_step_time_passes_when_it_matches():
+    r = check(adjust_log(), scn("coaching", **ADJ_SCN))
+    assert not failed(r)
+
+
+def test_adjust_step_time_checks():
+    s = scn("coaching", **ADJ_SCN)
+    assert "함수 호출 형식" in failed(check(adjust_log(adj(2, 45)), s))                          # 30초 단위가 아님
+    assert "함수 호출 형식" in failed(check(adjust_log({"name": "adjust_step_time", "args": {"step_order": 2}}), s))   # seconds 없음
+    assert "코칭: 시간 변경 호출이 기대와 같음" in failed(check(adjust_log(adj(2, 120)), s))      # 다른 시간
+    assert "코칭: 시간 변경 호출이 기대와 같음" in failed(check(adjust_log(), scn("coaching", verdicts={1: "done", 2: "done"}, no_verdict_turns=(2,))))   # 요청하지 않았는데 호출
+    assert "코칭: 같은 단계에 시간 변경과 판정을 함께 하지 않음" in failed(check(adjust_log(same_turn_verdict=True), s))
+
+
+def test_removed_step_is_not_judged():
+    turns = [T("물 한 잔 드셨나요?"), T("좋아요. 스트레칭을 해 볼까요?", [rep(1, "done")], heard="물 마셨어요"),
+             T("오늘만 마지막 단계를 뺐어요. 스트레칭은 끝나면 말씀해 주세요.", [adj(3, 0)], heard="마지막은 오늘 빼 주세요"),
+             T("잘하셨어요.", [rep(2, "done")], heard="스트레칭 했어요")]
+    s = scn("coaching", verdicts={1: "done", 2: "done"}, adjust={3: 0}, no_verdict_turns=(2,))
+    assert not failed(check(log("coaching", turns), s))
+    turns[3].calls.append(rep(3, "skipped"))          # 0초로 뺀 단계를 또 판정함
+    assert "코칭: 판정이 기대와 같음" in failed(check(log("coaching", turns), s))
 
 
 def test_content_session_passes():

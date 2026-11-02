@@ -1,4 +1,4 @@
-"""행동 기록 형식. DB 정의서(10/31수정)의 컬럼 이름을 그대로 따른다 (실제 테이블은 소문자).
+"""행동 기록 형식. DB 정의서(11/01수정)의 컬럼 이름을 그대로 따른다 (실제 테이블은 소문자).
 
 서버가 할 일은 RS_MORNING_SESSION, RS_SESSION_STEP, RS_NIGHT_RECORD에서 읽은 행(dict)을 `build_sessions()`에 넣어 주는 것뿐이다.
 컬럼이 없거나 NULL이어도 오류 없이 빈 값으로 처리한다. 시각은 한국 시간(KST) 기준으로 읽는다(시간대가 없는 값은 KST로 본다).
@@ -91,14 +91,17 @@ class SessionRecord:
     session_date: date | None = None
     session_id: str | None = None
     call_type: str | None = None             # MORNING_CALL_TYPE: ROUTINE / CONTENT
-    coaching_min: int | None = None          # 0 / 10 / 20 (0 = 수행 안 함)
+    coaching_skipped: bool = False           # 밤 대화에서 '내일 코칭 안 하기'에 동의한 날(브리핑만 진행). 이 날의 단계는 수행률·보상에서 뺀다
+    planned_total_sec: int | None = None     # 그날 계획한 단계 시간 합계(초)
     target_wake_time: time | None = None
     first_response_at: datetime | None = None
     session_end_at: datetime | None = None
-    rewake_count: int = 0
+    rewake_count: int = 0                    # 8초 무응답으로 재기상 음악이 나온 횟수
+    snooze_count: int = 0                    # "5분 뒤 다시 울리기" 횟수
+    wake_checked_at: datetime | None = None  # 브리핑 전 확인 질문에 첫 대답을 한 시각 = 기상 성공 판정 시점
     wake_success: bool = False
     condition_code: str | None = None        # RS_NIGHT_RECORD.CONDITION_LABEL
-    alarm_rang_at: datetime | None = None    # 정의서에 없는 선택 칸. 있으면 반응 시간을 정확히 계산한다
+    alarm_rang_at: datetime | None = None    # 알람이 울린 시각. 있으면 반응 시간(알람 → 첫 응답)을 정확히 계산한다
     alarm_mode: str | None = None            # RS_ALARM.ALARM_MODE. ON_TIME일 때만 목표 시각을 알람 시각으로 본다
     steps: list = field(default_factory=list)
 
@@ -130,8 +133,13 @@ class SessionRecord:
         return None
 
     @property
+    def active_steps(self) -> list:
+        """수행률·보상에 쓰는 단계. 코칭을 안 한 날은 단계가 있어도 세지 않는다."""
+        return [] if self.coaching_skipped else self.steps
+
+    @property
     def steps_done(self) -> int:
-        return sum(s.status == DONE for s in self.steps)
+        return sum(s.status == DONE for s in self.active_steps)
 
     @classmethod
     def from_rows(cls, session_row: dict, step_rows=(), night_row: dict | None = None) -> "SessionRecord":
@@ -139,9 +147,11 @@ class SessionRecord:
         label = str((night_row or {}).get("condition_label") or "").strip().upper()
         return cls(session_date=to_date(s.get("session_date")), session_id=str(s["session_id"]) if s.get("session_id") else None,
                    call_type=(str(s["morning_call_type"]).upper() if s.get("morning_call_type") else None),
-                   coaching_min=to_int(s.get("coaching_min")), target_wake_time=to_time(s.get("target_wake_time")),
+                   coaching_skipped=bool(s.get("coaching_skipped")), planned_total_sec=to_int(s.get("planned_total_sec")),
+                   target_wake_time=to_time(s.get("target_wake_time")),
                    first_response_at=to_dt(s.get("first_response_at")), session_end_at=to_dt(s.get("session_end_at")),
-                   rewake_count=to_int(s.get("rewake_count"), 0), wake_success=bool(s.get("wake_success")),
+                   rewake_count=to_int(s.get("rewake_count"), 0), snooze_count=to_int(s.get("snooze_count"), 0),
+                   wake_checked_at=to_dt(s.get("wake_checked_at")), wake_success=bool(s.get("wake_success")),
                    condition_code=label if label in CONDITIONS else None, alarm_rang_at=to_dt(s.get("alarm_rang_at")),
                    alarm_mode=(str(s["alarm_mode"]).upper() if s.get("alarm_mode") else None),
                    steps=sorted((StepRecord.from_row(r) for r in (step_rows or [])), key=lambda x: x.step_order or 0))
