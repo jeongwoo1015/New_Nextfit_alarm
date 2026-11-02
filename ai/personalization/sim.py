@@ -61,7 +61,7 @@ def run_policy(policy: str, user_type: str, days: int = 100, seed: int = 0, spee
             fallbacks += log.source == "fallback"
             errors += bool(log.error)
         wake, statuses = _day_outcome(user_type, strategy.coaching_intensity, tired, u_wake, u_steps)
-        rec = SessionRecord(session_date=today, wake_success=wake, coaching_min=20, condition_code=cond, call_type="ROUTINE",
+        rec = SessionRecord(session_date=today, wake_success=wake, condition_code=cond, call_type="ROUTINE",
                             steps=[StepRecord(step_name=f"s{j}", status=st, step_order=j + 1, template_item_id=f"t{j}") for j, st in enumerate(statuses)])
         reward = session_reward(rec)
         sessions.append(rec)

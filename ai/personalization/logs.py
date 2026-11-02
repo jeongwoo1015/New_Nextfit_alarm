@@ -1,7 +1,7 @@
 """전략 결정 로그. 매 세션 '어떤 전략을 왜 골랐는지'를 남겨야 나중에 효과를 평가할 수 있다(Bandit의 선택 확률 포함).
 
-to_row()는 DB 테이블 한 행으로 넣을 수 있는 평평한 dict이다(중첩 값은 JSON 문자열). 로그 테이블은 정의서에 아직 없어
-서버에 요청 중이며, 그전까지는 append_jsonl()로 파일에 남긴다.
+to_row()는 DB 테이블 한 행으로 넣을 수 있는 평평한 dict이다(중첩 값은 JSON 문자열). 정의서 11/01의 RS_STRATEGY_LOG(14번)와
+칸이 같고, 서버가 LOG_ID·SESSION_ID·REWARD를 더해 넣는다. 개발 중에는 append_jsonl()로 파일에 남길 수도 있다.
 """
 import json
 from dataclasses import asdict, dataclass, field, fields
