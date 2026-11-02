@@ -111,7 +111,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
     var elapsed by remember { mutableIntStateOf(0) }
     var muted by remember { mutableStateOf(false) }
     var speakerOn by remember { mutableStateOf(true) }
-    var wakeChecked by remember { mutableStateOf(false) }   // wake_check_done 받음 → 재기상 음악 더 이상 안 틂
+    var wakeChecked by remember { mutableStateOf(false) }   // 확인 질문에 대답함 → 재기상 음악 더 이상 안 틂
     var rewaking by remember { mutableStateOf(false) }
 
     // ---- 마이크 권한: 받기 전에 Live를 열면 마이크가 열리지 않으므로 결과를 기다렸다가 연결 ----
@@ -163,12 +163,15 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
         }
     }
 
-    // 알람 후 첫 음성 응답 기록 (반응 시간 계산용, 서버가 처음 한 번만 저장)
+    // 브리핑 확인 질문("잘 주무셨어요?")에 대한 첫 대답(말 또는 버튼): 첫 응답 기록 → 기상 확인 (AI CONTRACTS 6-1).
+    // AI는 wake_check_done을 부르지 않으므로 앱이 판정 시점을 알린다. 그 뒤로는 재기상 음악을 틀지 않는다.
     LaunchedEffect(lines, sessionId) {
         val sid = sessionId ?: return@LaunchedEffect
         if (!responded && lines.any { it.role == LiveClient.Role.User }) {
             responded = true
+            wakeChecked = true
             RespecApi.firstResponse(sid)
+            RespecApi.wakeCheck(sid)?.let { RoutineRepository.applyView(it) }
         }
     }
 
@@ -217,24 +220,19 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                     }
                     JSONObject().put("result", "ok")
                 }
-                // 기상 확인 멘트를 모두 마침 → 서버가 기상 성공 여부 판정
-                "wake_check_done" -> {
-                    withContext(Dispatchers.Main) { wakeChecked = true }
-                    RoutineRepository.sessionId?.let { sid ->
-                        RespecApi.wakeCheck(sid)?.let { v -> withContext(Dispatchers.Main) { RoutineRepository.applyView(v) } }
-                    }
-                    JSONObject().put("result", "ok")
-                }
-                // 코칭 중 "오늘 스트레칭 좀 적게" → 오늘만 단계 시간 변경 (0 = 오늘만 빼기)
+                // 루틴 코칭 중 "오늘 스트레칭 좀 적게" → 오늘만 단계 시간 변경 (seconds: 30초 단위, 0 = 오늘만 빼기)
                 "adjust_step_time" -> {
                     val sid = RoutineRepository.sessionId
                     val order = call.args.optInt("step_order", -1)
-                    val sec = call.args.optInt("duration_sec", -1)
-                    if (sid != null && order > 0 && sec >= 0) {
-                        RespecApi.changeStepDuration(sid, order, sec)
-                            ?.let { v -> withContext(Dispatchers.Main) { RoutineRepository.applyView(v) } }
+                    val sec = call.args.optInt("seconds", -1)
+                    val view = if (sid != null && order > 0 && sec >= 0) RespecApi.changeStepDuration(sid, order, sec) else null
+                    if (view != null) {
+                        withContext(Dispatchers.Main) { RoutineRepository.applyView(view) }
+                        JSONObject().put("result", "ok")
+                    } else {
+                        // 거절(30초 단위 아님, 합계 초과 등) 응답 형식은 팀 합의 전 (AI CONTRACTS B7의 예시 형식)
+                        JSONObject().put("result", "error").put("reason", ApiClient.lastErrorCode ?: "INVALID_REQUEST")
                     }
-                    JSONObject().put("result", "ok")
                 }
                 // 응답을 보내지 않음: 앱이 세션을 닫거나 다음 세션으로 넘어감
                 "start_routine", "end_session" -> {

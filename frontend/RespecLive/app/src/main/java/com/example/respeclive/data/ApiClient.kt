@@ -36,6 +36,11 @@ object ApiClient {
     var lastError: String? = null
         private set
 
+    /** 마지막 실패의 서버 오류 코드 (예: VALIDATION_FAILED). 네트워크·로그인 실패면 null */
+    @Volatile
+    var lastErrorCode: String? = null
+        private set
+
     /** 화면이 닫혀도 취소되지 않는 전송용 스코프 (통화 종료 기록, 원문·목소리 업로드) */
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -66,6 +71,7 @@ object ApiClient {
 
     private suspend fun sendOnce(method: String, path: String, body: RequestBody?, timeoutMs: Long): ApiResponse? {
         val token = ServerAuth.bearer() ?: run {
+            lastErrorCode = null
             lastError = ServerAuth.lastError ?: "로그인하지 못했어요"
             return null
         }
@@ -83,11 +89,13 @@ object ApiClient {
                     if (resp.isSuccessful) Log.d(TAG, "$method $path -> ${resp.code}")
                     else Log.w(TAG, "$method $path -> HTTP ${resp.code} $text")
                     ApiResponse(resp.code, text).also { r ->
+                        lastErrorCode = if (r.ok) null else r.errorCode
                         lastError = if (r.ok) null else "서버 오류 (HTTP ${r.code}): ${r.errorMessage ?: r.errorCode ?: "알 수 없는 오류"}"
                     }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "$method $path 실패: ${e.message}")
+                lastErrorCode = null
                 lastError = "서버(${ApiConfig.BASE_URL})에 연결하지 못했어요. 서버 실행과 adb reverse를 확인해 주세요"
                 null
             }

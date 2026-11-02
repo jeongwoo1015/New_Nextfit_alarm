@@ -153,13 +153,13 @@ object RespecApi {
     suspend fun rewake(sessionId: String): Boolean =
         ApiClient.post("/morning/sessions/$sessionId/rewake")?.ok == true
 
-    /** 브리핑 Live의 wake_check_done 전달 (기상 확인 멘트를 모두 마침) → SessionViewOut */
+    /** 브리핑 확인 질문에 사용자가 처음 대답했을 때 (AI CONTRACTS 6-1) → 서버가 기상 성공 판정. SessionViewOut */
     suspend fun wakeCheck(sessionId: String): JSONObject? {
         val r = ApiClient.post("/morning/sessions/$sessionId/wake-check") ?: return null
         return if (r.ok) r.json() else null
     }
 
-    /** 코칭 중 adjust_step_time 전달: 오늘만 단계 시간 변경 (30초 단위, 0 = 오늘만 빼기) → SessionViewOut */
+    /** 코칭 중 adjust_step_time 전달: 오늘만 단계 시간 변경 (30초 단위, 0 = 오늘만 빼기) → SessionViewOut. 거절이면 null */
     suspend fun changeStepDuration(sessionId: String, stepOrder: Int, durationSec: Int): JSONObject? {
         val r = ApiClient.patch("/morning/sessions/$sessionId/steps/$stepOrder/duration",
             JSONObject().put("duration_sec", durationSec)) ?: return null
