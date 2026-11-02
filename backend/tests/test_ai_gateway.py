@@ -11,25 +11,23 @@ from backend.domain.models import NightRecord
 
 AI_ROW = {"ai_summary": "발표를 마쳤다", "tomorrow_goal": "보고서 끝내기", "tomorrow_notes": ["10시 회의"],
           "condition_label": "TIRED", "condition_text": "지쳤지만 뿌듯함", "encouragement": "잘했어요", "insight": "",
-          "diary_text": "발표 끝!", "override_wake_time": "06:40", "override_coaching_min": 0, "extract_status": "DONE"}
+          "diary_text": "발표 끝!", "override_wake_time": "06:40", "override_skip_coaching": True, "extract_status": "DONE"}
 
 
 def test_extract_row_maps_to_1101_columns():
     f = to_night_record_fields(AI_ROW)
     assert f["override_wake_time"] == time(6, 40) and f["override_skip_coaching"] is True
-    assert "override_coaching_min" not in f and "extract_status" not in f
+    assert "extract_status" not in f
     assert f["tomorrow_notes"] == ["10시 회의"] and f["condition_label"] == "TIRED"
 
 
-@pytest.mark.parametrize("coaching, skip", [(10, False), (None, False), (0, True)])
-def test_coaching_min_10_has_no_1101_equivalent(coaching, skip):
-    assert to_night_record_fields({**AI_ROW, "override_coaching_min": coaching})["override_skip_coaching"] is skip
+@pytest.mark.parametrize("value, skip", [(True, True), (False, False), (None, False), ("true", False)])
+def test_skip_coaching_only_when_true(value, skip):
+    assert to_night_record_fields({**AI_ROW, "override_skip_coaching": value})["override_skip_coaching"] is skip
 
 
-def test_future_ai_field_is_also_accepted():
-    row = {**AI_ROW, "override_coaching_min": None, "override_skip_coaching": True, "override_wake_time": None}
-    f = to_night_record_fields(row)
-    assert f["override_skip_coaching"] is True and f["override_wake_time"] is None
+def test_missing_wake_time_is_none():
+    assert to_night_record_fields({**AI_ROW, "override_wake_time": None})["override_wake_time"] is None
 
 
 def test_without_key_gateway_is_unavailable():

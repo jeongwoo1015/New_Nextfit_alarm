@@ -53,12 +53,12 @@ def tool_names(body):
 def test_night_token_builds_real_setup():
     gw, tokens = gateway()
     t = gw.issue_night_token(NightContext(PERSONA, "23:30", (CalendarEvent("발표", "14:00", "15:00"),), (),
-                                          "07:00", ("스트레칭 (축소)", "물 한 잔")))
+                                          "07:00", ("스트레칭 (축소)", "물 한 잔"), (180, 60)))
     key, body = tokens[0]
     assert key == "test-key" and t.token == "auth_tokens/1" and body["uses"] == 1
     assert t.start_signal and t.model.startswith("models/")
     text = system_text(body)
-    assert "정우님" in text and "발표" in text and "스트레칭 (축소)" in text
+    assert "정우님" in text and "발표" in text and "스트레칭 (축소)" in text and "3분" in text
     assert body["bidiGenerateContentSetup"]["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"] == "Puck"
     assert tool_names(body) == ["end_session"]
 
@@ -86,7 +86,9 @@ def test_coaching_token_has_no_following_session():
     gw.issue_coaching_token(CoachingContext(PERSONA, "ROUTINE", steps, resumed=True, night=NIGHT))
     body = tokens[-1][1]
     assert "물 한 잔" in system_text(body) and "1. 기지개" in system_text(body)
-    assert tool_names(body) == ["report_step_result", "end_session"]           # 11/01: 이어지는 세션 없음
+    assert tool_names(body) == ["report_step_result", "adjust_step_time", "end_session"]   # 11/01: 이어지는 세션 없음
+    gw.issue_coaching_token(CoachingContext(PERSONA, "CONTENT", steps))
+    assert tool_names(tokens[-1][1]) == ["report_step_result", "end_session"]   # 콘텐츠는 고정 시간이라 시간 변경 없음
 
 
 def test_token_http_failure_is_503():
@@ -101,7 +103,7 @@ def test_token_http_failure_is_503():
 def test_extract_maps_to_1101_columns():
     llm = FakeLLM({"ai_summary": "발표를 마쳤다", "tomorrow_goal": "보고서", "tomorrow_notes": ["10시 회의"],
                    "condition_label": "tired", "condition_text": "지침", "encouragement": "잘했어", "insight": "",
-                   "diary_text": "발표 끝", "override_wake_time": "06:40", "override_coaching_min": 0})
+                   "diary_text": "발표 끝", "override_wake_time": "06:40", "override_skip_coaching": True})
     gw, _ = gateway(llm)
     r = gw.extract_night_record(TALK)
     assert r.status == "DONE" and llm.calls
@@ -111,10 +113,13 @@ def test_extract_maps_to_1101_columns():
 
 
 def test_routine_changes_use_item_ids():
-    items = [AlarmRoutineItem("i1", 1, "스트레칭 (축소)", 180, 180, "PLAY"), AlarmRoutineItem("i2", 2, "물 한 잔", 60, 0, "QA")]
-    gw, _ = gateway(FakeLLM({"remove": [1], "restore": [2]}))
+    items = [AlarmRoutineItem("i1", 1, "스트레칭 (축소)", 180, 180, "PLAY"), AlarmRoutineItem("i2", 2, "물 한 잔", 60, 0, "QA"),
+             AlarmRoutineItem("i3", 3, "세수", 60, 60, "QA")]
+    llm = FakeLLM({"changes": [{"item": 2, "seconds": None}, {"item": 1, "seconds": 0, "scope": "TOMORROW"}]})
+    gw, _ = gateway(llm)
     r = gw.parse_routine_changes(TALK, items)
-    # 지금 AI 형식(빼기·다시 넣기) → 정의서 기본 범위 '내일만'. 0초 항목 = AI에는 '뺀 상태'
+    # 0초 항목 = AI에는 '뺀 상태', 사용 중 항목은 현재 시간을 함께 본다. 빼기가 먼저 온다
+    assert "3분" in llm.calls[0][1] and "뺀 상태" in llm.calls[0][1]
     assert r.status == "DONE" and r.changes == [ItemChange("i1", 0, "TOMORROW"), ItemChange("i2", None, "TOMORROW")]
 
 
