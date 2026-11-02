@@ -27,9 +27,6 @@ object RespecApi {
         )
     }
 
-    /** 폰 캘린더 연동 전까지는 빈 일정을 보냄 (서버는 일정 없이도 토큰을 줌) */
-    private fun noEvents() = JSONArray()
-
     // ---------------- 사용자·온보딩 ----------------
 
     /** 앱 시작 시: ProfileOut {onboarding_done, user, setting} */
@@ -80,9 +77,9 @@ object RespecApi {
 
     // ---------------- 밤 ----------------
 
-    /** 굿나잇콜 Live 토큰 (지시문: 호칭·말투, 일정, 내일 알람·루틴 항목) */
-    suspend fun nightToken(): LiveAuth? {
-        val body = JSONObject().put("events_today", noEvents()).put("events_tomorrow", noEvents())
+    /** 굿나잇콜 Live 토큰 (지시문: 호칭·말투, 일정, 내일 알람·루틴 항목). 일정은 CalendarEvents 형식 */
+    suspend fun nightToken(eventsToday: JSONArray, eventsTomorrow: JSONArray): LiveAuth? {
+        val body = JSONObject().put("events_today", eventsToday).put("events_tomorrow", eventsTomorrow)
         val r = ApiClient.post("/night/token", body, ApiConfig.TOKEN_TIMEOUT_MS) ?: return null
         return if (r.ok) liveAuth(r.json()) else null
     }
@@ -132,8 +129,9 @@ object RespecApi {
         return if (r.ok) r.json() else null
     }
 
-    suspend fun briefingToken(sessionId: String): LiveAuth? {
-        val body = JSONObject().put("events_today", noEvents())
+    /** 아침 브리핑 Live 토큰. 일정은 CalendarEvents 형식 */
+    suspend fun briefingToken(sessionId: String, eventsToday: JSONArray): LiveAuth? {
+        val body = JSONObject().put("events_today", eventsToday)
         val r = ApiClient.post("/morning/sessions/$sessionId/briefing-token", body, ApiConfig.TOKEN_TIMEOUT_MS) ?: return null
         return if (r.ok) liveAuth(r.json()) else null
     }

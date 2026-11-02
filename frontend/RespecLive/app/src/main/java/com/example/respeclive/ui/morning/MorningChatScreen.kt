@@ -48,6 +48,7 @@ import com.example.respeclive.audio.VoiceTranscriber
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.data.ApiClient
+import com.example.respeclive.data.CalendarEvents
 import com.example.respeclive.data.MusicStore
 import com.example.respeclive.data.NightMessageStore
 import com.example.respeclive.data.RespecApi
@@ -349,7 +350,8 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
         stage = Stage.Briefing
         notice = "리스펙과 연결하는 중…"
         client.start {
-            val auth = RespecApi.briefingToken(sid) ?: RespecApi.tokenError()
+            // 오늘 일정은 폰 캘린더에서 (권한은 밤 대화에서 받음. 없으면 빈 일정)
+            val auth = RespecApi.briefingToken(sid, CalendarEvents.today(context)) ?: RespecApi.tokenError()
             if (doneAtStart) LiveAuth(auth.token, auth.wsUrl, auth.model, auth.startSignal + ALREADY_DONE_NOTE) else auth
         }
 

@@ -43,6 +43,7 @@ import com.example.respeclive.audio.SleepMusicPlayer
 import com.example.respeclive.audio.VoiceRecorder
 import com.example.respeclive.audio.VoiceTranscriber
 import com.example.respeclive.data.ApiClient
+import com.example.respeclive.data.CalendarEvents
 import com.example.respeclive.data.MusicStore
 import com.example.respeclive.data.NightMessageStore
 import com.example.respeclive.data.RespecApi
@@ -133,19 +134,20 @@ fun NightChatScreen(onClose: () -> Unit) {
     var sleeping by remember { mutableStateOf(false) }     // 마무리 뒤 수면 음악만 흐르는 상태
     var liveSaying by remember { mutableStateOf(false) }   // 안내 문장을 AI 목소리로 읽는 중 (자막은 AI가 실제로 한 말)
 
-    // ---- 마이크 권한: 결과를 받은 뒤 Live 연결 ----
+    // ---- 마이크·캘린더 권한: 결과를 받은 뒤 Live 연결 (캘린더는 없어도 대화는 됨, 일정만 빠짐) ----
     val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (!granted) {
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        if (result[Manifest.permission.RECORD_AUDIO] == false) {
             Toast.makeText(context, "마이크 권한이 있어야 대답할 수 있어요", Toast.LENGTH_SHORT).show()
         }
         micReady.complete(Unit)
     }
     LaunchedEffect(Unit) {
-        val has = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-                PackageManager.PERMISSION_GRANTED
-        if (has) micReady.complete(Unit) else permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        val missing = listOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.READ_CALENDAR).filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) micReady.complete(Unit) else permissionLauncher.launch(missing.toTypedArray())
     }
 
     // ---- 통화 볼륨으로 통일: 화면에 있는 동안 통화 모드 유지. 수면 음악만 남으면 풀고 미디어 볼륨으로 ----
@@ -305,7 +307,10 @@ fun NightChatScreen(onClose: () -> Unit) {
 
         // ===== 1) Live 대화. 끝은 사용자가 정함 (말로 → end_session, 또는 버튼) =====
         micReady.await()
-        client.start { RespecApi.nightToken() ?: RespecApi.tokenError() }
+        // 토큰마다(재연결 포함) 그때의 폰 캘린더 일정을 넣음. 권한이 없으면 빈 일정
+        client.start {
+            RespecApi.nightToken(CalendarEvents.today(context), CalendarEvents.tomorrow(context)) ?: RespecApi.tokenError()
+        }
         select<Unit> {
             toolEvents.onReceive { client.awaitSpeechEnd() }
             endTalk.onReceive { }
