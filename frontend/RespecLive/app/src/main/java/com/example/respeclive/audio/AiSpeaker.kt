@@ -1,6 +1,7 @@
 package com.example.respeclive.audio
 
 import android.content.Context
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
@@ -52,6 +53,14 @@ class AiSpeaker(
                         State.FAILED
                     } else {
                         engine.setSpeechRate(speechRate)
+                        engine.setAudioAttributes(CallAudio.VOICE_ATTRIBUTES)   // AI 음성과 같은 통화 볼륨
+                        // 네트워크 목소리는 연결 상태에 따라 바뀌므로 기기 안의 한국어 목소리 하나로 고정
+                        runCatching {
+                            engine.voices
+                                ?.filter { it.locale.language == locale.language && !it.isNetworkConnectionRequired }
+                                ?.minByOrNull { it.name }
+                                ?.let { engine.voice = it }
+                        }
                         engine.setOnUtteranceProgressListener(listener)
                         State.READY
                     }
@@ -90,7 +99,8 @@ class AiSpeaker(
             else -> {
                 val id = UUID.randomUUID().toString()
                 currentId = id
-                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
+                val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, CallAudio.VOICE_GAIN) }
+                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, id)
             }
         }
     }

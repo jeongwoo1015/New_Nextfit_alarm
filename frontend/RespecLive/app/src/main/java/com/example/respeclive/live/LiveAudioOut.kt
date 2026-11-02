@@ -1,10 +1,10 @@
 package com.example.respeclive.live
 
-import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.SystemClock
 import android.util.Log
+import com.example.respeclive.audio.CallAudio
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -30,6 +30,7 @@ class LiveAudioOut {
     private val queuedBytes = AtomicLong(0)
     @Volatile private var playUntilMs = 0L     // 지금까지 보낸 소리가 끝나는 예상 시각
     @Volatile private var epoch = 0            // clear() 할 때마다 증가 (남은 조각 재생 중단용)
+    @Volatile private var holdUntilMs = 0L     // 이 시각(elapsedRealtime)까지는 받은 소리를 재생하지 않고 모아 둠
     private val sliceBytes = LiveConfig.OUTPUT_SAMPLE_RATE * 2 * 20 / 1000
     private val bytesPerMs = LiveConfig.OUTPUT_SAMPLE_RATE * 2 / 1000L       // 48
 
@@ -38,12 +39,7 @@ class LiveAudioOut {
         val rate = LiveConfig.OUTPUT_SAMPLE_RATE
         val minBuf = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val t = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-            )
+            .setAudioAttributes(CallAudio.VOICE_ATTRIBUTES)
             .setAudioFormat(
                 AudioFormat.Builder()
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
@@ -54,6 +50,7 @@ class LiveAudioOut {
             .setBufferSizeInBytes(maxOf(minBuf, rate))      // 약 0.5초
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
+        t.setVolume(CallAudio.VOICE_GAIN)
         t.play()
         track = t
 
@@ -61,8 +58,9 @@ class LiveAudioOut {
         queue = q
         job = scope.launch {
             for (chunk in q) {
-                queuedBytes.addAndGet(-chunk.size.toLong())
                 val myEpoch = epoch
+                while (myEpoch == epoch && SystemClock.elapsedRealtime() < holdUntilMs) delay(20)
+                queuedBytes.addAndGet(-chunk.size.toLong())
                 var off = 0
                 while (off < chunk.size && myEpoch == epoch) {
                     val n = minOf(sliceBytes, chunk.size - off)
@@ -93,9 +91,15 @@ class LiveAudioOut {
         if (queue.trySend(pcm).isFailure) queuedBytes.addAndGet(-pcm.size.toLong())
     }
 
+    /** until(elapsedRealtime)까지 재생을 미룸. 그동안 온 소리는 버리지 않고 모아 두었다가 이어서 재생 */
+    fun holdUntil(until: Long) {
+        holdUntilMs = until
+    }
+
     /** 끼어들기: 대기 중인 소리와 재생 버퍼를 모두 버림 */
     fun clear() {
         epoch++
+        holdUntilMs = 0L
         while (true) {
             val c = queue.tryReceive().getOrNull() ?: break
             queuedBytes.addAndGet(-c.size.toLong())
@@ -110,6 +114,10 @@ class LiveAudioOut {
         }
         playUntilMs = 0L
     }
+
+    /** 아직 재생하지 않은 소리 길이 (대기열 + 재생 버퍼) */
+    fun pendingMs(): Long =
+        queuedBytes.get() / bytesPerMs + maxOf(0L, playUntilMs - SystemClock.elapsedRealtime())
 
     /** AI가 지금 말하고 있는지 (대기열이 있거나 재생이 끝나지 않음) */
     fun isSpeaking(): Boolean =

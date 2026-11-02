@@ -2,6 +2,7 @@ package com.example.respeclive.ui.night
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -16,8 +17,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.VolumeOff
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Mic
@@ -39,14 +38,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.respeclive.audio.AiSpeaker
+import com.example.respeclive.audio.CallAudio
 import com.example.respeclive.audio.SleepMusicPlayer
 import com.example.respeclive.audio.VoiceRecorder
+import com.example.respeclive.audio.VoiceTranscriber
 import com.example.respeclive.data.ApiClient
 import com.example.respeclive.data.MusicStore
 import com.example.respeclive.data.NightMessageStore
 import com.example.respeclive.data.RespecApi
 import com.example.respeclive.live.LiveClient
 import com.example.respeclive.ui.common.SubtitleBox
+import com.example.respeclive.ui.common.rememberHeldUserLine
+import com.example.respeclive.ui.common.rememberSpokenPage
 import com.example.respeclive.ui.common.typeSubtitlePages
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.CompletableDeferred
@@ -108,6 +111,7 @@ fun NightChatScreen(onClose: () -> Unit) {
     val userLevel by client.userLevel.collectAsState()
     val lines by client.transcript.collectAsState()
     val liveMessage by client.message.collectAsState()
+    val spoken by client.spokenFraction.collectAsState()
 
     var talking by remember { mutableStateOf(true) }      // Live 대화 단계
     var phase by remember { mutableStateOf(Phase.AiSpeaking) }   // 대화 뒤 한 마디 단계의 상태
@@ -117,15 +121,17 @@ fun NightChatScreen(onClose: () -> Unit) {
     var elapsed by remember { mutableIntStateOf(0) }
     var musicOn by remember { mutableStateOf(true) }
     var muted by remember { mutableStateOf(false) }
-    var speakerOn by remember { mutableStateOf(true) }
     var saveStep by remember { mutableStateOf(false) }
     var pendingFile by remember { mutableStateOf<File?>(null) }
+    var pendingText by remember { mutableStateOf<String?>(null) }   // 녹음한 한 마디를 받아쓴 글자
+    var transcribing by remember { mutableStateOf(false) }
     var skipAi by remember { mutableStateOf(false) }
     var skipSave by remember { mutableStateOf(false) }
     var finishNow by remember { mutableStateOf(false) }
     var sleepUrl by remember { mutableStateOf<String?>(null) }
     var musicReady by remember { mutableStateOf(false) }   // 서버 수면 음악 URL 조회를 마침 (대화가 끝난 뒤)
     var sleeping by remember { mutableStateOf(false) }     // 마무리 뒤 수면 음악만 흐르는 상태
+    var liveSaying by remember { mutableStateOf(false) }   // 안내 문장을 AI 목소리로 읽는 중 (자막은 AI가 실제로 한 말)
 
     // ---- 마이크 권한: 결과를 받은 뒤 Live 연결 ----
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -142,11 +148,29 @@ fun NightChatScreen(onClose: () -> Unit) {
         if (has) micReady.complete(Unit) else permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
+    // ---- 통화 볼륨으로 통일: 화면에 있는 동안 통화 모드 유지. 수면 음악만 남으면 풀고 미디어 볼륨으로 ----
+    val callAudioHeld = remember { booleanArrayOf(false) }
+    fun releaseCallAudio() {
+        if (callAudioHeld[0]) CallAudio.release(context)
+        callAudioHeld[0] = false
+    }
+    LaunchedEffect(sleeping) {
+        if (sleeping) {
+            releaseCallAudio()
+            CallAudio.volumeKeys(context, AudioManager.STREAM_MUSIC)
+        }
+    }
+
     // ---- 정리 + 화면 켜짐 유지 ----
     DisposableEffect(Unit) {
         view.keepScreenOn = true
+        CallAudio.acquire(context)
+        callAudioHeld[0] = true
+        CallAudio.volumeKeys(context, AudioManager.STREAM_VOICE_CALL)
         onDispose {
             view.keepScreenOn = false
+            releaseCallAudio()
+            CallAudio.volumeKeys(context, AudioManager.USE_DEFAULT_STREAM_TYPE)
             client.release()
             recorder.cancel()
             previewHolder[0]?.release()
@@ -168,12 +192,6 @@ fun NightChatScreen(onClose: () -> Unit) {
         }
     }
 
-    LaunchedEffect(speakerOn) {
-        client.setSpeaker(speakerOn)
-        speaker.enabled = speakerOn
-        if (!speakerOn) speaker.stop()
-    }
-
     LaunchedEffect(muted) { client.setMuted(muted) }
 
     LaunchedEffect(Unit) {
@@ -186,11 +204,18 @@ fun NightChatScreen(onClose: () -> Unit) {
     // ---- 굿나잇콜 전체 진행 ----
     LaunchedEffect(Unit) {
 
-        // 고정 안내 문장: 자막(페이지별) + 음성(TTS)
+        // 고정 안내 문장: 자막(페이지별) + 음성. 대화와 같은 AI 목소리로 읽고, 연결이 끊겼으면 기기 TTS
         suspend fun say(text: String) {
             phase = Phase.AiSpeaking
             subtitle = ""
             skipAi = false
+            liveSaying = true
+            val byLive = client.speakExact(text)
+            liveSaying = false
+            if (byLive) {
+                subtitle = client.transcript.value.getOrNull(client.exactLineIndex)?.text ?: text
+                return
+            }
             coroutineScope {
                 val typing = launch {
                     typeSubtitlePages(text, { subtitle = it }, { skipAi })
@@ -285,7 +310,8 @@ fun NightChatScreen(onClose: () -> Unit) {
             toolEvents.onReceive { client.awaitSpeechEnd() }
             endTalk.onReceive { }
         }
-        client.stop()
+        client.pauseMic()     // 연결은 안내 문장을 읽을 때까지 유지 (같은 목소리), 마이크는 한 마디 녹음에 넘김
+        val talkEndedAt = System.currentTimeMillis()
         talking = false
 
         // 수면 음악 URL 조회, 내일 아침 재기상 음악 미리 받기 (12시간 유효)
@@ -300,7 +326,7 @@ fun NightChatScreen(onClose: () -> Unit) {
         val hasUser = turns.any { it.role == LiveClient.Role.User && it.text.isNotBlank() }
         val transcript = client.transcriptJson()
         val startedAt = isoUtc(client.startedAtMs)
-        val endedAt = isoUtc(client.endedAtMs)
+        val endedAt = isoUtc(talkEndedAt)
         val appCtx = context.applicationContext
         val saveJob = ApiClient.scope.async {
             if (!hasUser) return@async null
@@ -325,19 +351,31 @@ fun NightChatScreen(onClose: () -> Unit) {
                 continue
             }
             pendingFile = rec
+            pendingText = null
             reviewChoice.tryReceive()
             phase = Phase.Review
+            val textJob = async {
+                transcribing = true
+                VoiceTranscriber.transcribe(context, rec).also {
+                    pendingText = it
+                    transcribing = false
+                }
+            }
             val save = reviewChoice.receive()
             previewHolder[0]?.release()
             previewHolder[0] = null
             if (save) {
                 voice = rec
-                NightMessageStore.save(context, rec)   // 기기에도 보관 (서버 조회 실패 시 대체 재생)
+                // 기기에도 보관 (서버 조회 실패 시 대체 재생, 아침에 글자로도 보여 줌)
+                NightMessageStore.save(context, rec, withTimeoutOrNull(5_000) { textJob.await() })
                 Toast.makeText(context, "내일의 나에게 남긴 한 마디를 저장했어요", Toast.LENGTH_SHORT).show()
             } else {
+                textJob.cancel()
                 rec.delete()
             }
+            transcribing = false
             pendingFile = null
+            pendingText = null
         }
         saveStep = false
 
@@ -350,6 +388,7 @@ fun NightChatScreen(onClose: () -> Unit) {
         }
 
         say(if (voice != null) CLOSING_SAVED else CLOSING)
+        client.stop()
 
         val saved = withTimeoutOrNull(SAVE_WAIT_MS) { uploadJob.await() } == true
         if (!saved && (hasUser || voice != null)) {
@@ -368,6 +407,7 @@ fun NightChatScreen(onClose: () -> Unit) {
     fun skipSpeech() {
         if (!talking && phase == Phase.AiSpeaking) {
             skipAi = true
+            client.interruptSpeech()
             speaker.stop()
         }
     }
@@ -377,12 +417,14 @@ fun NightChatScreen(onClose: () -> Unit) {
         try {
             previewHolder[0]?.release()
             previewHolder[0] = MediaPlayer().apply {
+                setAudioAttributes(CallAudio.VOICE_ATTRIBUTES)   // AI 음성과 같은 통화 볼륨
                 setDataSource(file.absolutePath)
                 setOnCompletionListener {
                     it.release()
                     previewHolder[0] = null
                 }
                 prepare()
+                setVolume(CallAudio.VOICE_GAIN, CallAudio.VOICE_GAIN)
                 start()
             }
         } catch (e: Exception) {
@@ -408,12 +450,33 @@ fun NightChatScreen(onClose: () -> Unit) {
         status == LiveClient.Status.Live && !aiSpeaking -> Phase.Listening
         else -> Phase.AiSpeaking
     }
+    // AI가 바로 대답해도 사용자 말을 잠깐 더 보여 줌
+    val heldUser = rememberHeldUserLine(lines).takeIf { talking && status == LiveClient.Status.Live }
+    val lastLine = heldUser ?: lines.lastOrNull()
+    val shownFromUser = when {
+        !talking -> phase == Phase.Review
+        else -> status == LiveClient.Status.Live && lastLine?.role == LiveClient.Role.User
+    }
+    // AI가 말하는 줄: 지금 말하는 박스를 통째로 먼저 보여 줌
+    val spokenLine = when {
+        !talking && liveSaying -> lines.getOrNull(client.exactLineIndex)
+        talking && status == LiveClient.Status.Live && lastLine?.role == LiveClient.Role.Assistant -> lastLine
+        else -> null
+    }
+    val spokenPage = spokenLine?.let { rememberSpokenPage(it.atMs, it.text, spoken) }
     val shownSubtitle = when {
+        spokenPage != null -> spokenPage.text
+        !talking && phase == Phase.Review -> when {
+            pendingText != null -> "“$pendingText”"
+            transcribing -> "녹음한 말을 글자로 바꾸는 중…"
+            else -> "녹음은 됐지만 글자로 바꾸지 못했어요. 들어보기로 확인해 주세요"
+        }
+        !talking && liveSaying -> ""
         !talking -> subtitle
         status == LiveClient.Status.Error -> liveMessage ?: "연결이 끊겼어요. 통화 종료를 누르면 한 마디 남기기로 넘어가요"
         status == LiveClient.Status.Reconnecting -> "연결이 잠시 끊겨서 다시 연결하는 중…"
         status != LiveClient.Status.Live -> "리스펙과 연결하는 중…"
-        else -> lines.lastOrNull { it.role == LiveClient.Role.Assistant }?.text.orEmpty()
+        else -> lastLine?.text.orEmpty()
     }
 
     // ---- UI ----
@@ -434,10 +497,11 @@ fun NightChatScreen(onClose: () -> Unit) {
             )
         }
 
-        SubtitleBox(shownSubtitle)
+        SubtitleBox(shownSubtitle, fromUser = shownFromUser, pageKey = spokenPage?.key)
         Spacer(Modifier.height(12.dp))
 
-        AnswerArea(
+        // 한 마디 녹음 단계에서만 버튼 표시 (대화 중에는 통화 종료 버튼으로 끝냄)
+        if (!talking && phase != Phase.AiSpeaking) AnswerArea(
             phase = shownPhase,
             isSaveStep = saveStep,
             sleeping = sleeping,
@@ -456,7 +520,7 @@ fun NightChatScreen(onClose: () -> Unit) {
 
         Row(
             Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            horizontalArrangement = Arrangement.spacedBy(48.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.Top
         ) {
             RoundControl(
@@ -479,12 +543,6 @@ fun NightChatScreen(onClose: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Text("통화 종료", color = RespecColors.TextSub, fontSize = 13.sp)
             }
-            RoundControl(
-                icon = if (speakerOn) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff,
-                label = "스피커",
-                active = !speakerOn,
-                onClick = { speakerOn = !speakerOn }
-            )
         }
         Spacer(Modifier.height(8.dp))
     }
@@ -567,24 +625,24 @@ private fun VoiceOrb(phase: Phase, level: Float, isSaveStep: Boolean, onTap: () 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.size(290.dp).aspectRatio(1f)
+            modifier = Modifier.size(230.dp).aspectRatio(1f)
         ) {
             Box(
                 Modifier
-                    .size(270.dp)
+                    .size(216.dp)
                     .scale(outerScale)
                     .border(2.dp, tint.copy(alpha = 0.35f), CircleShape)
             )
             Box(
                 Modifier
-                    .size(230.dp)
+                    .size(184.dp)
                     .scale(if (reactive) 1f + smoothLevel * 0.15f else pulse)
                     .clip(CircleShape)
                     .background(tint.copy(alpha = 0.08f))
             )
             Box(
                 Modifier
-                    .size(190.dp)
+                    .size(150.dp)
                     .clip(CircleShape)
                     .background(RespecColors.Card)
                     .border(2.dp, tint.copy(alpha = 0.7f), CircleShape)
@@ -595,7 +653,7 @@ private fun VoiceOrb(phase: Phase, level: Float, isSaveStep: Boolean, onTap: () 
                     if (phase == Phase.Recording || phase == Phase.Listening) Icons.Filled.Mic else Icons.Filled.Bedtime,
                     null,
                     tint = tint,
-                    modifier = Modifier.size(80.dp)
+                    modifier = Modifier.size(64.dp)
                 )
             }
         }
@@ -618,16 +676,9 @@ private fun AnswerArea(
 ) {
     val time = "%02d:%02d".format(recordSeconds / 60, recordSeconds % 60)
 
-    Box(Modifier.fillMaxWidth().height(145.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
         when (phase) {
-            Phase.AiSpeaking -> {
-                Text(
-                    if (sleeping) "수면 음악 재생 중" else "리스펙의 이야기가 끝나면 바로 말할 수 있어요",
-                    color = RespecColors.TextSub,
-                    fontSize = 14.sp,
-                    textAlign = TextAlign.Center
-                )
-            }
+            Phase.AiSpeaking -> Unit
 
             Phase.Listening, Phase.Recording -> {
                 val recording = phase == Phase.Recording

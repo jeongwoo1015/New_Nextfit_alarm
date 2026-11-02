@@ -12,18 +12,21 @@ object NightMessageStore {
     private const val PREFS = "respec_night"
     private const val KEY_PATH = "tomorrow_message_path"
     private const val KEY_SAVED_AT = "tomorrow_message_saved_at"
+    private const val KEY_TEXT = "tomorrow_message_text"
     private const val KEY_APPLY_DATE = "night_apply_date"
     private const val KEY_RECORD_ID = "night_record_id"
 
     fun newMessageFile(context: Context): File =
         File(context.filesDir, "messages/message_${System.currentTimeMillis()}.m4a")
 
-    fun save(context: Context, file: File) {
+    /** text: 녹음을 받아쓴 글자 (못 바꿨으면 null). 아침에 재생하면서 함께 보여 줌 */
+    fun save(context: Context, file: File, text: String?) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs.getString(KEY_PATH, null)?.let { if (it != file.absolutePath) File(it).delete() } // 이전 메시지 삭제
         prefs.edit()
             .putString(KEY_PATH, file.absolutePath)
             .putLong(KEY_SAVED_AT, System.currentTimeMillis())
+            .putString(KEY_TEXT, text)
             .apply()
     }
 
@@ -32,6 +35,9 @@ object NightMessageStore {
             .getString(KEY_PATH, null) ?: return null
         return File(path).takeIf { it.exists() }
     }
+
+    fun latestText(context: Context): String? =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_TEXT, null)
 
     /** 마지막으로 저장한 시각 (없으면 0) */
     fun savedAtMillis(context: Context): Long =

@@ -1,6 +1,5 @@
 package com.example.respeclive.audio
 
-import android.media.AudioAttributes
 import android.media.MediaPlayer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -39,15 +38,11 @@ class MessagePlayer(private val baseUrl: String = "") {
         release()
         val mp = MediaPlayer()
         return try {
-            mp.setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-            )
+            mp.setAudioAttributes(CallAudio.VOICE_ATTRIBUTES)     // 통화 화면에서 재생하므로 통화 볼륨
             setSource(mp)
             mp.setOnCompletionListener { onComplete() }
             mp.prepare()
+            mp.setVolume(CallAudio.VOICE_GAIN, CallAudio.VOICE_GAIN)
             player = mp
             true
         } catch (e: Exception) {

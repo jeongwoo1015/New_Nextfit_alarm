@@ -2,6 +2,7 @@ package com.example.respeclive.ui.morning
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -18,8 +19,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.VolumeOff
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -40,8 +39,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.example.respeclive.audio.AiSpeaker
 import com.example.respeclive.audio.AlarmSoundPlayer
+import com.example.respeclive.audio.CallAudio
 import com.example.respeclive.audio.MessagePlayer
+import com.example.respeclive.audio.VoiceAnswer
+import com.example.respeclive.audio.VoiceTranscriber
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.data.ApiClient
@@ -52,8 +55,11 @@ import com.example.respeclive.data.RoutineRepository
 import com.example.respeclive.live.LiveAuth
 import com.example.respeclive.live.LiveClient
 import com.example.respeclive.ui.common.SubtitleBox
+import com.example.respeclive.ui.common.rememberHeldUserLine
+import com.example.respeclive.ui.common.rememberSpokenPage
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -66,14 +72,25 @@ import java.util.Date
 import java.util.Locale
 
 private enum class MPhase { AiSpeaking, Playing, Listening }
-private enum class Stage { Preparing, Message, Briefing, Coaching, Finished }
+private enum class Stage { Preparing, Message, Briefing, Coaching, Wrapup, Finished }   // Wrapup: 마무리 안내
 private data class Banner(val title: String, val sub: String)
 
-// 말 대신 누를 수 있는 대답 (Live에 사용자 글자 입력으로 보냄)
-private const val BTN_DONE = "다 했어요"
-private const val BTN_LATER = "다음에 할게요"
-private const val BTN_WAIT = "잠깐만요"
-private const val BTN_READY = "준비됐어요"
+// 말 대신 누를 수 있는 대답 (Live에 사용자 글자 입력으로 보냄). 루틴 단계: 건너뛰기 / 완료
+private const val BTN_DONE = "완료했어요"
+private const val BTN_LATER = "오늘은 건너뛸게요"
+
+/** 앱이 보내는 이벤트: 코칭 중 모든 단계를 판정함 */
+private const val ROUTINE_OVER = "routine_over"
+
+private const val ASK_LISTEN = "어젯밤에 남긴 한 마디를 들어 볼까요?"
+
+/** 다시 듣기 버튼을 이만큼 보여 준 뒤 누르지 않으면 통화를 마침 */
+private const val REPLAY_WAIT_MS = 30_000L
+
+/** 이미 루틴을 다 마친 날 브리핑 시작 신호에 덧붙임: 루틴 안내·시작 질문을 하지 않게 함 */
+private const val ALREADY_DONE_NOTE = "\n(앱 안내: 사용자는 오늘 루틴을 이미 모두 마쳤습니다. 브리핑에서 루틴이나 콘텐츠를 안내하거나 " +
+        "시작할 준비가 됐는지 묻지 말고, start_routine도 호출하지 마세요. 브리핑 마지막에는 오늘 루틴을 이미 다 마쳤다고 짧게 칭찬하고, " +
+        "사용자가 끝내겠다고 하면 작별 인사 뒤 end_session을 호출해 주세요.)"
 
 /** AI 질문 뒤 이 시간 동안 대답이 없으면 재기상 음악 (브리핑의 기상 확인 전까지만) */
 private const val REWAKE_SILENCE_MS = 8_000L
@@ -81,7 +98,9 @@ private const val REWAKE_LEVEL = 3
 
 /**
  * 아침 대화 (Gemini Live). 지시문·함수는 서버가 토큰에 고정한다 (ai/live, AI CONTRACTS 2절).
- * 세션 시작 → 어젯밤 한 마디 → 브리핑 세션 → start_routine → 코칭 세션(새 토큰) → end_session 또는 통화 종료
+ * 세션 시작 → 브리핑 세션 → start_routine → 코칭 세션(새 토큰) → end_session → 어젯밤 한 마디 → 종료
+ * 루틴을 마쳤으면: 한 마디를 들을지 묻기(말이나 버튼으로 대답) → 들으면 재생 → [다시 듣기] 버튼 (안내도 같은 AI 목소리)
+ * 이미 다 마친 날 다시 열면 브리핑에서 루틴을 안내하지 않음
  * initialSession: 알람 수신 화면에서 이미 만든 세션 (없으면 여기서 만듦)
  */
 @Composable
@@ -92,6 +111,8 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
 
     val client = remember { LiveClient(context) }
     val messagePlayer = remember { MessagePlayer() }
+    val speaker = remember { AiSpeaker(context) }     // Live 연결이 끊겼을 때만 마무리 안내를 대신 읽음
+    val replayChoice = remember { Channel<Boolean>(Channel.CONFLATED) }   // true=다시 듣기
     val rewakePlayer = remember { AlarmSoundPlayer(context) }
     val messageDone = remember { arrayOfNulls<CompletableDeferred<Unit>>(1) }
     val toolEvents = remember { Channel<String>(Channel.UNLIMITED) }   // start_routine / end_session
@@ -102,6 +123,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
     val aiSpeaking by client.aiSpeaking.collectAsState()
     val lines by client.transcript.collectAsState()
     val liveMessage by client.message.collectAsState()
+    val spoken by client.spokenFraction.collectAsState()
 
     var stage by remember { mutableStateOf(Stage.Preparing) }
     var notice by remember { mutableStateOf("리스펙이 준비하는 중…") }
@@ -110,9 +132,15 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
     var banner by remember { mutableStateOf<Banner?>(null) }
     var elapsed by remember { mutableIntStateOf(0) }
     var muted by remember { mutableStateOf(false) }
-    var speakerOn by remember { mutableStateOf(true) }
     var wakeChecked by remember { mutableStateOf(false) }   // 확인 질문에 대답함 → 재기상 음악 더 이상 안 틂
     var rewaking by remember { mutableStateOf(false) }
+    var messageText by remember { mutableStateOf<String?>(null) }   // 어젯밤 한 마디를 받아쓴 글자
+    var wrapText by remember { mutableStateOf("") }        // 마무리 안내 문장
+    var askingReplay by remember { mutableStateOf(false) }
+    var replayLabel by remember { mutableStateOf("들어 볼래요") }
+    var replayNoLabel by remember { mutableStateOf("괜찮아요") }
+    var hearingAnswer by remember { mutableStateOf(false) }   // "들어 볼까요?"에 대한 말 대답을 듣는 중
+    var liveSaying by remember { mutableStateOf(false) }   // 마무리 안내를 AI 목소리로 읽는 중 (자막은 AI가 실제로 한 말)
 
     // ---- 마이크 권한: 받기 전에 Live를 열면 마이크가 열리지 않으므로 결과를 기다렸다가 연결 ----
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -130,11 +158,17 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
     }
 
     // ---- 정리 + 화면 켜짐 유지. 화면을 벗어나면 서버에 세션 종료 기록 ----
+    // 통화 볼륨으로 통일: 브리핑·코칭 사이와 마지막 한 마디 재생 중에도 통화 모드 유지
     DisposableEffect(Unit) {
         view.keepScreenOn = true
+        CallAudio.acquire(context)
+        CallAudio.volumeKeys(context, AudioManager.STREAM_VOICE_CALL)
         onDispose {
             view.keepScreenOn = false
+            CallAudio.release(context)
+            CallAudio.volumeKeys(context, AudioManager.USE_DEFAULT_STREAM_TYPE)
             client.release()
+            speaker.shutdown()
             messagePlayer.release()
             rewakePlayer.stop()
             RoutineRepository.sessionId?.let { sid ->
@@ -146,7 +180,6 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
     }
 
     LaunchedEffect(muted) { client.setMuted(muted) }
-    LaunchedEffect(speakerOn) { client.setSpeaker(speakerOn) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -243,11 +276,11 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
             }
         }
 
-        // 어젯밤 남긴 한 마디: 서버 음성(서명 URL)을 먼저 시도하고, 안 되면 기기 파일로 재생
-        suspend fun playLastNightMessage() {
+        // 어젯밤 남긴 한 마디 찾기: 서버 음성(서명 URL)과 기기 파일. 오늘 아침용이 없으면 null
+        suspend fun findLastNightMessage(): Pair<String?, java.io.File?>? {
             val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
             val applyDate = NightMessageStore.applyDate(context)
-            if (applyDate != null && applyDate != today) return       // 오늘 아침용 메시지가 아님
+            if (applyDate != null && applyDate != today) return null       // 오늘 아침용 메시지가 아님
 
             val url = NightMessageStore.recordId(context)
                 ?.let { id -> withTimeoutOrNull(5000) { RespecApi.nightRecord(id) } }
@@ -255,10 +288,20 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                 ?.optString("voice_url")
                 ?.takeIf { it.isNotBlank() }
             val file = NightMessageStore.latestMessage(context)
-            if (url == null && file == null) return
+            return if (url == null && file == null) null else url to file
+        }
+
+        // 서버 음성을 먼저 시도하고, 안 되면 기기 파일로 재생. 재생했으면 true
+        suspend fun playLastNightMessage(found: Pair<String?, java.io.File?>): Boolean {
+            val (url, file) = found
 
             stage = Stage.Message
             notice = "어젯밤의 내가 남긴 한 마디"
+            // 밤에 받아쓴 글자. 없으면 기기 파일을 지금 받아씀 (서버 음성만 있으면 글자 없이 재생)
+            messageText = NightMessageStore.latestText(context)
+            if (messageText == null && file != null) {
+                launch { VoiceTranscriber.transcribe(context, file)?.let { if (stage == Stage.Message) messageText = it } }
+            }
             val done = CompletableDeferred<Unit>()
             messageDone[0] = done
             val onEnd: () -> Unit = { done.complete(Unit) }
@@ -270,6 +313,18 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
             }
             messagePlayer.release()
             messageDone[0] = null
+            return ok
+        }
+
+        // 마무리 안내: 연결된 AI 목소리로 그대로 읽게 하고, 연결이 없으면 기기 TTS
+        suspend fun say(text: String) {
+            stage = Stage.Wrapup
+            wrapText = text
+            liveSaying = true
+            val byLive = client.speakExact(text)
+            liveSaying = false
+            if (byLive) client.transcript.value.getOrNull(client.exactLineIndex)?.text?.let { wrapText = it }
+            else speaker.speakAndWait(text)
         }
 
         // 1) 오늘 세션 (수신 화면에서 만들었으면 그대로, 아니면 지금 만듦)
@@ -286,39 +341,45 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
         RoutineRepository.applyView(started)
         val sid = RoutineRepository.sessionId ?: return@LaunchedEffect
         sessionId = sid
+        val messageJob = async { findLastNightMessage() }
 
-        // 2) 어젯밤 한 마디
-        playLastNightMessage()
-
-        // 3) 브리핑 세션
+        // 2) 브리핑 세션. 이미 루틴을 다 마친 날이면 루틴 안내를 하지 않도록 시작 신호에 덧붙임
+        val doneAtStart = items.isNotEmpty() && items.all { it.done }
         micReady.await()
         stage = Stage.Briefing
         notice = "리스펙과 연결하는 중…"
-        client.start { RespecApi.briefingToken(sid) ?: RespecApi.tokenError() }
+        client.start {
+            val auth = RespecApi.briefingToken(sid) ?: RespecApi.tokenError()
+            if (doneAtStart) LiveAuth(auth.token, auth.wsUrl, auth.model, auth.startSignal + ALREADY_DONE_NOTE) else auth
+        }
 
-        // 4) 함수 호출에 따라 다음 세션으로 넘어가거나 종료
+        // 3) 함수 호출에 따라 다음 세션으로 넘어가거나 종료
         for (event in toolEvents) {
-            if (event == "end_session") {
-                client.awaitSpeechEnd()      // 작별 인사를 끝까지 들려준 뒤 닫음
-                client.stop()
+            // end_session, 또는 루틴의 모든 단계를 판정함(routine_over): AI의 마지막 말까지만 듣고 바로 마무리
+            if (event == "end_session" || event == ROUTINE_OVER) {
+                client.awaitSpeechEnd()      // 작별 인사를 끝까지 들려줌. 연결은 마무리 안내까지 유지
+                client.pauseMic()
                 break
             }
 
-            // start_routine: 지금 세션을 닫고 새 토큰으로 코칭(콘텐츠 → 기본 루틴 순) 세션 시작
+            // start_routine: 코칭 토큰을 받으면 지금 세션을 닫고 새 토큰으로 코칭(콘텐츠 → 기본 루틴 순) 세션 시작
             client.awaitSpeechEnd()
-            client.stop()
+            client.pauseMic()
             stage = Stage.Coaching
             notice = "루틴을 준비하는 중…"
             val first = RespecApi.coachingToken(sid)
             val firstAuth = first.auth
             if (firstAuth == null) {
-                notice = when (first.code) {
-                    "COACHING_SKIPPED" -> "오늘은 루틴을 쉬어 가는 날이에요. 좋은 하루 보내세요!"
-                    "ALL_STEPS_CHECKED" -> "오늘 루틴을 이미 모두 마쳤어요. 정말 멋져요!"
-                    else -> "루틴을 시작하지 못했어요. 루틴 탭에서 직접 체크해 주세요."
+                first.steps?.let { RoutineRepository.applySteps(it) }
+                if (first.code != "ALL_STEPS_CHECKED") {      // 다 마친 날은 아래에서 완수 안내
+                    say(
+                        if (first.code == "COACHING_SKIPPED") "오늘은 루틴을 쉬어 가는 날이에요. 좋은 하루 보내세요!"
+                        else "루틴을 시작하지 못했어요. 루틴 탭에서 직접 체크해 주세요."
+                    )
                 }
                 break
             }
+            client.stop()
             first.steps?.let { RoutineRepository.applySteps(it) }
 
             // 첫 연결은 받아 둔 토큰, 재연결은 서버가 남은 단계만 넣은 새 토큰
@@ -331,7 +392,55 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
             }
         }
 
+        // 4) 브리핑·루틴을 마친 뒤 어젯밤 한 마디.
+        //    루틴을 마쳤으면 (마무리 인사는 AI가 코칭 끝에 함) 바로 들을지 묻기 → 들으면 재생 → 다시 들을지 묻기 (반복).
+        //    버튼은 묻기 시작할 때부터 보여서 AI가 다 말하기 전에도 누를 수 있음
+        val finished = items.isNotEmpty() && items.none { !it.done && !it.skipped }
+        val message = messageJob.await()
+        var played = false
+        if (message != null && finished) {
+            // 들을지 묻기: 버튼 또는 말("그래", "아니")로 대답. 말은 기기 음성 인식으로 들음 (Live 마이크는 닫혀 있음)
+            replayLabel = "들어 볼래요"
+            replayNoLabel = "괜찮아요"
+            replayChoice.tryReceive()
+            askingReplay = true
+            val ask = launch {
+                say(ASK_LISTEN)
+                hearingAnswer = true
+                repeat(2) {                       // 못 알아들으면 한 번 더 들음. 그래도 없으면 버튼만 기다림
+                    VoiceAnswer.yesNo(context)?.let { replayChoice.trySend(it); return@launch }
+                }
+            }
+            val listen = replayChoice.receive()
+            if (ask.isActive) {          // 다 묻기 전에 눌렀으면 하던 말·듣기를 끊음
+                client.interruptSpeech()
+                speaker.stop()
+                ask.cancel()
+                liveSaying = false
+            }
+            hearingAnswer = false
+            askingReplay = false
+            played = listen && playLastNightMessage(message)
+        } else if (message != null) {
+            played = playLastNightMessage(message)
+        }
+        // 한 번 들은 뒤에는 다시 묻지 않고 [다시 듣기] 버튼만 보여 줌
+        while (played && message != null) {
+            stage = Stage.Wrapup
+            wrapText = "다시 들으려면 [다시 듣기]를 눌러 주세요."
+            replayLabel = "다시 듣기"
+            replayNoLabel = "마칠게요"
+            replayChoice.tryReceive()
+            askingReplay = true
+            val again = withTimeoutOrNull(REPLAY_WAIT_MS) { replayChoice.receive() } == true
+            askingReplay = false
+            if (!again) break
+            played = playLastNightMessage(message)
+        }
+        client.stop()
+
         stage = Stage.Finished
+        notice = "좋은 하루 보내세요!"
         delay(2500)
         onFinish()
     }
@@ -345,18 +454,40 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
     val live = status == LiveClient.Status.Live
     val phase = when {
         stage == Stage.Message -> MPhase.Playing
+        stage == Stage.Wrapup -> if (hearingAnswer) MPhase.Listening else MPhase.AiSpeaking
         live && !aiSpeaking -> MPhase.Listening
         else -> MPhase.AiSpeaking
     }
+    // AI가 바로 대답해도 사용자 말을 잠깐 더 보여 줌
+    val heldUser = rememberHeldUserLine(lines).takeIf { live && (stage == Stage.Briefing || stage == Stage.Coaching) }
+    val lastLine = heldUser ?: lines.lastOrNull()
+    val subtitleFromUser = when (stage) {
+        Stage.Message -> messageText != null
+        Stage.Briefing, Stage.Coaching -> live && lastLine?.role == LiveClient.Role.User
+        else -> false
+    }
+    // AI가 말하는 줄: 지금 말하는 박스를 통째로 먼저 보여 줌
+    val spokenLine = when {
+        stage == Stage.Wrapup && liveSaying -> lines.getOrNull(client.exactLineIndex)
+        (stage == Stage.Briefing || stage == Stage.Coaching) && live && lastLine?.role == LiveClient.Role.Assistant -> lastLine
+        else -> null
+    }
+    val spokenPage = spokenLine?.let { rememberSpokenPage(it.atMs, it.text, spoken) }
     val subtitle = when {
-        stage == Stage.Message || stage == Stage.Preparing || stage == Stage.Finished -> notice
+        spokenPage != null -> spokenPage.text
+        stage == Stage.Message -> messageText?.let { "“$it”" } ?: notice
+        stage == Stage.Wrapup && liveSaying -> ""
+        stage == Stage.Wrapup -> wrapText
+        stage == Stage.Preparing || stage == Stage.Finished -> notice
         status == LiveClient.Status.Error -> liveMessage ?: "연결이 끊겼어요"
         status == LiveClient.Status.Reconnecting -> "연결이 잠시 끊겨서 다시 연결하는 중…"
-        else -> lines.lastOrNull { it.role == LiveClient.Role.Assistant }?.text ?: notice
+        else -> lastLine?.text ?: notice
     }
-    val heard = lines.lastOrNull()?.takeIf { it.role == LiveClient.Role.User }?.text.orEmpty()
     val doneCount = items.count { it.done }
     val currentTitle = items.firstOrNull { !it.done && !it.skipped }?.title
+    // 루틴을 모두 판정했으면 완료/건너뛰기 버튼을 숨기고, 코칭을 끌지 않고 바로 마무리로
+    val routineOver = stage == Stage.Coaching && items.isNotEmpty() && currentTitle == null
+    LaunchedEffect(routineOver) { if (routineOver) toolEvents.trySend(ROUTINE_OVER) }
 
     // ---- UI ----
     Box(
@@ -374,7 +505,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                     GaugeRing(
                         total = items.size,
                         done = doneCount,
-                        modifier = Modifier.size(290.dp).aspectRatio(1f)
+                        modifier = Modifier.size(240.dp).aspectRatio(1f)
                     ) {
                         val tint = when (phase) {
                             MPhase.AiSpeaking -> RespecColors.Lime
@@ -383,7 +514,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                         }
                         Column(
                             Modifier
-                                .size(228.dp)
+                                .size(188.dp)
                                 .clip(CircleShape)
                                 .background(RespecColors.Card)
                                 .clickable(enabled = phase == MPhase.Playing) { skipMessage() },
@@ -398,13 +529,13 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                                 },
                                 null,
                                 tint = tint,
-                                modifier = Modifier.size(56.dp)
+                                modifier = Modifier.size(44.dp)
                             )
-                            Spacer(Modifier.height(6.dp))
+                            Spacer(Modifier.height(4.dp))
                             Text(
                                 "$doneCount / ${items.size}",
                                 color = Color.White,
-                                fontSize = 34.sp,
+                                fontSize = 30.sp,
                                 fontWeight = FontWeight.ExtraBold
                             )
                             Text("루틴 완료", color = RespecColors.TextSub, fontSize = 13.sp)
@@ -427,30 +558,25 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
             }
 
             // 크기가 고정된 자막 박스 (AI 음성 받아쓰기)
-            SubtitleBox(subtitle)
+            SubtitleBox(subtitle, fromUser = subtitleFromUser, pageKey = spokenPage?.key)
             Spacer(Modifier.height(12.dp))
 
-            // 대답 영역
-            Box(Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
-                if (phase == MPhase.Listening) {
-                    val (laterText, doneText) =
-                        if (stage == Stage.Coaching) BTN_LATER to BTN_DONE else BTN_WAIT to BTN_READY
+            // 대답 버튼: 대답을 기다릴 때만 (말 대신 누르기). 루틴을 다 마쳤으면 숨김
+            val answers = when {
+                askingReplay -> replayNoLabel to replayLabel
+                phase == MPhase.Listening && !routineOver && stage == Stage.Coaching -> BTN_LATER to BTN_DONE
+                else -> null
+            }
+            Box(Modifier.fillMaxWidth().height(64.dp), contentAlignment = Alignment.Center) {
+                if (answers != null) {
+                    val (laterText, doneText) = answers
+                    fun answer(text: String) {
+                        if (askingReplay) replayChoice.trySend(text == doneText) else client.sendText(text)
+                    }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = when {
-                                heard.isNotEmpty() -> "들은 말: “$heard”"
-                                muted -> "음소거 중이에요. 아래 버튼으로 대답해 주세요"
-                                else -> "편하게 말씀해 주세요. 어려우면 아래 버튼을 눌러도 돼요"
-                            },
-                            color = if (heard.isNotEmpty()) Color.White else RespecColors.TextSub,
-                            fontSize = 14.sp,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2
-                        )
-                        Spacer(Modifier.height(12.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             OutlinedButton(
-                                onClick = { client.sendText(laterText) },
+                                onClick = { answer(laterText) },
                                 modifier = Modifier.weight(1f).height(52.dp),
                                 shape = RoundedCornerShape(26.dp),
                                 border = BorderStroke(1.5.dp, RespecColors.Purple)
@@ -458,7 +584,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                                 Text(laterText, color = RespecColors.Purple, fontWeight = FontWeight.Bold)
                             }
                             Button(
-                                onClick = { client.sendText(doneText) },
+                                onClick = { answer(doneText) },
                                 modifier = Modifier.weight(1f).height(52.dp),
                                 shape = RoundedCornerShape(26.dp),
                                 colors = ButtonDefaults.buttonColors(
@@ -470,21 +596,13 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                             }
                         }
                     }
-                } else {
-                    Text(
-                        if (stage == Stage.Finished) "통화 종료 버튼을 눌러 마칠 수 있어요"
-                        else "리스펙의 이야기가 끝나면 바로 대답할 수 있어요",
-                        color = RespecColors.TextSub,
-                        fontSize = 14.sp,
-                        textAlign = TextAlign.Center
-                    )
                 }
             }
             Spacer(Modifier.height(8.dp))
 
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                horizontalArrangement = Arrangement.spacedBy(48.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.Top
             ) {
                 MorningRoundControl(
@@ -507,12 +625,6 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                     Spacer(Modifier.height(8.dp))
                     Text("통화 종료", color = RespecColors.TextSub, fontSize = 13.sp)
                 }
-                MorningRoundControl(
-                    icon = if (speakerOn) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff,
-                    label = "스피커",
-                    active = !speakerOn,
-                    onClick = { speakerOn = !speakerOn }
-                )
             }
             Spacer(Modifier.height(8.dp))
         }
