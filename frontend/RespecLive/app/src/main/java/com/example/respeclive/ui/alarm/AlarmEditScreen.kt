@@ -35,12 +35,14 @@ import com.example.respeclive.data.Alarm
 import com.example.respeclive.data.AlarmMode
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
+import com.example.respeclive.data.THEMES
+import com.example.respeclive.data.themeLabel
 import com.example.respeclive.ui.theme.RespecColors
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 private val ITEM_H = 56.dp
 private val DAY_NAMES = listOf("월", "화", "수", "목", "금", "토", "일")
-private val THEMES = listOf("운동", "공부", "명상", "퀴즈")
 private const val NAME_MAX = 20
 
 /** alarmId == -1 이면 새 알람 */
@@ -57,24 +59,35 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
     var days by remember { mutableStateOf(existing?.days ?: setOf(0, 1, 2, 3, 4)) }
     var label by remember { mutableStateOf(existing?.label ?: "") }
     var mode by remember { mutableStateOf(existing?.mode ?: AlarmMode.CONTINUOUS) }
-    var theme by remember { mutableStateOf(existing?.theme) }
+    // 새 알람은 기존 모닝콜 알람의 테마를 따름
+    var theme by remember {
+        mutableStateOf(existing?.contentType ?: if (existing == null) AlarmRepository.alarms.firstOrNull { it.type == AlarmType.WAKE }?.contentType else null)
+    }
+    val isBedtime = existing?.type == AlarmType.BEDTIME
     var showThemeDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    var saving by remember { mutableStateOf(false) }   // 서버 저장·삭제 중에는 버튼을 막음
 
     fun save() {
-        val alarm = Alarm(
-            id = existing?.id ?: AlarmRepository.nextId(),
+        val base = existing ?: Alarm(id = AlarmRepository.nextId(), label = "", hour = 0, minute = 0, days = emptySet())
+        val alarm = base.copy(
             label = label.trim(),
             hour = (hour12 % 12) + if (ampm == 1) 12 else 0,
             minute = minute,
             days = days,
             enabled = true,
-            type = existing?.type ?: AlarmType.WAKE,
             mode = mode,
-            theme = theme
+            contentType = theme,
+            // 콘텐츠 세부 옵션은 같은 테마일 때만 유지 (다른 종류의 옵션은 서버가 거절)
+            contentOption = base.contentOption.takeIf { theme != null && theme == base.contentType }
         )
-        AlarmRepository.upsert(context, alarm)
-        Toast.makeText(context, AlarmScheduler.describeRemaining(alarm), Toast.LENGTH_SHORT).show()
-        onBack()
+        saving = true
+        scope.launch {
+            val error = AlarmRepository.save(context, alarm)
+            saving = false
+            Toast.makeText(context, error ?: AlarmScheduler.describeRemaining(alarm), Toast.LENGTH_SHORT).show()
+            if (error == null) onBack()
+        }
     }
 
     Column(
@@ -228,45 +241,47 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
 
         Spacer(Modifier.height(28.dp))
 
-        // 테마
-        Text("테마", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
-        Spacer(Modifier.height(4.dp))
-        Text("하루를 시작할 테마를 선택해 보세요", color = RespecColors.TextSub, fontSize = 14.sp)
-        Spacer(Modifier.height(14.dp))
-        val themeShape = RoundedCornerShape(24.dp)
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(themeShape)
-                .background(RespecColors.Card)
-                .border(1.dp, RespecColors.CardBorder, themeShape)
-                .clickable { showThemeDialog = true }
-                .padding(horizontal = 24.dp, vertical = 28.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
+        // 테마 (취침 알람에는 없음)
+        if (!isBedtime) {
+            Text("테마", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+            Spacer(Modifier.height(4.dp))
+            Text("하루를 시작할 테마를 선택해 보세요", color = RespecColors.TextSub, fontSize = 14.sp)
+            Spacer(Modifier.height(14.dp))
+            val themeShape = RoundedCornerShape(24.dp)
+            Row(
                 Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(RespecColors.PurpleDark),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .clip(themeShape)
+                    .background(RespecColors.Card)
+                    .border(1.dp, RespecColors.CardBorder, themeShape)
+                    .clickable { showThemeDialog = true }
+                    .padding(horizontal = 24.dp, vertical = 28.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Filled.Add, null, tint = RespecColors.Purple)
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(RespecColors.PurpleDark),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Filled.Add, null, tint = RespecColors.Purple)
+                }
+                Spacer(Modifier.width(16.dp))
+                Text(
+                    themeLabel(theme)?.let { "테마: $it · 탭해서 변경" } ?: "테마 추가하기 (지금은 루틴 알람)",
+                    color = RespecColors.Purple,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
-            Spacer(Modifier.width(16.dp))
-            Text(
-                if (theme == null) "테마 추가하기" else "테마: $theme · 탭해서 변경",
-                color = RespecColors.Purple,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
 
-        Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(24.dp))
+        }
 
         Button(
             onClick = { save() },
-            enabled = label.isNotBlank(),
+            enabled = label.isNotBlank() && !saving,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(60.dp),
@@ -278,15 +293,20 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
                 disabledContentColor = RespecColors.TextSub
             )
         ) {
-            Text("저장하기", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+            Text(if (saving) "저장 중…" else "저장하기", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
         }
 
         if (existing != null) {
             TextButton(
                 onClick = {
-                    AlarmRepository.delete(context, existing.id)
-                    onBack()
+                    saving = true
+                    scope.launch {
+                        val error = AlarmRepository.delete(context, existing.id)
+                        saving = false
+                        if (error == null) onBack() else Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                    }
                 },
+                enabled = !saving,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             ) {
                 Text("이 알람 삭제", color = RespecColors.Danger)
@@ -302,16 +322,16 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
             title = { Text("테마 선택", color = Color.White, fontWeight = FontWeight.Bold) },
             text = {
                 Column {
-                    THEMES.forEach { t ->
+                    THEMES.forEach { (code, name) ->
                         Text(
-                            t,
-                            color = if (t == theme) RespecColors.Lime else Color.White,
-                            fontWeight = if (t == theme) FontWeight.ExtraBold else FontWeight.Normal,
+                            name,
+                            color = if (code == theme) RespecColors.Lime else Color.White,
+                            fontWeight = if (code == theme) FontWeight.ExtraBold else FontWeight.Normal,
                             fontSize = 17.sp,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    theme = t
+                                    theme = code
                                     showThemeDialog = false
                                 }
                                 .padding(vertical = 12.dp)
@@ -319,7 +339,7 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
                     }
                     if (theme != null) {
                         Text(
-                            "테마 없음",
+                            "테마 없음 (루틴 알람)",
                             color = RespecColors.TextSub,
                             modifier = Modifier
                                 .fillMaxWidth()

@@ -3,13 +3,20 @@ package com.example.respeclive.data
 import android.content.Context
 import androidx.compose.runtime.mutableStateListOf
 import com.example.respeclive.alarm.AlarmScheduler
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** 알람 목록 저장소. 목록은 Compose 상태라 변경되면 화면이 자동 갱신됨 */
+/**
+ * 알람 목록 저장소. 목록은 Compose 상태라 변경되면 화면이 자동 갱신됨.
+ * 모닝콜 알람은 서버(GET/POST/PATCH/DELETE /alarms)가 기준이고 기기에는 사본을 둬서 오프라인에서도 울림.
+ * 취침 알람은 서버에 없어 기기에만 저장.
+ */
 object AlarmRepository {
     private const val PREFS = "respec_alarms"
     private const val KEY = "alarms_json"
+    private const val DEFAULT_LABEL = "기상 알람"
 
     val alarms = mutableStateListOf<Alarm>()
     private var loaded = false
@@ -27,31 +34,144 @@ object AlarmRepository {
 
     fun nextId(): Int = (alarms.maxOfOrNull { it.id } ?: 0) + 1
 
-    fun upsert(context: Context, alarm: Alarm) {
+    // ---------------- 서버 동기화 ----------------
+
+    /** 서버 알람 목록으로 모닝콜 알람을 교체 (서버에 없는 모닝콜 알람은 지움). 실패하면 기기 목록 그대로 두고 false */
+    suspend fun sync(context: Context): Boolean {
+        val server = RespecApi.alarms() ?: return false
+        onMain {
+            val app = context.applicationContext
+            var next = nextId()
+            val wakes = server.mapNotNull { o ->
+                val old = alarms.firstOrNull { it.serverId != null && it.serverId == o.optString("alarm_id") }
+                fromServer(o, old?.id ?: next++)
+            }
+            alarms.filter { it.type == AlarmType.WAKE && wakes.none { w -> w.id == it.id } }
+                .forEach { AlarmScheduler.cancel(app, it.id) }
+            val bedtimes = alarms.filter { it.type == AlarmType.BEDTIME }
+            alarms.clear()
+            alarms.addAll(wakes + bedtimes)
+            persist(app)
+            alarms.forEach { AlarmScheduler.schedule(app, it) }
+        }
+        return true
+    }
+
+    /** 알람 설정 화면의 저장. 모닝콜 알람은 서버에 먼저 저장하고 성공하면 기기에 반영. 실패하면 오류 문구 */
+    suspend fun save(context: Context, alarm: Alarm): String? {
+        if (alarm.type != AlarmType.WAKE) {
+            onMain { upsert(context, alarm) }
+            return null
+        }
+        val routineTemplate = if (alarm.isContent) null else
+            routineTemplate(alarm) ?: return ApiClient.lastError ?: "루틴 프리셋을 찾지 못했어요"
+        val body = editableFields(alarm, routineTemplate)
+        val saved = if (alarm.serverId != null) RespecApi.updateAlarm(alarm.serverId, body) else RespecApi.createAlarm(body)
+        saved ?: return ApiClient.lastError ?: "알람을 저장하지 못했어요"
+        val synced = fromServer(saved, alarm.id) ?: return "서버 응답을 읽지 못했어요"
+        onMain { upsert(context, synced) }
+        return null
+    }
+
+    /** 목록의 켜기/끄기. 화면은 바로 바뀌고 서버 저장이 실패하면 되돌림 */
+    suspend fun setEnabled(context: Context, id: Int, enabled: Boolean): String? {
+        val a = get(id) ?: return null
+        return change(context, a, a.copy(enabled = enabled), JSONObject().put("enabled", enabled))
+    }
+
+    /** 요일 켜기/끄기. 마지막 남은 요일은 끌 수 없음 */
+    suspend fun toggleDay(context: Context, id: Int, day: Int): String? {
+        val a = get(id) ?: return null
+        val newDays = if (day in a.days) a.days - day else a.days + day
+        if (newDays.isEmpty()) return "요일을 하나 이상 선택해 주세요"
+        return change(context, a, a.copy(days = newDays), JSONObject().put("repeat_days", repeatDays(newDays)))
+    }
+
+    suspend fun delete(context: Context, id: Int): String? {
+        val a = get(id) ?: return null
+        if (a.serverId != null && !RespecApi.deleteAlarm(a.serverId)) {
+            return ApiClient.lastError ?: "알람을 삭제하지 못했어요"
+        }
+        onMain {
+            alarms.removeAll { it.id == id }
+            persist(context)
+            AlarmScheduler.cancel(context, id)
+        }
+        return null
+    }
+
+    // ---------------- 기기 저장 ----------------
+
+    private fun upsert(context: Context, alarm: Alarm) {
         val i = alarms.indexOfFirst { it.id == alarm.id }
         if (i >= 0) alarms[i] = alarm else alarms.add(alarm)
         persist(context)
         AlarmScheduler.schedule(context, alarm)
     }
 
-    fun delete(context: Context, id: Int) {
-        alarms.removeAll { it.id == id }
-        persist(context)
-        AlarmScheduler.cancel(context, id)
+    /** 기기에 먼저 반영 → 서버 PATCH. 서버와 연결 안 된 알람(취침 알람 등)은 기기에서만 바꿈 */
+    private suspend fun change(context: Context, before: Alarm, after: Alarm, changes: JSONObject): String? {
+        onMain { upsert(context, after) }
+        val sid = after.serverId ?: return null
+        val saved = RespecApi.updateAlarm(sid, changes)?.let { fromServer(it, after.id) }
+        onMain { upsert(context, saved ?: before) }
+        return if (saved == null) ApiClient.lastError ?: "알람을 저장하지 못했어요" else null
     }
 
-    fun setEnabled(context: Context, id: Int, enabled: Boolean) {
-        get(id)?.let { upsert(context, it.copy(enabled = enabled)) }
+    private suspend fun onMain(block: () -> Unit) = withContext(Dispatchers.Main.immediate) { block() }
+
+    // ---------------- 서버 형식 ----------------
+
+    /** days(0=월 … 6=일) → "1111100" */
+    private fun repeatDays(days: Set<Int>) = (0..6).joinToString("") { if (it in days) "1" else "0" }
+
+    /**
+     * 알람 설정 화면에서 바꾸는 칸. 테마(content_type)가 있으면 콘텐츠 알람, 없으면 루틴 알람.
+     * 유형이 바뀔 수 있어 반대쪽 칸은 null로 함께 보냄 (서버 AlarmPatch 규칙)
+     */
+    private fun editableFields(a: Alarm, routineTemplate: String?) = JSONObject()
+        .put("alarm_time", "%02d:%02d".format(a.hour, a.minute))
+        .put("repeat_days", repeatDays(a.days))
+        .put("label", a.label.ifBlank { JSONObject.NULL })
+        .put("alarm_mode", a.mode.code)
+        .put("enabled", a.enabled)
+        .put("morning_call_type", if (a.isContent) "CONTENT" else "ROUTINE")
+        .put("template_id", routineTemplate ?: JSONObject.NULL)
+        .put("content_type", a.contentType ?: JSONObject.NULL)
+        .put("content_option", a.contentOption ?: JSONObject.NULL)
+
+    /** 루틴 알람의 프리셋: 이 알람에 있던 것 → 다른 루틴 알람의 것 → 첫 번째 프리셋 */
+    private suspend fun routineTemplate(a: Alarm): String? =
+        a.templateId
+            ?: alarms.firstOrNull { it.type == AlarmType.WAKE && it.templateId != null }?.templateId
+            ?: RespecApi.presets()?.firstOrNull()?.optString("template_id")?.takeIf { it.isNotBlank() }
+
+    /** AlarmOut → Alarm */
+    private fun fromServer(o: JSONObject, id: Int): Alarm? {
+        val serverId = o.text("alarm_id") ?: return null
+        val time = o.text("alarm_time")?.split(":") ?: return null
+        val repeat = o.text("repeat_days") ?: "1111111"
+        return Alarm(
+            id = id,
+            label = o.text("label") ?: DEFAULT_LABEL,
+            hour = time.getOrNull(0)?.toIntOrNull() ?: return null,
+            minute = time.getOrNull(1)?.toIntOrNull() ?: return null,
+            days = repeat.indices.filter { repeat[it] == '1' }.toSet(),
+            enabled = o.optBoolean("enabled", true),
+            type = AlarmType.WAKE,
+            mode = AlarmMode.fromCode(o.text("alarm_mode")),
+            serverId = serverId,
+            templateId = o.text("template_id"),
+            contentType = o.text("content_type"),
+            contentOption = o.text("content_option")
+        )
     }
 
-    /** 요일 켜기/끄기. 마지막 남은 요일은 끌 수 없어 false 반환 */
-    fun toggleDay(context: Context, id: Int, day: Int): Boolean {
-        val a = get(id) ?: return false
-        val newDays = if (day in a.days) a.days - day else a.days + day
-        if (newDays.isEmpty()) return false
-        upsert(context, a.copy(days = newDays))
-        return true
-    }
+    /** null(JSONObject.NULL)·빈 값이면 null */
+    private fun JSONObject.text(key: String): String? =
+        if (isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
+
+    // ---------------- 기기 저장 형식 ----------------
 
     private fun persist(context: Context) {
         val arr = JSONArray()
@@ -69,7 +189,10 @@ object AlarmRepository {
         .put("enabled", enabled)
         .put("type", type.name)
         .put("mode", mode.name)
-        .put("theme", theme ?: JSONObject.NULL)
+        .put("server_id", serverId ?: JSONObject.NULL)
+        .put("template_id", templateId ?: JSONObject.NULL)
+        .put("content_type", contentType ?: JSONObject.NULL)
+        .put("content_option", contentOption ?: JSONObject.NULL)
 
     private fun parse(raw: String): List<Alarm> = try {
         val arr = JSONArray(raw)
@@ -85,15 +208,19 @@ object AlarmRepository {
                 enabled = o.optBoolean("enabled", true),
                 type = runCatching { AlarmType.valueOf(o.getString("type")) }.getOrDefault(AlarmType.WAKE),
                 mode = runCatching { AlarmMode.valueOf(o.getString("mode")) }.getOrDefault(AlarmMode.CONTINUOUS),
-                theme = if (o.isNull("theme")) null else o.getString("theme")
+                serverId = o.text("server_id"),
+                templateId = o.text("template_id"),
+                contentType = o.text("content_type"),
+                contentOption = o.text("content_option")
             )
         }
     } catch (e: Exception) {
         defaults()
     }
 
+    /** 첫 실행 기본값. 모닝콜 알람은 서버와 처음 동기화할 때 서버 알람(온보딩의 07:00)으로 바뀜 */
     private fun defaults() = listOf(
-        Alarm(1, "기상 알람", 7, 0, setOf(0, 1, 2, 3, 4), type = AlarmType.WAKE, theme = "운동"),
+        Alarm(1, DEFAULT_LABEL, 7, 0, setOf(0, 1, 2, 3, 4), type = AlarmType.WAKE),
         Alarm(2, "취침 알람", 22, 0, (0..6).toSet(), type = AlarmType.BEDTIME)
     )
 }

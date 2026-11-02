@@ -51,6 +51,33 @@ object RespecApi {
         return r.ok || r.errorCode == "ONBOARDING_DONE"
     }
 
+    // ---------------- 알람 ----------------
+
+    /** 내 알람 목록 (AlarmOut: alarm_id, alarm_time "HH:MM", repeat_days "1111100", label, alarm_mode, morning_call_type, ...) */
+    suspend fun alarms(): List<JSONObject>? {
+        val r = ApiClient.get("/alarms") ?: return null
+        val arr = if (r.ok) r.array() else null
+        return arr?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }
+    }
+
+    /** 알람 만들기 (morning_call_type 필수, 루틴이면 template_id, 콘텐츠면 content_type) → AlarmOut */
+    suspend fun createAlarm(body: JSONObject): JSONObject? {
+        val r = ApiClient.post("/alarms", body) ?: return null
+        return if (r.ok) r.json() else null
+    }
+
+    /** 보낸 항목만 바꿈 (켜기/끄기는 {"enabled": false}) → AlarmOut */
+    suspend fun updateAlarm(alarmId: String, changes: JSONObject): JSONObject? {
+        val r = ApiClient.patch("/alarms/$alarmId", changes) ?: return null
+        return if (r.ok) r.json() else null
+    }
+
+    /** 이미 지워진 알람(404)도 성공으로 봄 */
+    suspend fun deleteAlarm(alarmId: String): Boolean {
+        val r = ApiClient.delete("/alarms/$alarmId") ?: return false
+        return r.ok || r.code == 404
+    }
+
     // ---------------- 밤 ----------------
 
     /** 굿나잇콜 Live 토큰 (지시문: 호칭·말투, 일정, 내일 알람·루틴 항목) */
@@ -84,14 +111,11 @@ object RespecApi {
     // ---------------- 아침 ----------------
 
     /**
-     * 앱의 로컬 알람에 대응하는 서버 alarm_id. 시각이 같은 켜진 알람을 먼저 찾고, 없으면 첫 번째 켜진 알람.
-     * (로컬 알람과 서버 알람 동기화 전까지의 임시 연결)
+     * 서버와 연결되지 않은 로컬 알람(동기화 전)에 대응하는 서버 alarm_id.
+     * 시각이 같은 켜진 알람을 먼저 찾고, 없으면 첫 번째 켜진 알람.
      */
-    suspend fun serverAlarmId(hour: Int?, minute: Int?): String? {
-        val r = ApiClient.get("/alarms") ?: return null
-        val arr = if (r.ok) r.array() else null
-        arr ?: return null
-        val alarms = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }.filter { it.optBoolean("enabled", true) }
+    private suspend fun serverAlarmId(hour: Int?, minute: Int?): String? {
+        val alarms = alarms()?.filter { it.optBoolean("enabled", true) } ?: return null
         val hhmm = if (hour != null && minute != null) "%02d:%02d".format(hour, minute) else null
         val match = alarms.firstOrNull { hhmm != null && it.optString("alarm_time") == hhmm } ?: alarms.firstOrNull()
         return match?.optString("alarm_id")?.takeIf { it.isNotBlank() }
@@ -142,8 +166,8 @@ object RespecApi {
         ApiClient.post("/morning/sessions/$sessionId/response")?.ok == true
 
     /** 로컬 알람에 대응하는 서버 알람으로 오늘 세션 시작. 알람이 울릴 때(스누즈 뒤 다시 울릴 때도) 호출 → 같은 세션 */
-    suspend fun startMorningFor(hour: Int?, minute: Int?): JSONObject? =
-        serverAlarmId(hour, minute)?.let { startMorning(it) }
+    suspend fun startMorningFor(alarm: Alarm?): JSONObject? =
+        (alarm?.serverId ?: serverAlarmId(alarm?.hour, alarm?.minute))?.let { startMorning(it) }
 
     /** "5분 뒤 다시 울리기" (한 번이라도 하면 그날은 기상 실패) */
     suspend fun snooze(sessionId: String): Boolean =

@@ -67,7 +67,7 @@ fun MorningCallScreen(
     LaunchedEffect(Unit) {
         val local = AlarmRepository.get(alarmId)
             ?: AlarmRepository.alarms.firstOrNull { it.type == AlarmType.WAKE && it.enabled }
-        session = RespecApi.startMorningFor(local?.hour, local?.minute)?.also { RoutineRepository.applyView(it) }
+        session = RespecApi.startMorningFor(local)?.also { RoutineRepository.applyView(it) }
     }
 
     if (answered) {

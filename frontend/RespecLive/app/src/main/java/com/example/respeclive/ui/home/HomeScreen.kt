@@ -34,6 +34,7 @@ import com.example.respeclive.alarm.AlarmScheduler
 import com.example.respeclive.data.Alarm
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.ui.theme.RespecColors
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 private val dayNames = listOf("월", "화", "수", "목", "금", "토", "일")
@@ -46,7 +47,11 @@ fun HomeScreen(
     onEditAlarm: (Int) -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val alarms = AlarmRepository.alarms
+
+    // 홈을 열 때마다 서버 알람 목록으로 맞춤 (실패하면 기기에 저장된 목록 그대로)
+    LaunchedEffect(Unit) { AlarmRepository.sync(context) }
 
     Column(
         Modifier
@@ -75,14 +80,16 @@ fun HomeScreen(
                     alarm = alarm,
                     onClick = { onEditAlarm(alarm.id) },
                     onToggle = { checked ->
-                        AlarmRepository.setEnabled(context, alarm.id, checked)
-                        if (checked) {
-                            Toast.makeText(context, AlarmScheduler.describeRemaining(alarm), Toast.LENGTH_SHORT).show()
+                        scope.launch {
+                            val error = AlarmRepository.setEnabled(context, alarm.id, checked)
+                            val message = error ?: if (checked) AlarmScheduler.describeRemaining(alarm) else null
+                            message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
                         }
                     },
                     onDay = { day ->
-                        if (!AlarmRepository.toggleDay(context, alarm.id, day)) {
-                            Toast.makeText(context, "요일을 하나 이상 선택해 주세요", Toast.LENGTH_SHORT).show()
+                        scope.launch {
+                            AlarmRepository.toggleDay(context, alarm.id, day)
+                                ?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
                         }
                     }
                 )
@@ -186,7 +193,8 @@ private fun AlarmCard(
                 }
             }
         }
-        if (alarm.theme != null) {
+        val theme = alarm.themeLabel
+        if (theme != null) {
             Spacer(Modifier.height(12.dp))
             Box(
                 Modifier
@@ -195,7 +203,7 @@ private fun AlarmCard(
                     .background(RespecColors.MintDark)
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                Text(alarm.theme, color = RespecColors.Mint, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text(theme, color = RespecColors.Mint, fontWeight = FontWeight.Bold, fontSize = 14.sp)
             }
         }
     }

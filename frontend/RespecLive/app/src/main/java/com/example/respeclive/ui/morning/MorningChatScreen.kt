@@ -276,7 +276,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
         val started = initialSession ?: run {
             val local = AlarmRepository.get(alarmId)
                 ?: AlarmRepository.alarms.firstOrNull { it.type == AlarmType.WAKE && it.enabled }
-            RespecApi.startMorningFor(local?.hour, local?.minute)
+            RespecApi.startMorningFor(local)
         }
         if (started == null) {
             stage = Stage.Finished
