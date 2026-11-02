@@ -78,7 +78,7 @@ def _step_counts(sessions) -> tuple[int, int, int, int]:
     done = skipped = total = 0
     pending = 0
     for s in sessions:
-        for st in s.steps:
+        for st in s.active_steps:
             total += 1
             if st.status == DONE:
                 done += 1
@@ -120,7 +120,7 @@ def aggregate(sessions) -> UserStats:
     done, skipped, total, _ = _step_counts(sessions)
     per_item: dict[str, list[int]] = {}
     for s in sessions:
-        for st in s.steps:
+        for st in s.active_steps:
             if st.status in (DONE, SKIPPED) and st.item_key:
                 per_item.setdefault(st.item_key, []).append(1 if st.status == DONE else 0)
     return UserStats(

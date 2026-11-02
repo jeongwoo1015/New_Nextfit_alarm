@@ -49,11 +49,12 @@ class NightService:
     def issue_token(self, user_id: str, events_today: list[CalendarEvent], events_tomorrow: list[CalendarEvent]) -> LiveToken:
         now = to_kst(self.clock())
         alarm = self._tomorrow_alarm(user_id, now)
-        items = ()
+        items = []
         if alarm and alarm.morning_call_type == "ROUTINE":
-            items = tuple(i.item_name for i in (self.r.alarms.get_alarm_routine(user_id, alarm.alarm_id) or []) if i.duration_sec > 0)
+            items = [i for i in (self.r.alarms.get_alarm_routine(user_id, alarm.alarm_id) or []) if i.duration_sec > 0]
         ctx = NightContext(self._persona(user_id), now.strftime("%H:%M"), tuple(events_today), tuple(events_tomorrow),
-                           alarm.alarm_time.strftime("%H:%M") if alarm else "", items)
+                           alarm.alarm_time.strftime("%H:%M") if alarm else "", tuple(i.item_name for i in items),
+                           tuple(i.duration_sec for i in items))
         return self.ai.issue_night_token(ctx)
 
     def save_transcript(self, user_id: str, transcript: list[dict], started_at: datetime | None,

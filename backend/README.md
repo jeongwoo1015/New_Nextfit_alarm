@@ -76,7 +76,7 @@ backend-db 초안(`repository_functions_draft.md`)의 함수 이름·묶음으�
 - 추가: `update_user`, `delete_account`, `get_template`, `list_photos`, `get_night`.
 - `AlarmRoutineItem`은 DB 함수 `rs_alarm_routine_items` 한 줄 + `default_duration_sec`(평평한 형태).
 - `planned_total_sec`는 `MorningSession`에 두고 단계를 만든 뒤 `update_session`으로 채운다.
-- 추출 결과의 `override_coaching_min` → `override_skip_coaching` 변환은 서버의 AI 어댑터가 한다. `save_night_extract`는 11/01 컬럼 이름만 받는다.
+- 추출 결과는 AI가 11/01 이름(`override_skip_coaching`)으로 준다. `save_night_extract`는 11/01 컬럼 이름만 받는다.
 - 재연결 때 전략 문장은 저장하지 않는다. `StrategyLog.strategy`로 AI의 `strategy_block()`을 다시 부르면 같은 문장이 나온다.
 - 의존성 `supabase>=2.32,<3`은 `backend/requirements.txt`에 들어 있다.
 
@@ -98,9 +98,9 @@ cd .. && backend/.venv/Scripts/python -m uvicorn backend.app.main:app --reload
 모든 API가 토큰의 user_id와 데이터의 USER_ID를 직접 비교한다(`core.auth.ensure_owner`).
 
 ## AI 연동
-`clients/ai_gateway.py`만 `ai.*`를 import한다. 이 브랜치에는 `ai/`가 없어 `GEMINI_API_KEY`가 있어도 AI 기능은 503
-(`AI_UNAVAILABLE`)이고, main에서 feat/ai와 합쳐지면 실제 함수를 부른다. AI 코드가 11/01 기준으로 바뀌기 전까지 어댑터가 맞춘다:
-추출 결과 `override_coaching_min = 0` → `override_skip_coaching = TRUE`(10은 11/01에 없어 버림), 토큰 입력의 `tomorrow_coaching_min`은 비움.
+`clients/ai_gateway.py`만 `ai.*`를 import한다. `ai/`(feat/ai 11/02판, CONTRACTS 5장 반영)와 `GEMINI_API_KEY`가 있으면 실제 함수를 부르고,
+없으면 AI 기능은 503(`AI_UNAVAILABLE`)이다. 밤 토큰에는 루틴 항목 이름과 현재 시간(초)을 함께 넣고, 콘텐츠는 AI가 300초로
+구성한 단계를 서버 설정 시간에 맞춰 늘이거나 줄인다.
 
 밤 흐름: 토큰 발급 때 내일 울릴 알람(시각, 루틴이면 지금 쓰는 항목 이름)을 지시문에 넣는다 → 원문 저장 → 백그라운드에서
 `extract_night_record` → 하루 한정 변경 대상 알람 지정 → `parse_routine_changes` → `apply_changes` → 범위별로 `replace_night_routine`(내일만) / `replace_alarm_routine`(앞으로 계속).
@@ -139,7 +139,7 @@ DB에 `rs_morning_session.snooze_count`, `wake_checked_at` 컬럼이 필요하�
 - 루틴 항목 시간을 바꾸는 범위는 셋(정의서 11/01 팀 확정): **앞으로 계속** = 알람 설정(`replace_alarm_routine`),
   **내일만** = 밤 대화의 기본(`replace_night_routine`, 알람 설정 위에 덮어씀, 대상 알람은 다음 날 아침에 울릴 알람),
   **오늘 진행 중** = 코칭 중 단계 시간 변경(`update_step_duration`, 0초는 SKIPPED). 내일 울릴 알람이 있으면 밤 기록에
-  `override_alarm_id`를 항상 남긴다. AI가 범위를 주기 전까지는 빼기·다시 넣기를 '내일만'으로 처리한다(`clients.ai_gateway.to_item_changes`).
+  `override_alarm_id`를 항상 남긴다. AI가 항목별 시간과 범위를 준다(범위를 안 주면 '내일만', `clients.ai_gateway.to_item_changes`).
   규칙(30초 단위·합계 상한·최소 한 항목)에 걸리는 요청은 반영하지 않는다(`routine_rules.apply_changes`).
 - 밤 대화에서 하루 한정 변경에 동의했는데 다음 날 아침에 울릴 알람이 없으면 변경값을 저장하지 않는다.
 

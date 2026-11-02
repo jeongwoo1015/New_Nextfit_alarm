@@ -15,9 +15,9 @@ def step(status=DONE, tid="t1", name="물 한 잔", order=1):
     return StepRecord(step_name=name, status=status, step_order=order, template_item_id=tid)
 
 
-def sess(day, ok=True, steps=(), cond=None, resp=None, end=None, rewake=0, coaching=20, **kw):
+def sess(day, ok=True, steps=(), cond=None, resp=None, end=None, rewake=0, skipped=False, **kw):
     d = date(2026, 11, day) if isinstance(day, int) else day
-    return SessionRecord(session_date=d, wake_success=ok, steps=list(steps), condition_code=cond, coaching_min=coaching,
+    return SessionRecord(session_date=d, wake_success=ok, steps=list(steps), condition_code=cond, coaching_skipped=skipped,
                          first_response_at=resp, session_end_at=end, rewake_count=rewake, **kw)
 
 
@@ -27,24 +27,26 @@ def at(day, hh, mm, tz=KST):
 
 # ---------------- records: 정의서 컬럼 변환 ----------------
 def test_session_from_rows_uses_spec_columns():
-    row = {"session_id": "s1", "user_id": "u1", "session_date": "2026-11-09", "morning_call_type": "routine", "coaching_min": 10,
+    row = {"session_id": "s1", "user_id": "u1", "session_date": "2026-11-09", "morning_call_type": "routine", "coaching_skipped": True, "planned_total_sec": 600,
            "target_wake_time": "07:00:00", "first_response_at": "2026-11-08T21:42:00+00:00", "session_end_at": "2026-11-08T21:54:00+00:00",
-           "rewake_count": 1, "wake_success": True}
+           "rewake_count": 1, "snooze_count": 2, "wake_checked_at": "2026-11-08T21:43:00+00:00", "alarm_rang_at": "2026-11-08T21:40:00+00:00",
+           "wake_success": True}
     steps = [{"session_id": "s1", "step_order": 2, "step_name": "스트레칭", "template_item_id": "t2", "step_status": "skipped",
               "planned_duration_sec": 120, "checked_at": "2026-11-08T21:50:00Z", "ai_verdict": "NOT_DONE"},
              {"session_id": "s1", "step_order": 1, "step_name": "물 한 잔", "template_item_id": "t1", "step_status": "DONE"}]
     s = SessionRecord.from_rows(row, steps, {"condition_label": "tired"})
-    assert s.session_date == date(2026, 11, 9) and s.call_type == "ROUTINE" and s.coaching_min == 10 and s.target_wake_time == time(7, 0)
+    assert s.session_date == date(2026, 11, 9) and s.call_type == "ROUTINE" and s.coaching_skipped is True and s.planned_total_sec == 600 and s.target_wake_time == time(7, 0)
     assert s.condition_code == "TIRED" and s.rewake_count == 1 and s.wake_success is True
+    assert s.snooze_count == 2 and s.wake_checked_at == datetime(2026, 11, 8, 21, 43, tzinfo=timezone.utc) and s.reaction_sec == 120.0   # 알람 21:40 → 첫 응답 21:42
     assert [x.step_order for x in s.steps] == [1, 2]                      # 순서대로 정렬
     assert s.steps[1].status == SKIPPED and s.steps[1].ai_verdict == "not_done" and s.steps[1].planned_sec == 120
     assert s.wake_clock == time(6, 42) and s.wake_minutes == 6 * 60 + 42    # UTC 21:42 = KST 06:42
-    assert s.talk_minutes == pytest.approx(12.0) and s.steps_done == 1
+    assert s.talk_minutes == pytest.approx(12.0) and s.steps_done == 0   # 코칭을 안 한 날이라 단계는 세지 않는다
 
 
 def test_records_tolerate_missing_and_bad_values():
     s = SessionRecord.from_rows({}, None, None)
-    assert s.session_date is None and s.coaching_min is None and s.rewake_count == 0 and s.wake_success is False and s.steps == []
+    assert s.session_date is None and s.coaching_skipped is False and s.planned_total_sec is None and s.snooze_count == 0 and s.wake_checked_at is None and s.rewake_count == 0 and s.wake_success is False and s.steps == []
     assert s.wake_clock is None and s.reaction_sec is None and s.talk_minutes is None
     bad = StepRecord.from_row({"step_status": "weird", "template_item_id": "", "step_order": "x"})
     assert bad.status == PENDING and bad.template_item_id is None and bad.step_order is None
@@ -137,7 +139,7 @@ def test_content_steps_count_in_totals_but_not_in_item_rates():
 
 
 def test_coaching_zero_day_has_no_steps_but_counts_for_wake():
-    s = compute_stats([sess(9, ok=True, steps=[], coaching=0), sess(8, ok=False, steps=[step(DONE)])], TODAY)
+    s = compute_stats([sess(9, ok=True, steps=[], skipped=True), sess(8, ok=False, steps=[step(DONE)])], TODAY)
     assert s.n_sessions == 2 and s.wake_success_rate == 0.5 and (s.routine_done, s.routine_total) == (1, 1)
 
 
@@ -240,8 +242,8 @@ def test_reward_cases():
 
 
 def test_reward_without_steps_uses_wake_only():
-    assert session_reward(sess(9, ok=True, steps=[], coaching=0)) == 1.0
-    assert session_reward(sess(9, ok=False, steps=[], coaching=0)) == 0.0
+    assert session_reward(sess(9, ok=True, steps=[], skipped=True)) == 1.0
+    assert session_reward(sess(9, ok=False, steps=[], skipped=True)) == 0.0
 
 
 def test_reward_config_and_clamp():
@@ -250,3 +252,12 @@ def test_reward_config_and_clamp():
     assert session_reward(s, RewardConfig(rewake_penalty=0.5)) == 0.0                 # 감점으로 음수가 되면 0
     assert session_reward(sess(9, ok=True, steps=[step(DONE)]), RewardConfig(rewake_penalty=-5)) == 1.0   # 1을 넘지 않는다
     assert session_reward(sess(9, ok=True, steps=[step()]), RewardConfig(wake_weight=0, routine_weight=0)) == 1.0   # 가중치가 0이어도 오류 없음
+
+
+def test_skipped_coaching_day_steps_are_not_counted():
+    brief_only = sess(9, ok=True, steps=[step(PENDING, "t1", order=1), step(PENDING, "t2", "스트레칭", 2)], skipped=True)   # 서버가 단계를 만들어 뒀어도 브리핑만 한 날
+    assert brief_only.steps_done == 0 and brief_only.active_steps == []
+    s = compute_stats([brief_only, sess(8, ok=True, steps=[step(DONE)])], TODAY)
+    assert s.routine_total == 1 and s.routine_done == 1 and s.routine_completion_rate == 1.0        # 브리핑만 한 날이 못 한 날로 잡히지 않는다
+    assert session_reward(brief_only) == 1.0                                                        # 기상 성공만 본다
+    assert session_reward(sess(9, ok=True, steps=[step(PENDING)])) == 0.5                           # 코칭을 한 날은 단계가 반영된다

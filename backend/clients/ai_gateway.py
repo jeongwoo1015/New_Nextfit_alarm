@@ -1,11 +1,8 @@
 """AI 파트(feat/ai의 `ai` 패키지) 어댑터. 서비스는 이 인터페이스만 쓰고 `ai.*`는 여기서만 import한다.
 
-feat/backend-service 브랜치에는 `ai/`가 없으므로 테스트는 FakeAIGateway로 돌고, main에서 통합된 뒤
-RealAIGateway가 실제 함수를 부른다(입출력은 feat/ai `ai/CONTRACTS.md` 기준).
-
-AI 코드가 정의서 11/01 기준으로 바뀌기 전까지 여기서 맞춘다:
-- 추출 결과 override_coaching_min 0 → override_skip_coaching = TRUE, 10(코칭 줄이기)은 11/01에 없어 버린다.
-- 루틴 항목 "사용 중" = 알람 항목 시간이 0보다 큼.
+`ai/`가 없으면 테스트는 FakeAIGateway로 돌고, 있으면 RealAIGateway가 실제 함수를 부른다
+(입출력은 feat/ai `ai/CONTRACTS.md` 11/01판 기준, 5장 어댑터 수정 목록 반영).
+루틴 항목 "사용 중" = 알람 항목 시간이 0보다 큼.
 """
 import importlib.util
 from dataclasses import asdict, dataclass, field
@@ -51,7 +48,8 @@ class NightContext:
     events_today: tuple[CalendarEvent, ...] = ()
     events_tomorrow: tuple[CalendarEvent, ...] = ()
     tomorrow_wake_time: str = ""            # 내일 울릴 알람 시각 (없으면 "") — 하루 한정 변경 제안용
-    routine_items: tuple[str, ...] = ()     # 내일 알람이 루틴이면 지금 쓰는 항목 이름 (빼기 요청 확인용)
+    routine_items: tuple[str, ...] = ()     # 내일 알람이 루틴이면 지금 쓰는 항목 이름 (시간 변경·빼기 요청 확인용)
+    routine_item_secs: tuple[int, ...] = () # routine_items와 같은 순서의 현재 시간(초)
     allow_skip_coaching: bool = True
 
 
@@ -158,7 +156,7 @@ def night_view(rec: NightRecord | None) -> NightView | None:
 
 
 def fit_seconds(raw: list[int | None], total: int) -> list[int]:
-    """비율을 유지하며 합이 total이 되게 맞춘다 (각 단계 최소 10초). AI 콘텐츠 구성은 10/20분만 받기 때문."""
+    """비율을 유지하며 합이 total이 되게 맞춘다 (각 단계 최소 10초). AI 콘텐츠 구성은 항상 300초라 서버 설정 시간에 맞춘다."""
     raw = [max(1, r or 1) for r in raw]
     out = [max(10, round(r * total / sum(raw))) for r in raw]
     out[out.index(max(out))] += total - sum(out)
@@ -188,16 +186,14 @@ def _wake(v) -> time | None:
 
 
 def to_item_changes(res) -> list[ItemChange]:
-    """AI parse_routine_changes 결과 → ItemChange 목록. 새 형식(changes: [{template_item_id, duration_sec, scope}])과
-    지금 형식(remove·restore)을 모두 받는다. 빼기를 먼저 적용해야 다시 넣을 때 상한에 덜 걸린다."""
-    if getattr(res, "changes", None):
-        out = []
-        for c in res.changes:
-            get = c.get if isinstance(c, dict) else lambda k, d=None, c=c: getattr(c, k, d)
-            scope = str(get("scope") or "TOMORROW").upper()
-            out.append(ItemChange(str(get("template_item_id")), get("duration_sec"), scope if scope in SCOPES else "TOMORROW"))
-        return out
-    return [ItemChange(i, 0) for i in getattr(res, "remove", [])] + [ItemChange(i, None) for i in getattr(res, "restore", [])]
+    """AI parse_routine_changes 결과(changes: [{template_item_id, duration_sec, scope}]) → ItemChange 목록.
+    AI가 빼기 → 줄이기 → 늘리기 순으로 정렬해 주므로 순서를 그대로 둔다(합계 상한에 덜 걸린다)."""
+    out = []
+    for c in getattr(res, "changes", None) or []:
+        get = c.get if isinstance(c, dict) else lambda k, d=None, c=c: getattr(c, k, d)
+        scope = str(get("scope") or "TOMORROW").upper()
+        out.append(ItemChange(str(get("template_item_id")), get("duration_sec"), scope if scope in SCOPES else "TOMORROW"))
+    return out
 
 
 def to_night_record_fields(row: dict) -> dict:
@@ -205,7 +201,7 @@ def to_night_record_fields(row: dict) -> dict:
     out = {k: row.get(k) for k in NIGHT_RECORD_FIELDS}
     out["tomorrow_notes"] = list(row.get("tomorrow_notes") or [])
     out["override_wake_time"] = _wake(row.get("override_wake_time"))
-    out["override_skip_coaching"] = row.get("override_skip_coaching") is True or row.get("override_coaching_min") == 0
+    out["override_skip_coaching"] = row.get("override_skip_coaching") is True
     return out
 
 
@@ -229,9 +225,9 @@ class RealAIGateway:
             persona=ai.Persona(ctx.persona.call_name, ctx.persona.tone, ctx.persona.speech_style, ctx.persona.voice_type),
             events_today=tuple(ai.CalendarEvent(e.title, e.start, e.end, e.all_day) for e in ctx.events_today),
             now_hhmm=ctx.now_hhmm, tomorrow_wake_time=ctx.tomorrow_wake_time,
-            tomorrow_coaching_min=None,     # 11/01: 코칭 길이 선택 없음 ("내일 코칭 안 하기"만)
             events_tomorrow=tuple(ai.CalendarEvent(e.title, e.start, e.end, e.all_day) for e in ctx.events_tomorrow),
-            routine_items=ctx.routine_items, allow_skip_coaching=ctx.allow_skip_coaching)
+            routine_items=ctx.routine_items, routine_item_secs=ctx.routine_item_secs,
+            allow_skip_coaching=ctx.allow_skip_coaching)
         return self._issue("night", build_setup("night", inp))
 
     def _issue(self, kind: str, setup: dict) -> LiveToken:
@@ -251,10 +247,10 @@ class RealAIGateway:
         return NightExtract(res.status, to_night_record_fields(res.to_row()), res.error)
 
     def parse_routine_changes(self, transcript: list, items: list[AlarmRoutineItem]) -> RoutineChangeRequest:
-        """items = 내일 진행할 항목(알람 설정 + 내일만 바꾼 값). AI가 범위·시간(changes)을 주면 그대로,
-        지금처럼 빼기·다시 넣기만 주면 정의서 기본값인 '내일만'으로 바꾼다(빼기 = 0초, 다시 넣기 = 알람 설정대로)."""
+        """items = 내일 진행할 항목(알람 설정 + 내일만 바꾼 값). AI가 항목별 시간(0 = 빼기, None = 되돌리기)과 범위를 준다."""
         from ai.tasks.routine_changes import RoutineItem, parse_routine_changes
-        res = parse_routine_changes(transcript, [RoutineItem(i.template_item_id, i.item_name, i.duration_sec > 0) for i in items], self.llm)
+        res = parse_routine_changes(transcript, [RoutineItem(i.template_item_id, i.item_name, i.duration_sec > 0, i.duration_sec)
+                                                 for i in items], self.llm)
         return RoutineChangeRequest(to_item_changes(res), res.status, res.note)
 
     # ---------- 아침 ----------
@@ -269,11 +265,9 @@ class RealAIGateway:
     def issue_briefing_token(self, ctx: BriefingContext) -> LiveToken:
         from ai.live import inputs as ai
         from ai.live.config import build_setup
-        routine = bool(ctx.program_name) and not ctx.content_name
         inp = ai.BriefingInput(
             persona=self._persona(ai, ctx.persona), morning_call_type="CONTENT" if ctx.content_name else "ROUTINE",
-            program_name=ctx.program_name, content_name=ctx.content_name, routine_follows=routine,
-            coaching_min=0 if ctx.coaching_skipped else 10,   # AI는 0인지만 본다 (11/01: 코칭 길이 없음)
+            program_name=ctx.program_name, content_name=ctx.content_name, coaching_skipped=ctx.coaching_skipped,
             now_hhmm=ctx.now_hhmm, events_today=tuple(ai.CalendarEvent(e.title, e.start, e.end, e.all_day) for e in ctx.events_today),
             weather=None, night=self._night(ai, ctx.night), strategy_block=ctx.strategy_block)
         return self._issue("briefing", build_setup("briefing", inp))
@@ -284,13 +278,13 @@ class RealAIGateway:
         inp = ai.CoachingInput(
             persona=self._persona(ai, ctx.persona), morning_call_type=ctx.morning_call_type,
             steps=tuple(ai.Step(s.order, s.name, s.planned_sec, s.response_type, s.script) for s in ctx.steps),
-            routine_follows=False, resumed=ctx.resumed, night=self._night(ai, ctx.night), strategy_block=ctx.strategy_block)
+            resumed=ctx.resumed, night=self._night(ai, ctx.night), strategy_block=ctx.strategy_block)
         return self._issue("coaching", build_setup("coaching", inp))
 
     def compose_content_steps(self, content_type: str, content_option: str | None, duration_sec: int, today: date) -> list[ContentStep]:
-        """AI 구성은 10/20분만 받으므로 가까운 쪽으로 만든 뒤 고정 시간에 맞춰 비율대로 늘이거나 줄인다."""
+        """AI는 항상 5분(300초)으로 구성하므로, 서버 설정(CONTENT_DURATION_SEC)이 다르면 비율대로 늘이거나 줄인다."""
         from ai.tasks.content_steps import compose_content_steps
-        res = compose_content_steps(content_type, content_option, 10 if duration_sec <= 900 else 20, self.llm, today=today)
+        res = compose_content_steps(content_type, content_option, self.llm, today=today)
         secs = fit_seconds([s.planned_sec for s in res.steps], duration_sec)
         return [ContentStep(s.name, sec, s.response_type, s.script) for s, sec in zip(res.steps, secs)]
 

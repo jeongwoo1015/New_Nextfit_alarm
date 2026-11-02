@@ -42,7 +42,7 @@ def print_report(scn, log, results, extra) -> None:
             print(f"    → 함수 {c['name']} {json.dumps(c['args'], ensure_ascii=False)}")
     if "extract" in extra:
         f = extra["extract"].fields
-        print("  추출:", json.dumps({k: f[k] for k in ("tomorrow_goal", "condition_label", "override_wake_time", "override_coaching_min")}, ensure_ascii=False))
+        print("  추출:", json.dumps({k: f[k] for k in ("tomorrow_goal", "condition_label", "override_wake_time", "override_skip_coaching")}, ensure_ascii=False))
     for r in results:
         if not r.passed:
             print(f"  {'✗ 실패' if r.severity == HARD else '△ 경고'} {r.rule}: {r.detail[:140]}")
