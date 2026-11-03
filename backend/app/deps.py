@@ -36,7 +36,8 @@ def night_service(request: Request, repos: Repositories = Depends(get_repos), ai
 
 
 def morning_service(request: Request, repos: Repositories = Depends(get_repos), ai=Depends(get_ai)) -> MorningService:
-    return MorningService(repos, ai, request.app.state.clock, request.app.state.personalization_mode)
+    return MorningService(repos, ai, request.app.state.clock, request.app.state.personalization_mode,
+                          request.app.state.weather)
 
 
 def history_service(request: Request, repos: Repositories = Depends(get_repos)) -> HistoryService:

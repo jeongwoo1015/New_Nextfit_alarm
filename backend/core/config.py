@@ -12,6 +12,7 @@ class Settings:
     supabase_service_role_key: str = ""
     supabase_jwt_secret: str = ""   # 비어 있으면 JWKS(비대칭 키)로 검증
     gemini_api_key: str = ""
+    openweather_api_key: str = ""   # 비어 있으면 브리핑에서 날씨를 건너뜀
     repository_backend: str = "memory"   # memory | supabase
     personalization_mode: str = "rule"   # off | rule | bandit | ab (AI CONTRACTS 6-2: 처음에는 rule 권장)
 
@@ -28,6 +29,7 @@ def get_settings() -> Settings:
         supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", ""),
         supabase_jwt_secret=os.getenv("SUPABASE_JWT_SECRET", ""),
         gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+        openweather_api_key=os.getenv("OPENWEATHER_API_KEY", ""),
         repository_backend=os.getenv("REPOSITORY_BACKEND", "memory"),
         personalization_mode=os.getenv("PERSONALIZATION_MODE", "rule"),
     )

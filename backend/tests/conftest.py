@@ -47,8 +47,24 @@ def ai():
     return FakeAIGateway()
 
 
+class FakeWeather:
+    """날씨 API 대신: 받은 위치를 기록하고 정해 둔 날씨(기본 없음)를 돌려준다."""
+
+    def __init__(self):
+        self.result, self.calls = None, []
+
+    def today(self, lat, lon, location_name=""):
+        self.calls.append((lat, lon, location_name))
+        return self.result
+
+
 @pytest.fixture
-def client(repos, ai, clock):
-    app = create_app(repos, ai, clock)
+def weather():
+    return FakeWeather()
+
+
+@pytest.fixture
+def client(repos, ai, clock, weather):
+    app = create_app(repos, ai, clock, weather)
     app.dependency_overrides[get_verifier] = lambda: TokenVerifier(Settings(supabase_jwt_secret=SECRET))
     return TestClient(app)

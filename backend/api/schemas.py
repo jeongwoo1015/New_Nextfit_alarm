@@ -282,8 +282,16 @@ class SessionViewOut(BaseModel):
     progress: ProgressOut
 
 
+class LocationIn(BaseModel):
+    """브리핑 날씨용 현재 위치. 앱이 매번 보내고 DB에 저장하지 않는다."""
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    name: str = Field(default="", max_length=30, description='기기에서 만든 한국어 지역 이름(예: "광진구"). 비우면 날씨 API의 이름')
+
+
 class BriefingTokenIn(BaseModel):
     events_today: list[CalendarEventIn] = Field(default=[], max_length=30)
+    location: LocationIn | None = None   # 없으면 날씨 없이 브리핑
 
 
 class CoachingTokenOut(LiveTokenOut):
