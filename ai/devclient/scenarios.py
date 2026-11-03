@@ -1,4 +1,5 @@
 """가상 사용자 시나리오. 사용자 발화는 고정 스크립트라 AI의 말에 따라 바뀌지 않는다."""
+import re
 from dataclasses import dataclass, field, replace
 
 from ..live.inputs import (BriefingInput, CalendarEvent, CoachingInput, NightInput, NightRecordView, Persona,
@@ -71,6 +72,17 @@ SCENARIOS = {s.name: s for s in [
     Scenario("night_routine_always", "night", _night(events_today=EVENTS, routine_items=ROUTINE_NAMES, routine_item_secs=ROUTINE_SECS),
              ("오늘은 괜찮았어요", "앞으로 스트레칭은 계속 3분으로 해 주세요", "네 맞아요", "이제 잘게요"), routine_items=ROUTINE_ITEMS,
              expect={"routine_changes": [("id-stretch", 180, "ALWAYS")], "farewell": True, "extract": {"override_wake_time": None}}),
+    Scenario("night_quiet_day", "night", _night(),      # 일정이 없고 별일 없다고 하는 날: 작은 일을 물어 일기 재료를 얻는다
+             ("별일 없었어요", "점심에 김치찌개 먹은 거 정도요", "맛있었어요", "네 맞아요", "이제 잘게요"),
+             expect={"farewell": True, "diary": True, "asks_small": True, "asks_summary": True,
+                     "extract": {"diary_text": lambda v: bool(v) and "김치찌개" in v}}),
+    Scenario("night_quiet_day_vague", "night", _night(),      # 끝까지 막연하게만 답하는 날: AI가 구체적인 질문을 해서 일기 재료를 끌어내는가
+             ("별일 없었어요", "그냥 평범했어요", "딱히 없어요", "네 맞아요", "이제 잘게요"),
+             expect={"farewell": True, "diary": True, "asks_small": True, "asks_summary": True}),
+    Scenario("night_quiet_day_declines", "night", _night(),      # 말하기 싫어하면 더 캐묻지 않고 지어내지도 않는다
+             ("별일 없었어요", "정말 없어요 그냥 피곤해요", "네 맞아요", "이제 잘게요"),
+             expect={"farewell": True, "asks_summary": True, "small_stop_from": 2,
+                     "extract": {"diary_text": lambda v: not v or not re.search(r"김치|점심|산책|친구|회의|발표", v)}}),
     Scenario("briefing_full", "briefing",
              BriefingInput(persona=Persona("예준", "FORMAL", "KIND"), morning_call_type="ROUTINE", program_name="현실 모닝루틴",
                            now_hhmm="07:02", events_today=EVENTS, weather=WEATHER, night=NIGHT_REC),
