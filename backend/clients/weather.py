@@ -60,12 +60,12 @@ class OpenWeatherClient:
             desc = (current.get("weather") or [{}])[0].get("description", "")
             temp = (current.get("main") or {}).get("temp")
         except FETCH_ERRORS as e:
-            log.warning("현재 날씨를 가져오지 못함 (%s, %s): %s", lat, lon, e)
+            log.warning("현재 날씨를 가져오지 못함 (%s, %s): %s", lat, lon, _describe(e))
             return None
         try:
             high, low, pop = self._today_range(self._get("forecast", lat, lon), now)
         except FETCH_ERRORS as e:
-            log.warning("날씨 예보를 가져오지 못함 (%s, %s): %s", lat, lon, e)
+            log.warning("날씨 예보를 가져오지 못함 (%s, %s): %s", lat, lon, _describe(e))
             high = low = pop = None
         if not desc and temp is None:
             return None
@@ -90,6 +90,15 @@ class OpenWeatherClient:
         pops = [x["pop"] for x in picked if x.get("pop") is not None]
         return (max(highs) if highs else None, min(lows) if lows else None,
                 round(max(pops) * 100) if pops else None)
+
+
+def _describe(e: Exception) -> str:
+    """로그용 오류 설명. HTTP 오류 메시지에는 요청 URL(appid=API 키)이 들어 있어 상태 코드만 남긴다."""
+    if isinstance(e, httpx.HTTPStatusError):
+        return f"HTTP {e.response.status_code}"
+    if isinstance(e, httpx.HTTPError):
+        return type(e).__name__
+    return f"{type(e).__name__}: {e}"
 
 
 def _round(v: float | None) -> float | None:

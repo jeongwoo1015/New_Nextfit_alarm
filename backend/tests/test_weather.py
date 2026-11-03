@@ -66,9 +66,10 @@ def test_current_temp_widens_range_and_late_night_uses_next_slots():
     assert (w.high_c, w.low_c, w.precip_prob) == (3.5, 0.0, 20)     # 다음 24시간 예보 + 지금 기온(3.46도)
 
 
-def test_failures_do_not_block_briefing():
+def test_failures_do_not_block_briefing(caplog):
     c, _ = client(current=httpx.Response(401, json={"message": "Invalid API key"}))
     assert c.today(37.5, 127.0) is None
+    assert "HTTP 401" in caplog.text and "ow-key" not in caplog.text            # 로그에 API 키(appid)가 남지 않음
     c, _ = client(forecast=httpx.Response(500))                     # 예보만 실패: 현재 날씨만이라도
     assert c.today(37.5, 127.0) == Weather("맑음", 3.5, 3.5, 3.5, None, "Seoul")
     c, _ = client(current={"cod": 200}, forecast={"list": "bad"})   # 형식이 다른 응답
