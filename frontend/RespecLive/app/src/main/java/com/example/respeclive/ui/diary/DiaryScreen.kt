@@ -6,6 +6,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -22,7 +23,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -36,6 +39,7 @@ import org.json.JSONObject
 import java.util.Calendar
 
 private val WEEKDAYS = listOf("일", "월", "화", "수", "목", "금", "토")
+private val SWIPE_THRESHOLD = 60.dp           // 이만큼 옆으로 밀어야 달이 넘어감
 
 /** 사진을 받기 전(또는 받지 못했을 때) 칸을 채우는 그라데이션 */
 internal val PHOTO_GRADIENTS = listOf(
@@ -61,7 +65,7 @@ private data class YearMonth(val year: Int, val month: Int) {
 
 /**
  * 한 줄 일기 달력 (GET /diary/calendar). 사진을 올린 날은 사진, 없는 날은 그날 루틴 성공률 링.
- * 날짜를 누르면 그날의 한 줄 일기와 리포트(onOpenDay "YYYY-MM-DD").
+ * 날짜를 누르면 그날의 한 줄 일기와 리포트(onOpenDay "YYYY-MM-DD"). 달은 화살표나 옆으로 밀어서 이동.
  */
 @Composable
 fun DiaryScreen(onOpenDay: (String) -> Unit) {
@@ -80,9 +84,25 @@ fun DiaryScreen(onOpenDay: (String) -> Unit) {
     val today = Calendar.getInstance()
     val todayKey = "%04d-%02d-%02d".format(today.get(Calendar.YEAR), today.get(Calendar.MONTH) + 1, today.get(Calendar.DAY_OF_MONTH))
 
+    val canNext = ym.key < thisMonth.key
+    fun prevMonth() { monthKey = ym.plus(-1).key }
+    fun nextMonth() { if (canNext) monthKey = ym.plus(1).key }
+    val swipeThreshold = with(LocalDensity.current) { SWIPE_THRESHOLD.toPx() }
+
     Column(
         Modifier
             .fillMaxSize()
+            // 옆으로 밀어 달 이동: 오른쪽으로 밀면 이전 달, 왼쪽으로 밀면 다음 달 (이번 달 이후는 없음)
+            .pointerInput(monthKey) {
+                var dragged = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { dragged = 0f },
+                    onDragEnd = {
+                        if (dragged > swipeThreshold) prevMonth()
+                        else if (dragged < -swipeThreshold) nextMonth()
+                    }
+                ) { _, dx -> dragged += dx }
+            }
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp)
     ) {
@@ -91,7 +111,7 @@ fun DiaryScreen(onOpenDay: (String) -> Unit) {
             Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 18.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            MonthButton("‹", enabled = true) { monthKey = ym.plus(-1).key }
+            MonthButton("‹", enabled = true) { prevMonth() }
             Text(
                 "${ym.year}년 ${ym.month}월",
                 color = Color.White,
@@ -100,7 +120,7 @@ fun DiaryScreen(onOpenDay: (String) -> Unit) {
                 modifier = Modifier.weight(1f),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
-            MonthButton("›", enabled = ym.key < thisMonth.key) { monthKey = ym.plus(1).key }
+            MonthButton("›", enabled = canNext) { nextMonth() }
         }
 
         // 요일 (일요일부터)
@@ -135,21 +155,7 @@ fun DiaryScreen(onOpenDay: (String) -> Unit) {
             }
         }
 
-        // 범례
         Spacer(Modifier.height(14.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(20.dp).clip(RoundedCornerShape(6.dp))
-                    .background(Brush.linearGradient(listOf(PHOTO_GRADIENTS[0].first, PHOTO_GRADIENTS[0].second)))
-            )
-            Spacer(Modifier.width(8.dp))
-            Text("사진을 올린 날", color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
-            Spacer(Modifier.width(20.dp))
-            RateRing(rate = 0.7f, size = 20.dp, stroke = 3.dp, label = null)
-            Spacer(Modifier.width(8.dp))
-            Text("사진이 없는 날 · 루틴 성공률", color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp)
-        }
-        Spacer(Modifier.height(10.dp))
         Text("날짜를 누르면 그날의 한 줄 일기와 리포트를 볼 수 있어요.", color = RespecColors.TextSub, fontSize = 13.sp)
         error?.let {
             Spacer(Modifier.height(10.dp))
