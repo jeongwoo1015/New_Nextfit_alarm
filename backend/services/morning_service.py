@@ -9,6 +9,7 @@ from datetime import timedelta
 
 from backend.clients.ai_gateway import (AIGateway, BriefingContext, CalendarEvent, CoachingContext, CoachStep, LiveToken,
                                         Persona, night_view)
+from backend.clients.weather import NoWeather, WeatherClient
 from backend.core.errors import AppError, Conflict, NotFound
 from backend.core.timeutil import now_kst, to_kst, today_kst
 from backend.domain.models import MorningSession, Progress, SessionStep
@@ -26,6 +27,14 @@ RECENT_DAYS = 7
 
 
 @dataclass(frozen=True)
+class Location:
+    """앱이 브리핑 토큰 요청에 보내는 현재 위치. name은 기기에서 만든 한국어 지역 이름(예: "광진구")."""
+    lat: float
+    lon: float
+    name: str = ""
+
+
+@dataclass(frozen=True)
 class SessionView:
     session: MorningSession
     steps: list[SessionStep]
@@ -36,8 +45,10 @@ class SessionView:
 
 
 class MorningService:
-    def __init__(self, repos: Repositories, ai: AIGateway, clock=now_kst, mode: str = "rule"):
+    def __init__(self, repos: Repositories, ai: AIGateway, clock=now_kst, mode: str = "rule",
+                 weather: WeatherClient | None = None):
         self.r, self.ai, self.clock, self.mode = repos, ai, clock, mode
+        self.weather = weather or NoWeather()
 
     # ---------- 세션 ----------
     def start(self, user_id: str, alarm_id: str) -> SessionView:
@@ -113,7 +124,9 @@ class MorningService:
             raise NotFound("온보딩을 먼저 마쳐 주세요", "SETTING_NOT_FOUND")
         return Persona(st.user_call_name, st.tone, st.speech_style, st.voice_type)
 
-    def briefing_token(self, user_id: str, session_id: str, events_today: list[CalendarEvent]) -> LiveToken:
+    def briefing_token(self, user_id: str, session_id: str, events_today: list[CalendarEvent],
+                       location: Location | None = None) -> LiveToken:
+        """location은 앱이 매번 보내는 현재 위치(저장하지 않음). 없거나 날씨를 못 가져오면 날씨 없이 브리핑."""
         s = self._session(user_id, session_id)
         persona = self._persona(user_id)
         night = self.r.nights.get_night_for_morning(user_id, s.session_date)
@@ -122,8 +135,10 @@ class MorningService:
         if s.morning_call_type == "ROUTINE":
             t = self.r.presets.get_template(s.template_id)
             program = t.template_name if t else ""
+        weather = self.weather.today(location.lat, location.lon, location.name) if location else None
         ctx = BriefingContext(persona, to_kst(self.clock()).strftime("%H:%M"), tuple(events_today), night_view(night),
-                              program, CONTENT_NAMES.get(s.content_type or "", ""), s.coaching_skipped, briefing_block)
+                              program, CONTENT_NAMES.get(s.content_type or "", ""), s.coaching_skipped, briefing_block,
+                              weather)
         return self.ai.issue_briefing_token(ctx)
 
     def _strategy(self, user_id: str, s: MorningSession, night) -> tuple[str, str]:

@@ -2,7 +2,7 @@ from datetime import datetime, time
 
 import pytest
 
-from backend.clients.ai_gateway import ItemChange, NightExtract, RoutineChangeRequest
+from backend.clients.ai_gateway import ItemChange, NightExtract, RoutineChangeRequest, Weather
 from backend.core.errors import ServiceUnavailable
 from backend.core.timeutil import KST
 from backend.repositories.seed import template_id
@@ -65,6 +65,22 @@ def test_briefing_token_decides_strategy_once(client, morning, ai, repos):
     assert [c[0] for c in ai.calls].count("decide") == 1
     log = repos.personalization.get_strategy_log(USER_A, FRIDAY_7.date())
     assert log.strategy_id == "gentle" and log.session_id == v["session"]["session_id"]
+
+
+def test_briefing_weather_from_app_location(client, morning, ai, weather):
+    """위치를 보내면 그 위치의 날씨를 브리핑에 넣고, 안 보내거나 날씨가 없으면 날씨 없이."""
+    v = start(client, morning).json()
+    weather.result = Weather("맑음", 3.5, 9.0, 1.2, 10, "광진구")
+    body = {"location": {"lat": 37.5385, "lon": 127.0823, "name": " 광진구 "}}
+    assert client.post(url(v, "/briefing-token"), json=body, headers=auth(USER_A)).status_code == 200
+    assert weather.calls[-1] == (37.5385, 127.0823, "광진구") and ai.calls[-1][1].weather == weather.result
+    client.post(url(v, "/briefing-token"), json={}, headers=auth(USER_A))
+    assert len(weather.calls) == 1 and ai.calls[-1][1].weather is None                # 위치가 없으면 부르지도 않음
+    weather.result = None                                                               # 날씨 API 실패
+    assert client.post(url(v, "/briefing-token"), json=body, headers=auth(USER_A)).status_code == 200
+    assert ai.calls[-1][1].weather is None
+    bad = {"location": {"lat": 91, "lon": 127.0}}
+    assert client.post(url(v, "/briefing-token"), json=bad, headers=auth(USER_A)).status_code == 422
 
 
 def test_strategy_failure_falls_back_to_default(client, morning, ai, repos):

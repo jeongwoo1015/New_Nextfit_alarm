@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from backend.app.deps import morning_service
 from backend.clients.ai_gateway import CalendarEvent
 from backend.core.auth import current_user_id
-from backend.services.morning_service import MorningService, SessionView
+from backend.services.morning_service import Location, MorningService, SessionView
 
 from .schemas import (BriefingTokenIn, CoachingTokenOut, LiveTokenOut, ProgressOut, RewakeOut, SessionOut, SessionStartIn,
                       SessionViewOut, SnoozeOut, StepDurationIn, StepOut, StepStatusIn, VerdictIn)
@@ -63,9 +63,11 @@ def first_response(session_id: str, user_id: str = Depends(current_user_id), svc
 @router.post("/sessions/{session_id}/briefing-token", response_model=LiveTokenOut)
 def briefing_token(session_id: str, body: BriefingTokenIn, user_id: str = Depends(current_user_id),
                    svc: MorningService = Depends(morning_service)):
-    """브리핑 Live 토큰. 그날 처음 호출할 때 개인화 전략을 정해 로그에 남긴다(재연결은 같은 전략)."""
+    """브리핑 Live 토큰. 그날 처음 호출할 때 개인화 전략을 정해 로그에 남긴다(재연결은 같은 전략).
+    location을 보내면 그 위치의 오늘 날씨를 브리핑에 넣는다(실패하면 날씨 없이)."""
     events = [CalendarEvent(e.title, e.start, e.end, e.all_day) for e in body.events_today]
-    return svc.briefing_token(user_id, session_id, events)
+    loc = Location(body.location.lat, body.location.lon, body.location.name.strip()) if body.location else None
+    return svc.briefing_token(user_id, session_id, events, loc)
 
 
 @router.post("/sessions/{session_id}/coaching-token", response_model=CoachingTokenOut)

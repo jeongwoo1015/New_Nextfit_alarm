@@ -11,7 +11,7 @@
 | `api/` | 화면별 엔드포인트와 요청·응답 형식(`schemas.py`) |
 | `services/` | 서비스 흐름 — 사용자 확인(USER_ID 비교), 검사, 저장 순서 |
 | `repositories/` | DB 접근 인터페이스(`base.py`) + 메모리 구현 + 프리셋 시드. Supabase 구현은 backend-db 담당 |
-| `clients/` | AI 파트 어댑터(`ai_gateway.py`: Live 토큰·추출·콘텐츠·개인화, `ai_stats.py`: 리포트·일기 통계) + 테스트용 `fake_ai.py` |
+| `clients/` | AI 파트 어댑터(`ai_gateway.py`: Live 토큰·추출·콘텐츠·개인화, `ai_stats.py`: 리포트·일기 통계), 날씨(`weather.py`: OpenWeather) + 테스트용 `fake_ai.py` |
 | `jobs/` | 배치. `maintenance.py`(30일 원문 정리, FAILED 재추출, 탈퇴)는 backend-db 담당 |
 
 ## API (5단계까지)
@@ -37,7 +37,7 @@
 | `POST /morning/sessions/{id}/rewake` · `/response` | 모닝콜 | 8초 무응답 재기상(AI 음악) 횟수 +1 / 첫 음성 응답 시각(= 기상 성공 시각) |
 | `POST /morning/sessions/{id}/snooze` | 모닝콜 | "5분 뒤 다시 울리기" 횟수 +1 (제한 없음). 다시 울리면 `POST /morning/sessions`로 같은 세션 |
 | `POST /morning/sessions/{id}/wake-check` | 브리핑 | 확인 멘트(2~3개)를 모두 마침 — 브리핑 Live의 `wake_check_done`을 앱이 전달. 이때 기상 성공 판정 |
-| `POST /morning/sessions/{id}/briefing-token` | 브리핑 | 오늘 일정을 보내면 브리핑 Live 토큰. 그날 처음이면 개인화 전략을 정해 로그 |
+| `POST /morning/sessions/{id}/briefing-token` | 브리핑 | 오늘 일정·현재 위치(선택, 날씨용)를 보내면 브리핑 Live 토큰. 그날 처음이면 개인화 전략을 정해 로그 |
 | `POST /morning/sessions/{id}/coaching-token` | 루틴·콘텐츠 | `start_routine` 뒤(재연결도) 호출. 처음이면 단계를 PENDING으로 만들고 남은 단계만 토큰에 |
 | `POST /morning/sessions/{id}/steps/{n}/verdict` | 코칭 | Live `report_step_result` 전달 |
 | `PATCH /morning/sessions/{id}/steps/{n}` | 체크리스트 | 직접 체크·건너뛰기·해제 |
@@ -106,7 +106,7 @@ cd .. && backend/.venv/Scripts/python -m uvicorn backend.app.main:app --reload
 `extract_night_record` → 하루 한정 변경 대상 알람 지정 → `parse_routine_changes` → `apply_changes` → 범위별로 `replace_night_routine`(내일만) / `replace_alarm_routine`(앞으로 계속).
 루틴 변경이 실패해도 밤 기록 저장은 유지한다. 추출이 실패하면 `FAILED`로 두고 원문은 남긴다(재추출 배치는 6단계).
 
-아침 흐름: 세션 시작(스냅샷) → 브리핑 토큰(어젯밤 기록, 오늘 일정, 프리셋/콘텐츠 이름, 전략 문장) → `start_routine` →
+아침 흐름: 세션 시작(스냅샷) → 브리핑 토큰(어젯밤 기록, 오늘 일정, 날씨, 프리셋/콘텐츠 이름, 전략 문장) → `start_routine` →
 코칭 토큰(처음이면 루틴 = 어젯밤 내일만 바꾼 값 또는 알람 항목 시간 중 0초 초과, 콘텐츠 = AI `compose_content_steps` → 단계 PENDING 생성,
 `planned_total_sec` 기록) → 판정 반영 → 종료. 개인화는 그날 처음 브리핑 때 `decide()` 한 번, 로그 저장,
 재연결 때는 로그의 `strategy`로 같은 문장(`strategy_blocks`). 개인화가 실패하면 기본 방식으로 진행한다.
@@ -148,7 +148,9 @@ DB에 `rs_morning_session.snooze_count`, `wake_checked_at` 컬럼이 필요하�
 - 일기 사진은 오늘 이전 날짜만 받는다.
 - 업로드 Content-Type은 Storage 버킷 허용 형식과 같게 검사한다(목소리 `audio/mp4`·`audio/x-m4a`·`audio/m4a`·`audio/aac`, 사진 `image/jpeg`, 다르면 415).
 - 음악 파일(RS_AI_MUSIC 행 + music 버킷 mp3)은 아직 만든 사람이 없다. AI 파트 `ai/tasks/music.py`의 프롬프트로 생성·업로드할 담당을 정해야 한다.
-- 날씨는 지역 정보가 정의서에 없어 아직 넘기지 않는다(AI 브리핑은 날씨를 건너뜀).
+- 날씨: 앱이 브리핑 토큰 요청에 현재 위치(`location`: lat, lon, 한국어 지역 이름)를 매번 보내고 DB에 저장하지 않는다.
+  서버가 OpenWeather 현재 날씨 + 5일/3시간 예보(오늘 남은 시간의 최고·최저·강수 확률)로 정리해 브리핑에 넣는다.
+  같은 위치(약 1km)는 30분 캐시. 위치가 없거나 `OPENWEATHER_API_KEY`가 없거나 호출이 실패하면 날씨 없이 브리핑한다.
 - 대화 원문 role은 `user` / `assistant`만 받는다(AI CONTRACTS 2-2 권고). 사용자 발화가 없으면 422(`EMPTY_TRANSCRIPT`).
 - `MUSIC_GENRE`는 NOT NULL인데 기본값이 없어 온보딩에서 안 보내면 `POP`.
 - 메모리 시드의 고정 스크립트는 표시(`[stretch_short]`, `[lymph]`)만 있다. 실제 문구는 DB 시드에 있다.

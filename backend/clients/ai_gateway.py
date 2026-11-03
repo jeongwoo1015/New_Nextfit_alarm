@@ -42,6 +42,17 @@ class CalendarEvent:
 
 
 @dataclass(frozen=True)
+class Weather:
+    """브리핑에서 말할 오늘 날씨 (앱이 보낸 위치로 날씨 API를 불러 정리, DB에 저장하지 않음). 없는 값은 None/""."""
+    summary: str = ""                       # 예: "맑음", "실 비"
+    temp_c: float | None = None             # 현재 기온
+    high_c: float | None = None
+    low_c: float | None = None
+    precip_prob: int | None = None          # 강수 확률 0~100
+    location_name: str = ""                 # 예: "광진구"
+
+
+@dataclass(frozen=True)
 class NightContext:
     persona: Persona
     now_hhmm: str
@@ -75,6 +86,7 @@ class BriefingContext:
     content_name: str = ""                  # 콘텐츠 알람이면 콘텐츠 이름
     coaching_skipped: bool = False          # 내일 코칭 안 하기에 동의한 날 → 브리핑만
     strategy_block: str = ""
+    weather: Weather | None = None          # 없으면 브리핑에서 날씨를 건너뜀
 
 
 @dataclass(frozen=True)
@@ -269,7 +281,8 @@ class RealAIGateway:
             persona=self._persona(ai, ctx.persona), morning_call_type="CONTENT" if ctx.content_name else "ROUTINE",
             program_name=ctx.program_name, content_name=ctx.content_name, coaching_skipped=ctx.coaching_skipped,
             now_hhmm=ctx.now_hhmm, events_today=tuple(ai.CalendarEvent(e.title, e.start, e.end, e.all_day) for e in ctx.events_today),
-            weather=None, night=self._night(ai, ctx.night), strategy_block=ctx.strategy_block)
+            weather=ai.Weather(**asdict(ctx.weather)) if ctx.weather else None, night=self._night(ai, ctx.night),
+            strategy_block=ctx.strategy_block)
         return self._issue("briefing", build_setup("briefing", inp))
 
     def issue_coaching_token(self, ctx: CoachingContext) -> LiveToken:

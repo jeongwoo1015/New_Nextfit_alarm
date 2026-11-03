@@ -12,7 +12,7 @@ import pytest
 pytest.importorskip("ai.live.config")
 
 from backend.clients.ai_gateway import (BriefingContext, CalendarEvent, CoachingContext, CoachStep, ItemChange,  # noqa: E402
-                                        NightContext, NightView, Persona, RealAIGateway, to_item_changes)
+                                        NightContext, NightView, Persona, RealAIGateway, Weather, to_item_changes)
 from backend.core.timeutil import KST  # noqa: E402
 from backend.domain.models import AlarmRoutineItem, MorningSession, RecentRecords, SessionStep  # noqa: E402
 
@@ -72,6 +72,16 @@ def test_briefing_token_routine_and_skip():
     assert tool_names(body) == ["start_routine", "end_session"]                 # 루틴이 이어진다
     gw.issue_briefing_token(BriefingContext(PERSONA, "07:02", night=NIGHT, program_name="현실 모닝루틴", coaching_skipped=True))
     assert tool_names(tokens[-1][1]) == ["end_session"]                         # 코칭 안 하는 날은 start_routine 없음
+
+
+def test_briefing_token_weather():
+    gw, tokens = gateway()
+    gw.issue_briefing_token(BriefingContext(PERSONA, "07:02", program_name="현실 모닝루틴",
+                                            weather=Weather("비", 11.0, 14.0, 8.0, 80, "광진구")))
+    text = system_text(tokens[-1][1])
+    assert "[오늘 날씨]\n- 지역 광진구, 비, 현재 11도, 최고 14도 / 최저 8도, 강수 확률 80%" in text
+    gw.issue_briefing_token(BriefingContext(PERSONA, "07:02", program_name="현실 모닝루틴"))
+    assert "[오늘 날씨]\n-" not in system_text(tokens[-1][1])                        # 날씨가 없으면 날씨 칸 없음
 
 
 def test_briefing_token_content_alarm():
