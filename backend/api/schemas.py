@@ -356,7 +356,7 @@ class DiaryDayOut(BaseModel):
     date: date
     summary: TotalsOut
     night: NightRecordOut | None         # RECORD_DATE = 이 날짜인 밤 기록 (한 줄 일기, 요약, 컨디션)
-    sessions: list[DiarySessionOut]      # SESSION_DATE = 이 날짜인 아침 세션
+    sessions: list[DiarySessionOut]      # SESSION_DATE = 이 날짜인 아침 세션, 알람이 먼저 울린 순 (울리지 않은 세션은 뒤)
     photo_url: str | None
 
 
