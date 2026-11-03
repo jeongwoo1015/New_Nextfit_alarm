@@ -34,6 +34,7 @@ import com.example.respeclive.ui.night.NightChatScreen
 import com.example.respeclive.ui.diary.DiaryDayScreen
 import com.example.respeclive.ui.diary.DiaryScreen
 import com.example.respeclive.ui.onboarding.OnboardingScreen
+import com.example.respeclive.ui.report.ReportScreen
 import com.example.respeclive.ui.routine.RoutineScreen
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.flow.first
@@ -140,7 +141,7 @@ private fun MainNav(
                 )
             }
             composable("routine") { RoutineScreen() }
-            composable("report") { PlaceholderScreen("리포트") }
+            composable("report") { ReportScreen() }
             composable("diary") { DiaryScreen(onOpenDay = { date -> nav.navigate("diaryDay/$date") }) }
             composable("diaryDay/{date}") { entry ->
                 DiaryDayScreen(date = entry.arguments?.getString("date").orEmpty(), onBack = { nav.popBackStack() })

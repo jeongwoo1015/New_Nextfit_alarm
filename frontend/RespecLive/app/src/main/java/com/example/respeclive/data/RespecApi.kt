@@ -188,6 +188,18 @@ object RespecApi {
         return if (r.ok) r.json() else null
     }
 
+    // ---------------- 리포트 ----------------
+
+    /**
+     * period "week"/"month"/"year" (오늘이 속한 기간) → ReportOut
+     * {overall(전체 누적), totals(기간 합계), series[{label, avg_wake_clock, routine_done/total, routine_completion_rate, ...}],
+     *  current_streak, best_streak}. 비율은 0~1, 기록이 없으면 null
+     */
+    suspend fun report(period: String): JSONObject? {
+        val r = ApiClient.get("/reports?period=$period") ?: return null
+        return if (r.ok) r.json() else null
+    }
+
     // ---------------- 한 줄 일기 ----------------
 
     /** 달력: month "YYYY-MM" → CalendarDayOut 목록 (date, photo_url, routine_completion_rate 0~1, routine_done/total, ...) */
