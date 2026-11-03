@@ -96,6 +96,22 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
         asked_tomorrow = [s for t in texts for s in sentences(t) if "?" in s and "내일" in s and re.search(r"일정|챙겨|목표|해내|걱정|특별한", s)]
         if e.get("asks_tomorrow"):
             add("밤: 내일 목표·특이사항을 물어봄", SOFT, bool(asked_tomorrow), "내일 이야기를 묻는 질문이 없음")
+        # 일정이 없고 별일 없다고 하는 날: 작고 구체적인 일(식사·산책·만난 사람 등)을 물어 일기 재료를 얻는다.
+        # '기억에 남는 순간이 있나요?' 같은 막연한 질문은 세지 않고, 요약 확인 질문("…맞아요?")도 세지 않는다
+        small = re.compile(r"먹|식사|점심|저녁|간식|커피|산책|걷|만나|연락|통화")
+        confirm = re.compile(r"맞(아요|죠|지|나요|을까요)[^.?]{0,12}\?|그렇죠\?|(요약|정리)(해 볼까요|하면 (될까요|맞을까요))")
+        small_q = [i for i, t in enumerate(turns) if i >= 1 and ("?" in t.said or "궁금해요" in t.said or "알려" in t.said) and small.search(t.said) and not confirm.search(t.said)]
+        if e.get("asks_small"):
+            add("밤: 별일 없는 날 작고 구체적인 일을 물어봄", HARD, bool(small_q), "식사·산책·사람처럼 구체적인 질문이 없음")
+            add("밤: 작은 일 질문은 3번 이하", SOFT, len(small_q) <= 3, f"{len(small_q)}번 {small_q}")
+        if e.get("asks_summary"):      # 하루 요약 확인이 일기의 바탕이라 내일 이야기보다 먼저 와야 한다
+            first_sum = next((i for i, t in enumerate(turns) if confirm.search(t.said)), None)
+            first_tom = next((i for i, t in enumerate(turns) if re.search(r"내일", t.said) and "?" in t.said and re.search(r"일정|챙겨|목표|해내|걱정|특별한|하고 싶|계획", t.said)), None)
+            add("밤: 하루 요약을 확인한 뒤에 내일 이야기를 물음", HARD, first_sum is not None and (first_tom is None or first_sum < first_tom),
+                f"요약 확인 턴={first_sum}, 내일 질문 턴={first_tom}")
+        if "small_stop_from" in e:    # 말하기 싫다고 한 뒤에는 작은 일을 더 묻지 않는다
+            late = [i for i in small_q if i >= e["small_stop_from"]]
+            add("밤: 말하기 싫다고 한 뒤에는 작은 일을 더 묻지 않음", HARD, not late, f"{late}번째 턴")
         for i, t in enumerate(turns[1:], 1):
             farewell = "end_session" in _names(t) or bool(END_INTENT.search(t.heard))
             relaxed = bool(re.search(r"하루|알람|코칭", t.said))       # 하루 요약 확인, 내일 아침 조정 제안·확인은 3문장까지

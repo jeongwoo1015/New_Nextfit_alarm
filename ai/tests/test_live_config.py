@@ -278,11 +278,21 @@ def test_weather_location_is_included_only_with_weather_values():
     assert "[오늘 날씨]\n- 맑음" in no_place and "- 지역" not in no_place
 
 
+def test_night_asks_small_concrete_things_on_quiet_days():
+    p = night_prompt(NightInput())
+    assert "작은 일 묻기(사용자가" in p and "아주 작고 구체적인 일 하나를 골라 묻는다" in p
+    assert "작은 일은 최대 두 번만 묻는다" in p and "막연한 질문은 하지 않는다" in p and "지어내거나" in p
+    assert "요약 확인 전에는 내일 이야기를 묻지 않는다" in p and "작은 일 한두 가지여도 된다" in p
+    assert "점심은 뭘 드셨어요?" in p
+    casual = night_prompt(NightInput(persona=Persona(tone="CASUAL")))
+    assert "점심은 뭐 먹었어?" in casual and "점심은 뭘 드셨어요?" not in casual and "하루였구나." in casual
+
+
 def test_night_examples_follow_the_tone_setting():
     formal = night_prompt(NightInput(persona=Persona(tone="FORMAL"), tomorrow_wake_time="07:00", routine_items=("독서",)))
     casual = night_prompt(NightInput(persona=Persona(tone="CASUAL"), tomorrow_wake_time="07:00", routine_items=("독서",)))
     assert "맞죠?" in formal and "잘 마무리하셨어요?" in formal and "맞지?" not in formal
     assert "맞지?" in casual and "잘 마무리했어?" in casual and "독서는 내일 하루만 빠져." in casual
-    for polite in ("맞죠?", "잘 마무리하셨어요?", "맞아요?", "쉬어 갈까요?", "빠져요.", "줄여 둘게요", "바꿔 둘게요"):                         # 반말 설정의 지시문에 존댓말 예시가 남아 있으면 말투가 섞인다
+    for polite in ("맞죠?", "잘 마무리하셨어요?", "맞아요?", "쉬어 갈까요?", "빠져요.", "줄여 둘게요", "바꿔 둘게요", "드셨어요?", "하루였군요."):                         # 반말 설정의 지시문에 존댓말 예시가 남아 있으면 말투가 섞인다
         assert polite not in casual
     assert night_prompt(NightInput(persona=Persona(tone="???"))).count("잘 마무리하셨어요?") == 1             # 모르는 어조는 존댓말 예시
