@@ -50,6 +50,7 @@ import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.data.ApiClient
 import com.example.respeclive.data.CalendarEvents
+import com.example.respeclive.data.DeviceLocation
 import com.example.respeclive.data.MusicStore
 import com.example.respeclive.data.NightMessageStore
 import com.example.respeclive.data.RespecApi
@@ -149,19 +150,21 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
     var hearingAnswer by remember { mutableStateOf(false) }   // "들어 볼까요?"에 대한 말 대답을 듣는 중
     var liveSaying by remember { mutableStateOf(false) }   // 마무리 안내를 AI 목소리로 읽는 중 (자막은 AI가 실제로 한 말)
 
-    // ---- 마이크 권한: 받기 전에 Live를 열면 마이크가 열리지 않으므로 결과를 기다렸다가 연결 ----
+    // ---- 마이크·위치 권한: 받기 전에 Live를 열면 마이크가 열리지 않으므로 결과를 기다렸다가 연결 ----
+    // (위치는 없어도 브리핑은 됨, 날씨만 빠짐)
     val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (!granted) {
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        if (result[Manifest.permission.RECORD_AUDIO] == false) {
             Toast.makeText(context, "마이크 권한이 없으면 버튼으로 대답해 주세요", Toast.LENGTH_SHORT).show()
         }
         micReady.complete(Unit)
     }
     LaunchedEffect(Unit) {
-        val has = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-                PackageManager.PERMISSION_GRANTED
-        if (has) micReady.complete(Unit) else permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        val missing = listOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.ACCESS_COARSE_LOCATION).filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) micReady.complete(Unit) else permissionLauncher.launch(missing.toTypedArray())
     }
 
     // ---- 정리 + 화면 켜짐 유지. 화면을 벗어나면 서버에 세션 종료 기록 ----
@@ -353,11 +356,13 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
         // 2) 브리핑 세션. 이미 루틴을 다 마친 날이면 루틴 안내를 하지 않도록 시작 신호에 덧붙임
         val doneAtStart = items.isNotEmpty() && items.all { it.done }
         micReady.await()
+        val placeJob = async { DeviceLocation.lastKnown(context) }   // 재연결 때마다 다시 찾지 않도록 한 번만
         stage = Stage.Briefing
         notice = "리스펙과 연결하는 중…"
         client.start {
-            // 오늘 일정은 폰 캘린더에서 (권한은 밤 대화에서 받음. 없으면 빈 일정)
-            val auth = RespecApi.briefingToken(sid, CalendarEvents.today(context)) ?: RespecApi.tokenError()
+            // 오늘 일정은 폰 캘린더에서 (권한은 밤 대화에서 받음. 없으면 빈 일정), 날씨용 위치는 마지막으로 알던 위치
+            val auth = RespecApi.briefingToken(sid, CalendarEvents.today(context), placeJob.await())
+                ?: RespecApi.tokenError()
             if (doneAtStart) LiveAuth(auth.token, auth.wsUrl, auth.model, auth.startSignal + ALREADY_DONE_NOTE) else auth
         }
 

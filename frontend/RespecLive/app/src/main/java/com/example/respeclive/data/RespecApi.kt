@@ -129,9 +129,13 @@ object RespecApi {
         return if (r.ok) r.json() else null
     }
 
-    /** 아침 브리핑 Live 토큰. 일정은 CalendarEvents 형식 */
-    suspend fun briefingToken(sessionId: String, eventsToday: JSONArray): LiveAuth? {
+    /** 아침 브리핑 Live 토큰. 일정은 CalendarEvents 형식. 위치가 없으면 위치 칸은 보내지 않음 (날씨 없이 브리핑) */
+    suspend fun briefingToken(sessionId: String, eventsToday: JSONArray, place: DeviceLocation.Place?): LiveAuth? {
         val body = JSONObject().put("events_today", eventsToday)
+        // name을 비우면 서버가 날씨 API의 영어 이름(Seoul)을 씀
+        if (place != null) {
+            body.put("location", JSONObject().put("lat", place.lat).put("lon", place.lon).put("name", place.name.orEmpty()))
+        }
         val r = ApiClient.post("/morning/sessions/$sessionId/briefing-token", body, ApiConfig.TOKEN_TIMEOUT_MS) ?: return null
         return if (r.ok) liveAuth(r.json()) else null
     }

@@ -1,8 +1,11 @@
 package com.example.respeclive.ui.onboarding
 
+import android.Manifest
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -50,6 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.respeclive.data.ApiClient
+import com.example.respeclive.data.DeviceLocation
 import com.example.respeclive.data.RespecApi
 import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.theme.RespecColors
@@ -121,6 +125,10 @@ private fun minutesText(sec: Int): String {
 @Composable
 fun OnboardingScreen(onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    // 아침 브리핑 날씨용 위치 권한을 미리 받음. 거부해도 온보딩은 끝남 (날씨 없이 브리핑)
+    val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { onDone() }
 
     var step by rememberSaveable { mutableIntStateOf(0) }
 
@@ -180,7 +188,11 @@ fun OnboardingScreen(onDone: () -> Unit) {
         scope.launch {
             val ok = RespecApi.onboard(body)
             submitting = false
-            if (ok) onDone() else submitError = ApiClient.lastError ?: "저장하지 못했어요. 다시 시도해 주세요"
+            when {
+                !ok -> submitError = ApiClient.lastError ?: "저장하지 못했어요. 다시 시도해 주세요"
+                DeviceLocation.hasPermission(context) -> onDone()
+                else -> locationPermission.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+            }
         }
     }
 
