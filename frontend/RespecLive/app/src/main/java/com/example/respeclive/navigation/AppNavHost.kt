@@ -31,6 +31,8 @@ import com.example.respeclive.ui.home.HomeScreen
 import com.example.respeclive.ui.morning.MorningCallScreen
 import com.example.respeclive.ui.night.NightCallScreen
 import com.example.respeclive.ui.night.NightChatScreen
+import com.example.respeclive.ui.diary.DiaryDayScreen
+import com.example.respeclive.ui.diary.DiaryScreen
 import com.example.respeclive.ui.onboarding.OnboardingScreen
 import com.example.respeclive.ui.routine.RoutineScreen
 import com.example.respeclive.ui.theme.RespecColors
@@ -51,7 +53,7 @@ private fun titleFor(route: String?) = when (route) {
     "home" -> "리스펙 알람"
     "routine" -> "루틴 목록"
     "report" -> "리포트"
-    "diary" -> "일기"
+    "diary" -> "한 줄 일기"
     "profile" -> "내 정보"
     else -> ""
 }
@@ -139,7 +141,10 @@ private fun MainNav(
             }
             composable("routine") { RoutineScreen() }
             composable("report") { PlaceholderScreen("리포트") }
-            composable("diary") { PlaceholderScreen("일기") }
+            composable("diary") { DiaryScreen(onOpenDay = { date -> nav.navigate("diaryDay/$date") }) }
+            composable("diaryDay/{date}") { entry ->
+                DiaryDayScreen(date = entry.arguments?.getString("date").orEmpty(), onBack = { nav.popBackStack() })
+            }
             composable("profile") { PlaceholderScreen("내 정보") }
 
             composable(

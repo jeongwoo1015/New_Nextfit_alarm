@@ -188,6 +188,27 @@ object RespecApi {
         return if (r.ok) r.json() else null
     }
 
+    // ---------------- 한 줄 일기 ----------------
+
+    /** 달력: month "YYYY-MM" → CalendarDayOut 목록 (date, photo_url, routine_completion_rate 0~1, routine_done/total, ...) */
+    suspend fun diaryCalendar(month: String): List<JSONObject>? {
+        val r = ApiClient.get("/diary/calendar?month=$month") ?: return null
+        val arr = if (r.ok) r.array() else null
+        return arr?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }
+    }
+
+    /** 날짜 상세: DiaryDayOut {date, summary, night(한 줄 일기 등), sessions[{session, steps}], photo_url} */
+    suspend fun diaryDay(date: String): JSONObject? {
+        val r = ApiClient.get("/diary/$date") ?: return null
+        return if (r.ok) r.json() else null
+    }
+
+    /** 일기 사진 올리기 (JPEG 본문 그대로, 다시 올리면 덮어씀) → 새 photo_url. 실패하면 null */
+    suspend fun uploadDiaryPhoto(date: String, jpeg: ByteArray): String? {
+        val r = ApiClient.putBytes("/diary/$date/photo", jpeg, "image/jpeg", ApiConfig.TOKEN_TIMEOUT_MS) ?: return null
+        return if (r.ok) r.json()?.optString("photo_url")?.takeIf { it.isNotBlank() && it != "null" } else null
+    }
+
     // ---------------- 음악 ----------------
 
     /** 음악 서명 URL. type: "rewake"(재기상, 12시간 유효) / "sleep"(수면). 없으면(404 MUSIC_NOT_FOUND) null */
