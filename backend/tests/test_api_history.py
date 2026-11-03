@@ -1,4 +1,5 @@
 """리포트·일기·사진·탈퇴. 아침 API로 여러 날 세션을 만든 뒤 실제 user_model 계산으로 확인한다."""
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 
 import pytest
@@ -90,6 +91,18 @@ def test_diary_day(client, clock, week, repos):
     assert d["night"]["voice_url"] is None and d["night"]["ai_summary"] == "요약"
     empty = client.get("/diary/2026-10-01", headers=H).json()
     assert empty["night"] is None and empty["sessions"] == [] and empty["summary"]["n_sessions"] == 0
+
+
+def test_diary_sessions_in_ring_order(client, week, repos):
+    """하루에 모닝콜이 여럿이면 알람이 먼저 울린 순, 울리지 않은 세션은 뒤 (저장소 순서와 무관)."""
+    store = repos.sessions.sessions
+    first = next(s for s in store.values() if s.session_date == date(2026, 11, 5))           # 07:00에 울림
+    store.clear()                                                                          # 저장소 순서: 안 울림 → 07:00 → 06:30
+    for s in (replace(first, session_id="not-rung", alarm_rang_at=None), first,
+              replace(first, session_id="early", alarm_rang_at=first.alarm_rang_at.replace(hour=6, minute=30))):
+        store[s.session_id] = s
+    d = client.get("/diary/2026-11-05", headers=H).json()
+    assert [x["session"]["session_id"] for x in d["sessions"]] == ["early", first.session_id, "not-rung"]
 
 
 def test_photo_rules(client, clock):

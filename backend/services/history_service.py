@@ -70,7 +70,9 @@ class HistoryService:
         rec = self.r.sessions.recent_records(user_id, day, day)
         night = self.r.nights.get_night_by_date(user_id, day)
         photo = self.r.storage.get_photo(user_id, day)
-        sessions = [(s, [st for st in rec.steps if st.session_id == s.session_id]) for s in rec.sessions]
+        # 하루에 모닝콜이 여럿이면 알람이 먼저 울린 순 (울리지 않은 세션은 뒤). 저장소 순서는 SESSION_ID(uuid)라 무작위
+        ordered = sorted(rec.sessions, key=lambda s: (s.alarm_rang_at is None, s.alarm_rang_at.timestamp() if s.alarm_rang_at else 0))
+        sessions = [(s, [st for st in rec.steps if st.session_id == s.session_id]) for s in ordered]
         voice = self.r.storage.signed_url("voice", night.voice_audio_path) if night and night.voice_audio_path else None
         return DiaryDay(day, ai_stats.day_summaries(rec, [day])[day], night, voice, sessions,
                         self._photo_url(photo.photo_path) if photo else None)
