@@ -57,8 +57,12 @@ object AlarmRepository {
         return true
     }
 
-    /** 알람 설정 화면의 저장. 모닝콜 알람은 서버에 먼저 저장하고 성공하면 기기에 반영. 실패하면 오류 문구 */
-    suspend fun save(context: Context, alarm: Alarm): String? {
+    /**
+     * 알람 설정 화면의 저장. 모닝콜 알람은 서버에 먼저 저장하고 성공하면 기기에 반영. 실패하면 오류 문구.
+     * routineItems: 루틴 알람의 항목 시간 [{template_item_id, duration_sec}]. 알람을 저장한 뒤 보냄
+     * (프리셋을 바꾸면 서버가 항목 설정을 지우므로 알람 먼저). null이면 항목 시간은 그대로
+     */
+    suspend fun save(context: Context, alarm: Alarm, routineItems: JSONArray? = null): String? {
         if (alarm.type != AlarmType.WAKE) {
             onMain { upsert(context, alarm) }
             return null
@@ -70,6 +74,11 @@ object AlarmRepository {
         saved ?: return ApiClient.lastError ?: "알람을 저장하지 못했어요"
         val synced = fromServer(saved, alarm.id) ?: return "서버 응답을 읽지 못했어요"
         onMain { upsert(context, synced) }
+        if (!synced.isContent && routineItems != null && synced.serverId != null) {
+            val routine = RespecApi.saveAlarmRoutine(synced.serverId, routineItems)
+                ?: return ApiClient.lastError ?: "알람은 저장했지만 항목 시간을 저장하지 못했어요"
+            onMain { RoutineCatalog.putRoutine(synced, routine) }
+        }
         return null
     }
 
@@ -133,7 +142,6 @@ object AlarmRepository {
         .put("alarm_time", "%02d:%02d".format(a.hour, a.minute))
         .put("repeat_days", repeatDays(a.days))
         .put("label", a.label.ifBlank { JSONObject.NULL })
-        .put("alarm_mode", a.mode.code)
         .put("enabled", a.enabled)
         .put("morning_call_type", if (a.isContent) "CONTENT" else "ROUTINE")
         .put("template_id", routineTemplate ?: JSONObject.NULL)
@@ -159,15 +167,16 @@ object AlarmRepository {
             days = repeat.indices.filter { repeat[it] == '1' }.toSet(),
             enabled = o.optBoolean("enabled", true),
             type = AlarmType.WAKE,
-            mode = AlarmMode.fromCode(o.text("alarm_mode")),
             serverId = serverId,
             templateId = o.text("template_id"),
             contentType = o.text("content_type"),
-            contentOption = o.text("content_option")
+            contentOption = o.text("content_option"),
+            createdAt = o.text("created_at"),
+            updatedAt = o.text("updated_at")
         )
     }
 
-    /** null(JSONObject.NULL)·빈 값이면 null */
+    /** 없는 칸·null(JSONObject.NULL)·빈 값이면 null */
     private fun JSONObject.text(key: String): String? =
         if (isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
 
@@ -188,11 +197,12 @@ object AlarmRepository {
         .put("days", JSONArray(days.toList()))
         .put("enabled", enabled)
         .put("type", type.name)
-        .put("mode", mode.name)
         .put("server_id", serverId ?: JSONObject.NULL)
         .put("template_id", templateId ?: JSONObject.NULL)
         .put("content_type", contentType ?: JSONObject.NULL)
         .put("content_option", contentOption ?: JSONObject.NULL)
+        .put("created_at", createdAt ?: JSONObject.NULL)
+        .put("updated_at", updatedAt ?: JSONObject.NULL)
 
     private fun parse(raw: String): List<Alarm> = try {
         val arr = JSONArray(raw)
@@ -207,11 +217,12 @@ object AlarmRepository {
                 days = (0 until d.length()).map { d.getInt(it) }.toSet(),
                 enabled = o.optBoolean("enabled", true),
                 type = runCatching { AlarmType.valueOf(o.getString("type")) }.getOrDefault(AlarmType.WAKE),
-                mode = runCatching { AlarmMode.valueOf(o.getString("mode")) }.getOrDefault(AlarmMode.CONTINUOUS),
                 serverId = o.text("server_id"),
                 templateId = o.text("template_id"),
                 contentType = o.text("content_type"),
-                contentOption = o.text("content_option")
+                contentOption = o.text("content_option"),
+                createdAt = o.text("created_at"),
+                updatedAt = o.text("updated_at")
             )
         }
     } catch (e: Exception) {

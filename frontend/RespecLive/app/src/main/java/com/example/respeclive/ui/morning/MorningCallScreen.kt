@@ -69,6 +69,7 @@ fun MorningCallScreen(
         val local = AlarmRepository.get(alarmId)
             ?: AlarmRepository.alarms.firstOrNull { it.type == AlarmType.WAKE && it.enabled }
         session = RespecApi.startMorningFor(local)?.also { RoutineRepository.applyView(it) }
+        RoutineRepository.loadPlan()   // 단계가 생기기 전 체크리스트는 이 세션 알람의 루틴
     }
 
     if (answered) {

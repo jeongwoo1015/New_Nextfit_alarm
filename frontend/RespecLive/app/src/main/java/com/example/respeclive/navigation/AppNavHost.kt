@@ -130,12 +130,6 @@ private fun MainNav(
                             .firstOrNull { it.type == AlarmType.BEDTIME }?.timeLabel() ?: ""
                         nav.navigate("nightCall")
                     },
-                    onPreviewMorningCall = {
-                        val wake = AlarmRepository.alarms.firstOrNull { it.type == AlarmType.WAKE }
-                        activeLabel = wake?.timeLabel() ?: ""
-                        activeAlarmId = wake?.id ?: -1
-                        nav.navigate("morningCall")
-                    },
                     onCreateAlarm = { nav.navigate("alarmEdit/-1") },
                     onEditAlarm = { id -> nav.navigate("alarmEdit/$id") }
                 )

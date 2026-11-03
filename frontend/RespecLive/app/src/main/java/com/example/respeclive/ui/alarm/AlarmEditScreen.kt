@@ -16,9 +16,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.LocalOffer
-import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,13 +31,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.respeclive.alarm.AlarmScheduler
 import com.example.respeclive.data.Alarm
-import com.example.respeclive.data.AlarmMode
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
+import com.example.respeclive.data.RoutineCatalog
 import com.example.respeclive.data.THEMES
-import com.example.respeclive.data.themeLabel
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlin.math.abs
 
 private val ITEM_H = 56.dp
@@ -58,32 +58,76 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
     var minute by remember { mutableIntStateOf(existing?.minute ?: 0) }
     var days by remember { mutableStateOf(existing?.days ?: setOf(0, 1, 2, 3, 4)) }
     var label by remember { mutableStateOf(existing?.label ?: "") }
-    var mode by remember { mutableStateOf(existing?.mode ?: AlarmMode.CONTINUOUS) }
-    // 새 알람은 기존 모닝콜 알람의 테마를 따름
-    var theme by remember {
-        mutableStateOf(existing?.contentType ?: if (existing == null) AlarmRepository.alarms.firstOrNull { it.type == AlarmType.WAKE }?.contentType else null)
-    }
     val isBedtime = existing?.type == AlarmType.BEDTIME
-    var showThemeDialog by remember { mutableStateOf(false) }
+
+    // 알람 유형·프리셋·콘텐츠. 새 알람은 기존 모닝콜 알람의 값을 따름
+    val sample = existing ?: AlarmRepository.alarms.firstOrNull { it.type == AlarmType.WAKE }
+    var isContent by remember { mutableStateOf(sample?.isContent ?: false) }
+    var templateId by remember {
+        mutableStateOf(sample?.templateId ?: AlarmRepository.alarms.firstOrNull { it.templateId != null }?.templateId)
+    }
+    var contentType by remember { mutableStateOf(sample?.contentType ?: THEMES.first().first) }
+    var contentOption by remember { mutableStateOf(existing?.contentOption) }
+
+    // 항목 시간: 이 알람에 저장된 값(같은 프리셋일 때) 또는 프리셋 기본 시간. 바꾼 값만 durations에
+    var routineItems by remember { mutableStateOf<List<RoutineCatalog.Item>>(emptyList()) }
+    val durations = remember { mutableStateMapOf<String, Int>() }
+    var itemsEdited by remember { mutableStateOf(false) }
+    var presets by remember { mutableStateOf<List<JSONObject>?>(null) }
+    var showPresetDialog by remember { mutableStateOf(false) }
+    var pendingPreset by remember { mutableStateOf<String?>(null) }   // 바꾸기 전 확인 중인 프리셋
+
+    LaunchedEffect(Unit) {
+        RoutineCatalog.loadLimits()
+        presets = RoutineCatalog.loadPresets()
+        if (templateId == null) templateId = presets?.firstOrNull()?.optString("template_id")?.takeIf { it.isNotBlank() }
+    }
+    LaunchedEffect(templateId) {
+        val tid = templateId ?: return@LaunchedEffect
+        RoutineCatalog.ensurePreset(tid)
+        val saved = existing?.takeIf { it.templateId == tid }?.let { RoutineCatalog.loadRoutine(it, force = true) }
+        routineItems = (saved ?: RoutineCatalog.presetRoutine(tid))?.items.orEmpty()
+        durations.clear()
+        itemsEdited = false
+    }
+
+    val total = routineItems.sumOf { durations[it.templateItemId] ?: it.durationSec }
+    val routineValid = templateId != null && routineItems.isNotEmpty() &&
+        total <= RoutineCatalog.limits.routineMaxSec && total > 0
     val scope = rememberCoroutineScope()
     var saving by remember { mutableStateOf(false) }   // 서버 저장·삭제 중에는 버튼을 막음
 
+    /** 프리셋을 바꾸면 서버가 이 알람의 항목 시간 설정을 지우므로, 바꾼 값이 있으면 먼저 확인 */
+    fun pickPreset(id: String) {
+        showPresetDialog = false
+        if (id == templateId) return
+        val customized = itemsEdited || routineItems.any { it.customized }
+        if (existing?.templateId != null && customized) pendingPreset = id else templateId = id
+    }
+
     fun save() {
         val base = existing ?: Alarm(id = AlarmRepository.nextId(), label = "", hour = 0, minute = 0, days = emptySet())
+        val content = isContent && !isBedtime
         val alarm = base.copy(
             label = label.trim(),
             hour = (hour12 % 12) + if (ampm == 1) 12 else 0,
             minute = minute,
             days = days,
             enabled = true,
-            mode = mode,
-            contentType = theme,
-            // 콘텐츠 세부 옵션은 같은 테마일 때만 유지 (다른 종류의 옵션은 서버가 거절)
-            contentOption = base.contentOption.takeIf { theme != null && theme == base.contentType }
+            templateId = if (content) null else templateId,
+            contentType = if (content) contentType else null,
+            contentOption = if (content) contentOption else null
         )
+        // 기본 시간과 다른 항목만 보냄 (보내지 않은 항목은 서버가 기본 시간으로)
+        val items = if (!content && itemsEdited) JSONArray().apply {
+            routineItems.forEach { item ->
+                val sec = durations[item.templateItemId] ?: item.durationSec
+                if (sec != item.defaultSec) put(JSONObject().put("template_item_id", item.templateItemId).put("duration_sec", sec))
+            }
+        } else null
         saving = true
         scope.launch {
-            val error = AlarmRepository.save(context, alarm)
+            val error = AlarmRepository.save(context, alarm, items)
             saving = false
             Toast.makeText(context, error ?: AlarmScheduler.describeRemaining(alarm), Toast.LENGTH_SHORT).show()
             if (error == null) onBack()
@@ -214,74 +258,33 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
 
         Spacer(Modifier.height(28.dp))
 
-        // 알람 방식
-        SectionTitle(Icons.Filled.Schedule, "알람 방식")
-        Spacer(Modifier.height(12.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            AlarmMode.entries.forEach { m ->
-                val selected = m == mode
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .height(52.dp)
-                        .clip(RoundedCornerShape(26.dp))
-                        .background(if (selected) RespecColors.PurpleDark else RespecColors.Card)
-                        .clickable { mode = m },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        m.label,
-                        color = if (selected) Color.White else RespecColors.TextSub,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(28.dp))
-
-        // 테마 (취침 알람에는 없음)
+        // 알람 유형 (취침 알람에는 없음): 루틴이면 프리셋·항목 시간, 콘텐츠면 종류·세부
         if (!isBedtime) {
-            Text("테마", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
-            Spacer(Modifier.height(4.dp))
-            Text("하루를 시작할 테마를 선택해 보세요", color = RespecColors.TextSub, fontSize = 14.sp)
-            Spacer(Modifier.height(14.dp))
-            val themeShape = RoundedCornerShape(24.dp)
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(themeShape)
-                    .background(RespecColors.Card)
-                    .border(1.dp, RespecColors.CardBorder, themeShape)
-                    .clickable { showThemeDialog = true }
-                    .padding(horizontal = 24.dp, vertical = 28.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(RespecColors.PurpleDark),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Filled.Add, null, tint = RespecColors.Purple)
-                }
-                Spacer(Modifier.width(16.dp))
-                Text(
-                    themeLabel(theme)?.let { "테마: $it · 탭해서 변경" } ?: "테마 추가하기 (지금은 루틴 알람)",
-                    color = RespecColors.Purple,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
+            SectionTitle(Icons.Filled.Tune, "아침에 할 일")
+            Spacer(Modifier.height(12.dp))
+            CallTypeToggle(isContent) { isContent = it }
+            Spacer(Modifier.height(16.dp))
+            if (isContent) {
+                ContentEditor(
+                    contentType = contentType,
+                    contentOption = contentOption,
+                    onType = { if (it != contentType) { contentType = it; contentOption = null } },
+                    onOption = { contentOption = it }
                 )
+            } else {
+                PresetRow(templateId?.let { RoutineCatalog.presetNames[it] }) { showPresetDialog = true }
+                Spacer(Modifier.height(16.dp))
+                RoutineItemsEditor(routineItems, durations) { id, sec ->
+                    durations[id] = sec
+                    itemsEdited = true
+                }
             }
-
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(28.dp))
         }
 
         Button(
             onClick = { save() },
-            enabled = label.isNotBlank() && !saving,
+            enabled = label.isNotBlank() && !saving && (isBedtime || isContent || routineValid),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(60.dp),
@@ -315,47 +318,56 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
         Spacer(Modifier.height(24.dp))
     }
 
-    if (showThemeDialog) {
+    // 프리셋 고르기: 이름 (TEMPLATE_NAME)과 대상 (TARGET_DESC)
+    if (showPresetDialog) {
         AlertDialog(
-            onDismissRequest = { showThemeDialog = false },
+            onDismissRequest = { showPresetDialog = false },
             containerColor = RespecColors.Card,
-            title = { Text("테마 선택", color = Color.White, fontWeight = FontWeight.Bold) },
+            title = { Text("프리셋 선택", color = Color.White, fontWeight = FontWeight.Bold) },
             text = {
-                Column {
-                    THEMES.forEach { (code, name) ->
-                        Text(
-                            name,
-                            color = if (code == theme) RespecColors.Lime else Color.White,
-                            fontWeight = if (code == theme) FontWeight.ExtraBold else FontWeight.Normal,
-                            fontSize = 17.sp,
-                            modifier = Modifier
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    val list = presets
+                    if (list == null) Text("프리셋을 불러오지 못했어요", color = RespecColors.TextSub)
+                    list?.forEach { p ->
+                        val id = p.optString("template_id")
+                        val on = id == templateId
+                        Column(
+                            Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    theme = code
-                                    showThemeDialog = false
-                                }
+                                .clickable { pickPreset(id) }
                                 .padding(vertical = 12.dp)
-                        )
-                    }
-                    if (theme != null) {
-                        Text(
-                            "테마 없음 (루틴 알람)",
-                            color = RespecColors.TextSub,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    theme = null
-                                    showThemeDialog = false
-                                }
-                                .padding(vertical = 12.dp)
-                        )
+                        ) {
+                            Text(
+                                p.optString("template_name"),
+                                color = if (on) RespecColors.Lime else Color.White,
+                                fontWeight = if (on) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                fontSize = 16.sp
+                            )
+                            p.optString("target_desc").takeIf { it.isNotBlank() && it != "null" }?.let {
+                                Text(it, color = RespecColors.TextSub, fontSize = 13.sp)
+                            }
+                        }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showThemeDialog = false }) {
-                    Text("닫기", color = RespecColors.Purple)
-                }
+                TextButton(onClick = { showPresetDialog = false }) { Text("닫기", color = RespecColors.Purple) }
+            }
+        )
+    }
+
+    // 프리셋을 바꾸면 항목 시간 설정이 처음으로 돌아감 (서버 트리거가 RS_ALARM_ROUTINE_ITEM을 지움)
+    pendingPreset?.let { next ->
+        AlertDialog(
+            onDismissRequest = { pendingPreset = null },
+            containerColor = RespecColors.Card,
+            title = { Text("프리셋을 바꿀까요?", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = { Text("바꾸면 이 알람의 항목 시간 설정이 처음으로 돌아가요.", color = RespecColors.TextSub) },
+            confirmButton = {
+                TextButton(onClick = { templateId = next; pendingPreset = null }) { Text("바꾸기", color = RespecColors.Lime) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingPreset = null }) { Text("취소", color = RespecColors.TextSub) }
             }
         )
     }

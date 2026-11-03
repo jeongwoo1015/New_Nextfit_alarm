@@ -58,6 +58,9 @@ object ApiClient {
     suspend fun patch(path: String, body: JSONObject, timeoutMs: Long = ApiConfig.TIMEOUT_MS): ApiResponse? =
         send("PATCH", path, body.toString().toRequestBody(JSON), timeoutMs)
 
+    suspend fun put(path: String, body: JSONObject, timeoutMs: Long = ApiConfig.TIMEOUT_MS): ApiResponse? =
+        send("PUT", path, body.toString().toRequestBody(JSON), timeoutMs)
+
     suspend fun delete(path: String, timeoutMs: Long = ApiConfig.TIMEOUT_MS): ApiResponse? =
         send("DELETE", path, null, timeoutMs)
 

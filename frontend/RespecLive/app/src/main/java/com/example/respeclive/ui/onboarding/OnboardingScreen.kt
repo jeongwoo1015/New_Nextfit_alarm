@@ -55,6 +55,8 @@ import androidx.compose.ui.unit.sp
 import com.example.respeclive.data.ApiClient
 import com.example.respeclive.data.DeviceLocation
 import com.example.respeclive.data.RespecApi
+import com.example.respeclive.data.RoutineCatalog
+import com.example.respeclive.data.durationText
 import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.launch
@@ -86,8 +88,9 @@ private val CONTENTS = listOf(
     ContentKind("QUIZ", "퀴즈", "가벼운 퀴즈로 머리를 깨워요", "💡"),
 )
 
-private const val CONTENT_MIN = 5            // 콘텐츠 알람은 고정 5분 (11/01 팀 결정)
-private const val ROUTINE_MAX_MIN = 15       // 루틴 합계 상한
+// 콘텐츠 고정 시간·루틴 합계 상한은 서버 앱 설정 (RS_APP_CONFIG, 받기 전에는 5분·15분)
+private val contentTime: String get() = durationText(RoutineCatalog.limits.contentSec)
+private val routineMaxTime: String get() = durationText(RoutineCatalog.limits.routineMaxSec)
 
 private val STEP_TITLES = listOf("기본 정보 입력", "페르소나 설정", "루틴 선택", "시작하기")
 
@@ -160,7 +163,10 @@ fun OnboardingScreen(onDone: () -> Unit) {
             if (list == null) presetsError = ApiClient.lastError ?: "루틴 목록을 불러오지 못했어요"
         }
     }
-    LaunchedEffect(Unit) { loadPresets() }
+    LaunchedEffect(Unit) {
+        loadPresets()
+        RoutineCatalog.loadLimits()
+    }
 
     val selectedPreset = presets?.firstOrNull { it.optString("template_id") == templateId }
 
@@ -630,7 +636,7 @@ private fun RoutineStep(
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         StepTitle(
             if (isContent) "콘텐츠를 선택해 주세요" else "루틴을 선택해 주세요",
-            if (isContent) "매일 아침 5분, 리스펙과 함께할 콘텐츠예요." else "탭해서 내 루틴에 담아 보세요."
+            if (isContent) "매일 아침 $contentTime, 리스펙과 함께할 콘텐츠예요." else "탭해서 내 루틴에 담아 보세요."
         )
 
         // 루틴 / 콘텐츠 전환
@@ -766,6 +772,12 @@ private fun PresetPager(presets: List<JSONObject>, templateId: String?, onPreset
         },
         color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold
     )
+    // 프리셋 설명 (DESCRIPTION)
+    current.optString("description").takeIf { it.isNotBlank() && it != "null" }?.let {
+        Spacer(Modifier.height(4.dp))
+        Text(it, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp, lineHeight = 19.sp)
+        Spacer(Modifier.height(4.dp))
+    }
     Text("옆으로 넘겨 다른 루틴도 확인해 보세요.", color = RespecColors.TextSub, fontSize = 13.sp)
 
     Spacer(Modifier.height(16.dp))
@@ -782,7 +794,7 @@ private fun PresetPager(presets: List<JSONObject>, templateId: String?, onPreset
     }
     Spacer(Modifier.height(6.dp))
     Text(
-        "항목별 시간은 알람 설정에서 30초 단위로 바꿀 수 있어요 (최대 ${ROUTINE_MAX_MIN}분)",
+        "항목별 시간은 알람 설정에서 ${durationText(RoutineCatalog.limits.stepSec)} 단위로 바꿀 수 있어요 (최대 $routineMaxTime)",
         color = RespecColors.TextSub, fontSize = 12.sp
     )
     Spacer(Modifier.height(8.dp))
@@ -850,11 +862,15 @@ private fun PresetCard(preset: JSONObject, index: Int, total: Int, selected: Boo
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
+                    // 항목: 이름 · 기본 시간 (ITEM_ORDER 순)
                     items.forEach { item ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Check, null, tint = Color.Black, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(item.optString("item_name"), color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                item.optString("item_name"),
+                                color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(durationText(item.optInt("default_duration_sec")), color = Color.Black.copy(alpha = 0.7f), fontSize = 12.sp)
                         }
                     }
                 }
@@ -892,7 +908,7 @@ private fun ContentPicker(selected: String?, onSelect: (String) -> Unit) {
             }
         }
         Text(
-            "콘텐츠는 매일 ${CONTENT_MIN}분으로 진행돼요. 세부 주제는 알람 설정에서 고를 수 있어요.",
+            "콘텐츠는 매일 ${contentTime}으로 진행돼요. 세부 주제는 알람 설정에서 고를 수 있어요.",
             color = RespecColors.TextSub, fontSize = 12.sp
         )
     }
@@ -926,7 +942,7 @@ private fun SummaryStep(
             SummaryRow(Icons.Filled.MusicNote, "음악 장르", labelOf(GENRES, genre)) { onEdit(1) }
             if (isContent) {
                 SummaryRow(Icons.Filled.ChecklistRtl, "선택한 콘텐츠", content?.label ?: "-") { onEdit(2) }
-                SummaryRow(Icons.Filled.Timer, "콘텐츠 시간", "${CONTENT_MIN}분 (고정)", last = true) { onEdit(2) }
+                SummaryRow(Icons.Filled.Timer, "콘텐츠 시간", "$contentTime (고정)", last = true) { onEdit(2) }
             } else {
                 SummaryRow(
                     Icons.Filled.ChecklistRtl, "선택한 루틴",

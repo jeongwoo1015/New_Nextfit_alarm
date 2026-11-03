@@ -12,7 +12,7 @@ object LiveConfig {
     const val SETUP_TIMEOUT_MS = 10_000L
 
     /** 사용자가 말을 마친 뒤 이 시간 동안은 AI 음성을 재생하지 않음 (화면에 사용자 말을 보여 주는 시간과 같음) */
-    const val USER_GAP_MS = 2_000L
+    const val USER_GAP_MS = 1_500L
 
     /** 연결이 끊겼을 때 재연결 시도 횟수 (매번 서버에서 새 토큰을 받음) */
     const val RECONNECT_MAX = 3

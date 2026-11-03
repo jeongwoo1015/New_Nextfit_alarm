@@ -349,12 +349,15 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
             return@LaunchedEffect
         }
         RoutineRepository.applyView(started)
+        if (initialSession == null) launch { RoutineRepository.loadPlan() }   // 수신 화면을 거치지 않았으면 여기서
         val sid = RoutineRepository.sessionId ?: return@LaunchedEffect
         sessionId = sid
         val messageJob = async { findLastNightMessage() }
 
         // 2) 브리핑 세션. 이미 루틴을 다 마친 날이면 루틴 안내를 하지 않도록 시작 신호에 덧붙임
-        val doneAtStart = items.isNotEmpty() && items.all { it.done }
+        // 이번 세션의 서버 단계로만 판단 (단계가 아직 없으면 처음 시작)
+        val sessionSteps = items.filter { it.stepOrder != null }
+        val doneAtStart = sessionSteps.isNotEmpty() && sessionSteps.all { it.done }
         micReady.await()
         val placeJob = async { DeviceLocation.lastKnown(context) }   // 재연결 때마다 다시 찾지 않도록 한 번만
         stage = Stage.Briefing

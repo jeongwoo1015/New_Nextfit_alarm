@@ -75,6 +75,30 @@ object RespecApi {
         return r.ok || r.code == 404
     }
 
+    /** 프리셋 하나 (비활성 프리셋도 받음) → PresetOut */
+    suspend fun preset(templateId: String): JSONObject? {
+        val r = ApiClient.get("/presets/$templateId") ?: return null
+        return if (r.ok) r.json() else null
+    }
+
+    /** 앱 설정 → LimitsOut {routine_max_sec, duration_step_sec, content_duration_sec} */
+    suspend fun limits(): JSONObject? {
+        val r = ApiClient.get("/config/limits") ?: return null
+        return if (r.ok) r.json() else null
+    }
+
+    /** 루틴 알람의 항목별 시간 → AlarmRoutineOut {alarm_id, template_id, total_sec, max_sec, items} */
+    suspend fun alarmRoutine(alarmId: String): JSONObject? {
+        val r = ApiClient.get("/alarms/$alarmId/routine-items") ?: return null
+        return if (r.ok) r.json() else null
+    }
+
+    /** 항목 시간 전체 교체. items: [{template_item_id, duration_sec}] (보내지 않은 항목은 기본 시간) → AlarmRoutineOut */
+    suspend fun saveAlarmRoutine(alarmId: String, items: JSONArray): JSONObject? {
+        val r = ApiClient.put("/alarms/$alarmId/routine-items", JSONObject().put("items", items)) ?: return null
+        return if (r.ok) r.json() else null
+    }
+
     // ---------------- 밤 ----------------
 
     /** 굿나잇콜 Live 토큰 (지시문: 호칭·말투, 일정, 내일 알람·루틴 항목). 일정은 CalendarEvents 형식 */
