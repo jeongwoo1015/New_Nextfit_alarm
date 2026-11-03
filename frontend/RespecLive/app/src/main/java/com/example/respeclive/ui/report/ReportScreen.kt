@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.respeclive.data.ApiClient
 import com.example.respeclive.data.RespecApi
+import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.diary.RateRing
 import com.example.respeclive.ui.diary.text
 import com.example.respeclive.ui.theme.RespecColors
@@ -200,7 +201,7 @@ private fun CardHeader(icon: ImageVector, title: String, period: String, onPerio
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, contentDescription = null, tint = RespecColors.Lime, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(10.dp))
-        Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+        FitText(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f).padding(end = 8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             PERIODS.forEach { (key, label) ->
                 val selected = key == period

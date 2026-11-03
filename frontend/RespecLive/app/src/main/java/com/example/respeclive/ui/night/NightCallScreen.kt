@@ -73,40 +73,45 @@ fun NightCallScreen(
         }
 
         // 발신자 (캐릭터 없이 아이콘 + 파동)
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(260.dp)) {
-                Box(
-                    Modifier
-                        .size(210.dp)
-                        .scale(ringScale)
-                        .alpha(ringAlpha)
-                        .border(2.dp, RespecColors.Lime, CircleShape)
-                )
-                Box(
-                    Modifier
-                        .size(210.dp)
-                        .clip(CircleShape)
-                        .background(RespecColors.Card)
-                        .border(1.dp, RespecColors.CardBorder, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Filled.Bedtime, null, tint = RespecColors.Lime, modifier = Modifier.size(96.dp))
+        // 세로가 짧은 폰에서는 아래 버튼이 잘리지 않도록 동그라미를 남은 공간에 맞춰 줄임
+        // (아래 이름·시각 칩 자리 약 150dp)
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            val orb = minOf(260.dp, maxHeight - 150.dp, maxWidth).coerceAtLeast(0.dp)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(orb)) {
+                    Box(
+                        Modifier
+                            .size(orb * 210 / 260)
+                            .scale(ringScale)
+                            .alpha(ringAlpha)
+                            .border(2.dp, RespecColors.Lime, CircleShape)
+                    )
+                    Box(
+                        Modifier
+                            .size(orb * 210 / 260)
+                            .clip(CircleShape)
+                            .background(RespecColors.Card)
+                            .border(1.dp, RespecColors.CardBorder, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Filled.Bedtime, null, tint = RespecColors.Lime, modifier = Modifier.size(orb * 96 / 260))
+                    }
                 }
-            }
-            Spacer(Modifier.height(24.dp))
-            Text("리스펙", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
-            Spacer(Modifier.height(20.dp))
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(RespecColors.Card)
-                    .border(1.dp, RespecColors.CardBorder, RoundedCornerShape(50))
-                    .padding(horizontal = 18.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Filled.Bedtime, null, tint = RespecColors.Lime, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(bedtimeLabel, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(20.dp))
+                Text("리스펙", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(RespecColors.Card)
+                        .border(1.dp, RespecColors.CardBorder, RoundedCornerShape(50))
+                        .padding(horizontal = 18.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Filled.Bedtime, null, tint = RespecColors.Lime, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(bedtimeLabel, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
 

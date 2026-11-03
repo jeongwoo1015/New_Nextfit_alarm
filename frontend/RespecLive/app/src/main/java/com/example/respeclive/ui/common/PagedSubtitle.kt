@@ -12,6 +12,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,8 +25,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.example.respeclive.live.LiveClient
 import com.example.respeclive.live.LiveConfig
@@ -32,7 +36,8 @@ import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.delay
 import kotlin.math.ceil
 
-private const val PAGE_MAX_CHARS = 64      // 한 페이지 최대 글자 수 (박스 5줄, 한 줄 약 15자). 문장 단위로 담음
+private val SUBTITLE_HEIGHT = 168.dp     // 자막 박스 높이 (세로가 짧은 폰에서는 rememberScreenScale만큼 줄어듦)
+private const val PAGE_MAX_CHARS = 64     // 한 페이지 최대 글자 수 (박스 5줄, 한 줄 약 15자). 문장 단위로 담음
 private const val CHAR_TYPE_MS = 60L       // 글자가 나오는 속도
 private const val HOLD_PER_CHAR_MS = 90L   // 페이지를 유지하는 시간. 음성보다 빠르면 키우고, 느리면 줄이기
 
@@ -165,14 +170,16 @@ fun rememberSpokenPage(lineKey: Any, text: String, fraction: Float): SpokenPage 
  * pageKey: rememberSpokenPage로 고른 박스면 그 key (없으면 페이지 수로 넘어감을 판단)
  */
 @Composable
-fun SubtitleBox(text: String, fromUser: Boolean = false, pageKey: Any? = null, modifier: Modifier = Modifier.height(168.dp)) {
+fun SubtitleBox(text: String, fromUser: Boolean = false, pageKey: Any? = null, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(24.dp)
+    val height = SUBTITLE_HEIGHT * rememberScreenScale()
     val pages = splitSubtitlePages(text)
     val page = pages.last()
     val accent = if (fromUser) RespecColors.Purple else RespecColors.Lime
 
     Row(
         modifier
+            .height(height)
             .fillMaxWidth()
             .clip(shape)
             .background(if (fromUser) RespecColors.PurpleDark.copy(alpha = 0.55f) else RespecColors.Card)
@@ -200,7 +207,12 @@ fun SubtitleBox(text: String, fromUser: Boolean = false, pageKey: Any? = null, m
             label = "subtitlePage"
         ) { (_, _, shown) ->
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
-                Text(shown, color = Color.White, fontSize = 17.sp, lineHeight = 26.sp, maxLines = 5)
+                // 폭이 좁거나 글꼴이 커서 한 페이지가 박스를 넘으면 글자를 줄여 박스 안에 맞춤
+                BasicText(
+                    shown,
+                    style = TextStyle(color = Color.White, fontSize = 17.sp, lineHeight = 1.53.em),
+                    autoSize = TextAutoSize.StepBased(minFontSize = 12.sp, maxFontSize = 17.sp, stepSize = 0.5.sp)
+                )
             }
         }
     }

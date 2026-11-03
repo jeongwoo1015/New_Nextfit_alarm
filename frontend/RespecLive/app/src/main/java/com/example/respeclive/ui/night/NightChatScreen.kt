@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -48,8 +49,10 @@ import com.example.respeclive.data.MusicStore
 import com.example.respeclive.data.NightMessageStore
 import com.example.respeclive.data.RespecApi
 import com.example.respeclive.live.LiveClient
+import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.common.SubtitleBox
 import com.example.respeclive.ui.common.rememberHeldUserLine
+import com.example.respeclive.ui.common.rememberScreenScale
 import com.example.respeclive.ui.common.rememberSpokenPage
 import com.example.respeclive.ui.common.typeSubtitlePages
 import com.example.respeclive.ui.theme.RespecColors
@@ -84,6 +87,9 @@ private const val MAX_SPEECH_MS = 60_000
 private const val SAVE_WAIT_MS = 15_000L
 
 private enum class Phase { AiSpeaking, Listening, Recording, Review }
+
+/** 동그라미 최대 크기 (자리가 모자라면 줄어듦) */
+private val ORB_SIZE = 230.dp
 
 private fun isoUtc(ms: Long): String? = if (ms <= 0L) null else
     SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(ms))
@@ -485,6 +491,7 @@ fun NightChatScreen(onClose: () -> Unit) {
     }
 
     // ---- UI ----
+    val scale = rememberScreenScale()   // 세로가 짧은 폰에서 버튼·영역 크기를 줄임
     Column(
         Modifier
             .fillMaxSize()
@@ -493,8 +500,10 @@ fun NightChatScreen(onClose: () -> Unit) {
     ) {
         CallHeader(elapsed = elapsed, musicOn = musicOn, onMusicChange = { musicOn = it })
 
-        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+        // 세로가 짧은 폰에서는 자막·버튼과 겹치지 않도록 남은 공간에 맞춰 줄임 (아래 상태 문구 자리 28dp)
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             VoiceOrb(
+                size = minOf(ORB_SIZE, maxHeight - 28.dp, maxWidth).coerceAtLeast(0.dp),
                 phase = shownPhase,
                 level = if (talking) userLevel else recLevel,
                 isSaveStep = saveStep,
@@ -507,6 +516,7 @@ fun NightChatScreen(onClose: () -> Unit) {
 
         // 한 마디 녹음 단계에서만 버튼 표시 (대화 중에는 통화 종료 버튼으로 끝냄)
         if (!talking && phase != Phase.AiSpeaking) AnswerArea(
+            minHeight = 120.dp * scale,
             phase = shownPhase,
             isSaveStep = saveStep,
             sleeping = sleeping,
@@ -531,13 +541,14 @@ fun NightChatScreen(onClose: () -> Unit) {
             RoundControl(
                 icon = if (muted) Icons.Filled.MicOff else Icons.Filled.Mic,
                 label = "음소거",
+                size = 64.dp * scale,
                 active = muted,
                 onClick = { if (phase != Phase.Recording) muted = !muted }
             )
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
                     Modifier
-                        .size(76.dp)
+                        .size(76.dp * scale)
                         .clip(CircleShape)
                         .background(RespecColors.Danger)
                         .clickable { endCall() },
@@ -560,13 +571,13 @@ private fun CallHeader(elapsed: Int, musicOn: Boolean, onMusicChange: (Boolean) 
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column {
+        Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(10.dp).clip(CircleShape).background(RespecColors.Mint))
                 Spacer(Modifier.width(8.dp))
                 Text("리스펙", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
             }
-            Text(
+            FitText(
                 "AI 굿나잇콜 통화 중 · %02d:%02d".format(elapsed / 60, elapsed % 60),
                 color = RespecColors.TextSub,
                 fontSize = 13.sp
@@ -582,7 +593,7 @@ private fun CallHeader(elapsed: Int, musicOn: Boolean, onMusicChange: (Boolean) 
         ) {
             Icon(Icons.Filled.MusicNote, null, tint = RespecColors.Lime, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text("수면 음악", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text("수면 음악", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
             Spacer(Modifier.width(4.dp))
             Switch(
                 checked = musicOn,
@@ -603,7 +614,7 @@ private fun CallHeader(elapsed: Int, musicOn: Boolean, onMusicChange: (Boolean) 
 
 /** 상태를 보여 주는 원형 파동: AI 말하기(라임, 한 마디 단계에서는 탭하면 건너뛰기) / 듣는 중(보라) / 말하는 중(음량 반응) */
 @Composable
-private fun VoiceOrb(phase: Phase, level: Float, isSaveStep: Boolean, onTap: () -> Unit) {
+private fun VoiceOrb(size: Dp, phase: Phase, level: Float, isSaveStep: Boolean, onTap: () -> Unit) {
     val infinite = rememberInfiniteTransition(label = "orb")
     val pulse by infinite.animateFloat(
         initialValue = 1f,
@@ -630,24 +641,24 @@ private fun VoiceOrb(phase: Phase, level: Float, isSaveStep: Boolean, onTap: () 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.size(230.dp).aspectRatio(1f)
+            modifier = Modifier.size(size)
         ) {
             Box(
                 Modifier
-                    .size(216.dp)
+                    .size(size * 216 / 230)
                     .scale(outerScale)
                     .border(2.dp, tint.copy(alpha = 0.35f), CircleShape)
             )
             Box(
                 Modifier
-                    .size(184.dp)
+                    .size(size * 184 / 230)
                     .scale(if (reactive) 1f + smoothLevel * 0.15f else pulse)
                     .clip(CircleShape)
                     .background(tint.copy(alpha = 0.08f))
             )
             Box(
                 Modifier
-                    .size(150.dp)
+                    .size(size * 150 / 230)
                     .clip(CircleShape)
                     .background(RespecColors.Card)
                     .border(2.dp, tint.copy(alpha = 0.7f), CircleShape)
@@ -658,16 +669,17 @@ private fun VoiceOrb(phase: Phase, level: Float, isSaveStep: Boolean, onTap: () 
                     if (phase == Phase.Recording || phase == Phase.Listening) Icons.Filled.Mic else Icons.Filled.Bedtime,
                     null,
                     tint = tint,
-                    modifier = Modifier.size(64.dp)
+                    modifier = Modifier.size(size * 64 / 230)
                 )
             }
         }
-        Text(status, color = tint, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        FitText(status, color = tint, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
 @Composable
 private fun AnswerArea(
+    minHeight: Dp,
     phase: Phase,
     isSaveStep: Boolean,
     sleeping: Boolean,
@@ -681,7 +693,7 @@ private fun AnswerArea(
 ) {
     val time = "%02d:%02d".format(recordSeconds / 60, recordSeconds % 60)
 
-    Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxWidth().heightIn(min = minHeight), contentAlignment = Alignment.Center) {
         when (phase) {
             Phase.AiSpeaking -> Unit
 
@@ -722,17 +734,18 @@ private fun AnswerArea(
             Phase.Review -> {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
+                        FitText(
                             "한 마디를 녹음했어요 ($time)",
                             color = Color.White,
                             fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         TextButton(onClick = onPreview) {
-                            Text("▶ 들어보기", color = RespecColors.Lime, fontWeight = FontWeight.Bold)
+                            Text("▶ 들어보기", color = RespecColors.Lime, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
                     }
-                    Text("내일 아침 모닝콜에서 들려드릴까요?", color = RespecColors.TextSub, fontSize = 14.sp)
+                    Text("내일 아침 모닝콜에서 들려드릴까요?", color = RespecColors.TextSub, fontSize = 14.sp, textAlign = TextAlign.Center)
                     Spacer(Modifier.height(14.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         OutlinedButton(
@@ -741,7 +754,7 @@ private fun AnswerArea(
                             shape = RoundedCornerShape(26.dp),
                             border = BorderStroke(1.5.dp, RespecColors.Purple)
                         ) {
-                            Text("다시 녹음", color = RespecColors.Purple, fontWeight = FontWeight.Bold)
+                            FitText("다시 녹음", color = RespecColors.Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                         }
                         Button(
                             onClick = onSave,
@@ -752,7 +765,7 @@ private fun AnswerArea(
                                 contentColor = Color.Black
                             )
                         ) {
-                            Text("저장하기", fontWeight = FontWeight.ExtraBold)
+                            FitText("저장하기", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
                         }
                     }
                 }
@@ -762,11 +775,11 @@ private fun AnswerArea(
 }
 
 @Composable
-private fun RoundControl(icon: ImageVector, label: String, active: Boolean, onClick: () -> Unit) {
+private fun RoundControl(icon: ImageVector, label: String, size: Dp, active: Boolean, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier
-                .size(64.dp)
+                .size(size)
                 .clip(CircleShape)
                 .background(if (active) Color.White else RespecColors.Card)
                 .border(1.dp, RespecColors.CardBorder, CircleShape)

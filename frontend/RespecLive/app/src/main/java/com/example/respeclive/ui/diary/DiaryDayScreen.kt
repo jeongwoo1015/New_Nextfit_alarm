@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import com.example.respeclive.data.ApiClient
 import com.example.respeclive.data.JpegEncoder
 import com.example.respeclive.data.RespecApi
+import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -206,16 +207,21 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
             val rate = summary?.text("routine_completion_rate")?.toFloatOrNull()
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatTile("기상 시간", Modifier.weight(1f)) {
-                    Text(clockOf(session.text("first_response_at")) ?: "-", color = RespecColors.Lime,
-                        fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, softWrap = false)
+                    FitText(clockOf(session.text("first_response_at")) ?: "-", color = RespecColors.Lime,
+                        fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
                 }
                 StatTile("루틴 수행", Modifier.weight(1f)) {
-                    Text(if (total > 0) "$done / $total" else "-", color = RespecColors.Lime,
-                        fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, softWrap = false)
+                    FitText(if (total > 0) "$done / $total" else "-", color = RespecColors.Lime,
+                        fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
                 }
                 StatTile("루틴 성공률", Modifier.weight(1f)) {
                     if (total > 0) {
-                        RateRing(rate ?: 0f, 68.dp, 7.dp, "${((rate ?: 0f) * 100).toInt()}%", 17.sp, color = RespecColors.Lime)
+                        // 칸에 맞춰 링 크기를 정함 (최대 68dp)
+                        BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            val ring = minOf(68.dp, maxWidth, maxHeight)
+                            RateRing(rate ?: 0f, ring, ring * 7 / 68, "${((rate ?: 0f) * 100).toInt()}%", 17.sp * (ring / 68.dp),
+                                color = RespecColors.Lime)
+                        }
                     } else {
                         Text("-", color = RespecColors.Lime, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
                     }
@@ -276,7 +282,7 @@ private fun StatTile(label: String, modifier: Modifier, value: @Composable () ->
             .border(1.dp, RespecColors.CardBorder, shape).padding(vertical = 14.dp, horizontal = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(label, color = RespecColors.TextSub, fontSize = 14.sp)
+        FitText(label, color = RespecColors.TextSub, fontSize = 14.sp)
         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { value() }
     }
 }

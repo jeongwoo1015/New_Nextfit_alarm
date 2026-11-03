@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.respeclive.data.ApiClient
 import com.example.respeclive.data.RespecApi
+import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -242,7 +243,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 ) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White)
                     Spacer(Modifier.width(8.dp))
-                    Text("이전으로", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    FitText("이전으로", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
             }
             Button(
@@ -260,7 +261,8 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 if (submitting) {
                     CircularProgressIndicator(Modifier.size(22.dp), color = Color.Black, strokeWidth = 2.dp)
                 } else {
-                    Text(if (step == 3) "시작하기" else "다음으로", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                    FitText(if (step == 3) "시작하기" else "다음으로", color = if (canNext) Color.Black else RespecColors.TextSub,
+                        fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.width(8.dp))
                     Icon(Icons.AutoMirrored.Filled.ArrowForward, null)
                 }
@@ -782,63 +784,66 @@ private fun PresetCard(preset: JSONObject, index: Int, total: Int, selected: Boo
     }.orEmpty()
     val badge = preset.optString("target_desc").takeIf { it.isNotBlank() && it != "null" } ?: "추천 루틴 ${index + 1}"
 
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(380.dp)
-            .clip(shape)
-            .background(Brush.verticalGradient(CARD_GRADIENTS[index % CARD_GRADIENTS.size]))
-            .border(if (selected) 2.dp else 1.dp, if (selected) RespecColors.Lime else RespecColors.CardBorder, shape)
-            .clickable(onClick = onClick)
-            .padding(14.dp)
-    ) {
-        Text(
-            badge,
-            color = Color.Black,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .clip(RoundedCornerShape(6.dp))
-                .background(RespecColors.Mint)
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-                .widthIn(max = 180.dp)
-        )
-        Text(
-            "${index + 1}/$total",
-            color = Color.White,
-            fontSize = 12.sp,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .clip(RoundedCornerShape(50))
-                .background(Color.Black.copy(alpha = 0.55f))
-                .padding(horizontal = 10.dp, vertical = 4.dp)
-        )
-
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth()) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = maxWidth * 1.25f)
+                .clip(shape)
+                .background(Brush.verticalGradient(CARD_GRADIENTS[index % CARD_GRADIENTS.size]))
+                .border(if (selected) 2.dp else 1.dp, if (selected) RespecColors.Lime else RespecColors.CardBorder, shape)
+                .clickable(onClick = onClick)
+                .padding(14.dp)
+        ) {
             Text(
-                preset.optString("template_name"),
-                color = Color.White,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.ExtraBold,
-                lineHeight = 28.sp
+                badge,
+                color = Color.Black,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(RespecColors.Mint)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .widthIn(max = 180.dp)
             )
-            Spacer(Modifier.height(10.dp))
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(RespecColors.Mint.copy(alpha = 0.92f))
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(3.dp)
-            ) {
-                items.forEach { item ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Check, null, tint = Color.Black, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(item.optString("item_name"), color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                "${index + 1}/$total",
+                color = Color.White,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            )
+
+            // 위쪽 배지와 겹치지 않도록 위 여백을 둠 (항목이 많으면 카드가 늘어남)
+            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(top = 36.dp)) {
+                Text(
+                    preset.optString("template_name"),
+                    color = Color.White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    lineHeight = 28.sp
+                )
+                Spacer(Modifier.height(10.dp))
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(RespecColors.Mint.copy(alpha = 0.92f))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    items.forEach { item ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Check, null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(item.optString("item_name"), color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }
@@ -850,14 +855,15 @@ private fun PresetCard(preset: JSONObject, index: Int, total: Int, selected: Boo
 private fun ContentPicker(selected: String?, onSelect: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         CONTENTS.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 row.forEach { c ->
                     val on = c.code == selected
                     val shape = RoundedCornerShape(22.dp)
                     Column(
                         Modifier
                             .weight(1f)
-                            .height(150.dp)
+                            .fillMaxHeight()
+                            .heightIn(min = 150.dp)
                             .clip(shape)
                             .background(if (on) RespecColors.Lime.copy(alpha = 0.12f) else RespecColors.Card)
                             .border(if (on) 2.dp else 1.dp, if (on) RespecColors.Lime else RespecColors.CardBorder, shape)

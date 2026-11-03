@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import com.example.respeclive.alarm.AlarmScheduler
 import com.example.respeclive.data.Alarm
 import com.example.respeclive.data.AlarmRepository
+import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -230,9 +231,10 @@ private fun SwipeBanner(text: String, onComplete: () -> Unit) {
             .onSizeChanged { widthPx = it.width.toFloat() },
         contentAlignment = Alignment.CenterStart
     ) {
-        Text(
+        // 손잡이 자리를 비워 두고, 좁은 화면에서는 줄바꿈 대신 글자를 줄임
+        FitText(
             text,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(start = knobSize + inset * 2, end = 16.dp),
             textAlign = TextAlign.Center,
             color = RespecColors.Purple,
             fontWeight = FontWeight.Bold,

@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -55,8 +56,10 @@ import com.example.respeclive.data.RespecApi
 import com.example.respeclive.data.RoutineRepository
 import com.example.respeclive.live.LiveAuth
 import com.example.respeclive.live.LiveClient
+import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.common.SubtitleBox
 import com.example.respeclive.ui.common.rememberHeldUserLine
+import com.example.respeclive.ui.common.rememberScreenScale
 import com.example.respeclive.ui.common.rememberSpokenPage
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.CompletableDeferred
@@ -78,6 +81,9 @@ private data class Banner(val title: String, val sub: String)
 
 // 말 대신 누를 수 있는 대답 (Live에 사용자 글자 입력으로 보냄). 루틴 단계: 건너뛰기 / 완료
 private const val BTN_DONE = "완료했어요"
+
+/** 루틴 게이지 최대 크기 (자리가 모자라면 줄어듦) */
+private val RING_SIZE = 240.dp
 private const val BTN_LATER = "오늘은 건너뛸게요"
 
 /** 앱이 보내는 이벤트: 코칭 중 모든 단계를 판정함 */
@@ -492,6 +498,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
     LaunchedEffect(routineOver) { if (routineOver) toolEvents.trySend(ROUTINE_OVER) }
 
     // ---- UI ----
+    val scale = rememberScreenScale()   // 세로가 짧은 폰에서 버튼·영역 크기를 줄임
     Box(
         Modifier
             .fillMaxSize()
@@ -502,12 +509,16 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
             MorningHeader(elapsed)
             Spacer(Modifier.height(8.dp))
 
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            // 세로가 짧은 폰에서는 자막·버튼과 겹치지 않도록 남은 공간에 맞춰 줄임 (아래 상태 문구 자리 30dp)
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                val ring = minOf(RING_SIZE, maxHeight - 30.dp, maxWidth).coerceAtLeast(0.dp)
+                val k = ring / RING_SIZE
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     GaugeRing(
                         total = items.size,
                         done = doneCount,
-                        modifier = Modifier.size(240.dp).aspectRatio(1f)
+                        stroke = 12.dp * k,
+                        modifier = Modifier.size(ring)
                     ) {
                         val tint = when (phase) {
                             MPhase.AiSpeaking -> RespecColors.Lime
@@ -516,7 +527,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                         }
                         Column(
                             Modifier
-                                .size(188.dp)
+                                .size(ring * 188 / 240)
                                 .clip(CircleShape)
                                 .background(RespecColors.Card)
                                 .clickable(enabled = phase == MPhase.Playing) { skipMessage() },
@@ -531,20 +542,20 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                                 },
                                 null,
                                 tint = tint,
-                                modifier = Modifier.size(44.dp)
+                                modifier = Modifier.size(44.dp * k)
                             )
-                            Spacer(Modifier.height(4.dp))
+                            Spacer(Modifier.height(4.dp * k))
                             Text(
                                 "$doneCount / ${items.size}",
                                 color = Color.White,
-                                fontSize = 30.sp,
+                                fontSize = 30.sp * k,
                                 fontWeight = FontWeight.ExtraBold
                             )
-                            Text("루틴 완료", color = RespecColors.TextSub, fontSize = 13.sp)
+                            FitText("루틴 완료", color = RespecColors.TextSub, fontSize = 13.sp * k, minSize = 8.sp)
                         }
                     }
                     Spacer(Modifier.height(8.dp))
-                    Text(
+                    FitText(
                         when {
                             phase == MPhase.Playing -> "어젯밤의 내가 남긴 한 마디 · 탭하면 건너뛰기"
                             phase == MPhase.Listening -> "듣고 있어요"
@@ -569,7 +580,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                 phase == MPhase.Listening && !routineOver && stage == Stage.Coaching -> BTN_LATER to BTN_DONE
                 else -> null
             }
-            Box(Modifier.fillMaxWidth().height(64.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxWidth().height(64.dp * scale), contentAlignment = Alignment.Center) {
                 if (answers != null) {
                     val (laterText, doneText) = answers
                     fun answer(text: String) {
@@ -579,22 +590,22 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             OutlinedButton(
                                 onClick = { answer(laterText) },
-                                modifier = Modifier.weight(1f).height(52.dp),
+                                modifier = Modifier.weight(1f).height(52.dp * scale),
                                 shape = RoundedCornerShape(26.dp),
                                 border = BorderStroke(1.5.dp, RespecColors.Purple)
                             ) {
-                                Text(laterText, color = RespecColors.Purple, fontWeight = FontWeight.Bold)
+                                FitText(laterText, color = RespecColors.Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                             }
                             Button(
                                 onClick = { answer(doneText) },
-                                modifier = Modifier.weight(1f).height(52.dp),
+                                modifier = Modifier.weight(1f).height(52.dp * scale),
                                 shape = RoundedCornerShape(26.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = RespecColors.Lime,
                                     contentColor = Color.Black
                                 )
                             ) {
-                                Text(doneText, fontWeight = FontWeight.ExtraBold)
+                                FitText(doneText, color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
                             }
                         }
                     }
@@ -610,13 +621,14 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                 MorningRoundControl(
                     icon = if (muted) Icons.Filled.MicOff else Icons.Filled.Mic,
                     label = "음소거",
+                    size = 64.dp * scale,
                     active = muted,
                     onClick = { muted = !muted }
                 )
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(
                         Modifier
-                            .size(76.dp)
+                            .size(76.dp * scale)
                             .clip(CircleShape)
                             .background(RespecColors.Danger)
                             .clickable { onFinish() },
@@ -649,6 +661,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
 private fun GaugeRing(
     total: Int,
     done: Int,
+    stroke: Dp,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
@@ -657,7 +670,7 @@ private fun GaugeRing(
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             if (total <= 0) return@Canvas
-            val stroke = 12.dp.toPx()
+            val stroke = stroke.toPx()
             val gap = 8f
             val slice = 360f / total
             val arcSize = Size(size.width - stroke, size.height - stroke)
@@ -702,7 +715,7 @@ private fun MorningHeader(elapsed: Int) {
             Spacer(Modifier.width(8.dp))
             Text("리스펙", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
         }
-        Text(
+        FitText(
             "AI 모닝콜 통화 중 · %02d:%02d".format(elapsed / 60, elapsed % 60),
             color = RespecColors.TextSub,
             fontSize = 13.sp
@@ -737,11 +750,11 @@ private fun BannerCard(banner: Banner) {
 }
 
 @Composable
-private fun MorningRoundControl(icon: ImageVector, label: String, active: Boolean, onClick: () -> Unit) {
+private fun MorningRoundControl(icon: ImageVector, label: String, size: Dp, active: Boolean, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier
-                .size(64.dp)
+                .size(size)
                 .clip(CircleShape)
                 .background(if (active) Color.White else RespecColors.Card)
                 .border(1.dp, RespecColors.CardBorder, shape = CircleShape)

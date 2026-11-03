@@ -40,6 +40,7 @@ import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.data.RespecApi
 import com.example.respeclive.data.RoutineRepository
+import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -158,45 +159,50 @@ private fun MorningIncomingScreen(
             Text("지금 당신의 하루가 시작돼요", color = RespecColors.TextSub, fontSize = 14.sp)
         }
 
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(260.dp)) {
-                Box(
-                    Modifier
-                        .size(210.dp)
-                        .scale(ringScale)
-                        .alpha(ringAlpha)
-                        .border(2.dp, RespecColors.Lime, CircleShape)
-                )
-                Box(
-                    Modifier
-                        .size(210.dp)
-                        .clip(CircleShape)
-                        .background(RespecColors.Card)
-                        .border(1.dp, RespecColors.CardBorder, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Filled.WbSunny, null, tint = RespecColors.Lime, modifier = Modifier.size(96.dp))
+        // 세로가 짧은 폰에서는 아래 버튼이 잘리지 않도록 동그라미를 남은 공간에 맞춰 줄임
+        // (아래 이름·시각 칩 자리 약 150dp)
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            val orb = minOf(260.dp, maxHeight - 150.dp, maxWidth).coerceAtLeast(0.dp)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(orb)) {
+                    Box(
+                        Modifier
+                            .size(orb * 210 / 260)
+                            .scale(ringScale)
+                            .alpha(ringAlpha)
+                            .border(2.dp, RespecColors.Lime, CircleShape)
+                    )
+                    Box(
+                        Modifier
+                            .size(orb * 210 / 260)
+                            .clip(CircleShape)
+                            .background(RespecColors.Card)
+                            .border(1.dp, RespecColors.CardBorder, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Filled.WbSunny, null, tint = RespecColors.Lime, modifier = Modifier.size(orb * 96 / 260))
+                    }
                 }
-            }
-            Spacer(Modifier.height(24.dp))
-            Text("리스펙", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
-            Spacer(Modifier.height(20.dp))
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(RespecColors.Card)
-                    .border(1.dp, RespecColors.CardBorder, RoundedCornerShape(50))
-                    .padding(horizontal = 18.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Filled.Alarm, null, tint = RespecColors.Lime, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(alarmLabel, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(20.dp))
+                Text("리스펙", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(RespecColors.Card)
+                        .border(1.dp, RespecColors.CardBorder, RoundedCornerShape(50))
+                        .padding(horizontal = 18.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Filled.Alarm, null, tint = RespecColors.Lime, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(alarmLabel, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
+            FitText(
                 if (level >= AlarmSoundPlayer.MAX_LEVEL) "알람 소리 최대"
                 else "알람 소리 $level/${AlarmSoundPlayer.MAX_LEVEL} · 받지 않으면 ${countdown}초 뒤 커져요",
                 color = RespecColors.TextSub,

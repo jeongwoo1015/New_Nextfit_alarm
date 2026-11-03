@@ -16,10 +16,13 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.example.respeclive.alarm.AlarmExtras
@@ -30,6 +33,9 @@ import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.navigation.AppNavHost
 import com.example.respeclive.ui.theme.RespecColors
+
+/** 기기 글꼴 크기 설정을 이 배율까지만 반영 (더 키우면 고정 크기 화면에서 글자가 넘침) */
+private const val MAX_FONT_SCALE = 1.2f
 
 class MainActivity : ComponentActivity() {
 
@@ -50,19 +56,25 @@ class MainActivity : ComponentActivity() {
         handleAlarmIntent(intent)
 
         setContent {
-            MaterialTheme(
-                colorScheme = darkColorScheme(
-                    primary = RespecColors.Lime,
-                    background = RespecColors.Background,
-                    surface = RespecColors.Card,
-                    onBackground = Color.White,
-                    onSurface = Color.White
-                )
+            // 기기 글꼴 크기를 아주 크게 해도 통화 화면처럼 자리가 정해진 배치가 깨지지 않도록 이 배율까지만 키움
+            val density = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(density.density, density.fontScale.coerceAtMost(MAX_FONT_SCALE))
             ) {
-                AppNavHost(
-                    launch = launchRequest,
-                    onLaunchHandled = { launchRequest = null }
-                )
+                MaterialTheme(
+                    colorScheme = darkColorScheme(
+                        primary = RespecColors.Lime,
+                        background = RespecColors.Background,
+                        surface = RespecColors.Card,
+                        onBackground = Color.White,
+                        onSurface = Color.White
+                    )
+                ) {
+                    AppNavHost(
+                        launch = launchRequest,
+                        onLaunchHandled = { launchRequest = null }
+                    )
+                }
             }
         }
     }
