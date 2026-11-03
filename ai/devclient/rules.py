@@ -9,6 +9,19 @@ HARD, SOFT = "HARD", "SOFT"
 END_INTENT = re.compile(r"잘게|잘 ?자|이만|끊을게|그만|끝낼게|끝내|안녕|종료|들어갈게|가볼게")     # 사용자가 대화를 끝내겠다는 말
 READY = re.compile(r"준비|시작|응|네|좋아|그래|오케이|ㅇㅋ")                                      # 루틴을 시작할 준비가 됐다는 말
 ALARM_WORDS = re.compile(r"알람")
+ACCEPT = re.compile(r"응|네|그래|없어|알겠|알았|좋아|그렇게|오케이|ㅇㅋ")                 # 마무리를 받아들이는 짧은 대답
+WRAP_Q = re.compile(r"마무리할까|마칠까|이만 할까")                                      # 마무리해도 되는지 묻는 말 (밤 대화는 묻지 않고 알린다)
+CLOSE = re.compile(r"마무리할게")                                                       # AI가 "이제 마무리할게요"라고 알리는 말
+FAREWELL = re.compile(r"편안한 밤|좋은 꿈|푹 (쉬|주무|자)|안녕히|잘 자|좋은 밤")             # AI의 작별 인사
+
+
+def _may_end(turns, i) -> bool:
+    """end_session을 불러도 되는 턴인가: 사용자가 끝내겠다고 했거나, AI의 마무리 확인 질문·작별 인사 뒤에 짧게 받아들였을 때."""
+    heard = turns[i].heard
+    if END_INTENT.search(heard) or CLOSE.search(turns[i].said):      # AI가 "이제 마무리할게요"라고 알리며 끝내는 것은 허용(밤 대화)
+        return True
+    prev = next((t.said for t in reversed(turns[:i]) if t.said.strip()), "")      # 바로 앞 AI 말(빈 턴은 건너뜀)
+    return bool(ACCEPT.search(heard)) and bool(WRAP_Q.search(prev) or FAREWELL.search(prev))
 
 
 @dataclass
@@ -82,7 +95,7 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
     add("첫 소리 3초 이내", SOFT, fa is not None and fa <= 3.0, f"{fa}")
 
     # 대화는 사용자가 끝낸다: 사용자가 끝내겠다는 말을 하지 않았는데 AI가 end_session을 부르면 실패
-    early = [i for i, t in enumerate(turns) if "end_session" in _names(t) and not END_INTENT.search(t.heard)]
+    early = [i for i, t in enumerate(turns) if "end_session" in _names(t) and not _may_end(turns, i)]
     add("사용자가 끝내자고 하기 전에 AI가 끝내지 않음", HARD, not early, f"{early}번째 턴에서 종료 호출")
     if e.get("farewell"):
         add("사용자 작별 뒤 end_session 호출", HARD, log.ended_by == "end_session", f"종료 방식={log.ended_by}")
@@ -99,7 +112,7 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
         # 일정이 없고 별일 없다고 하는 날: 작고 구체적인 일(식사·산책·만난 사람 등)을 물어 일기 재료를 얻는다.
         # '기억에 남는 순간이 있나요?' 같은 막연한 질문은 세지 않고, 요약 확인 질문("…맞아요?")도 세지 않는다
         small = re.compile(r"먹|식사|점심|저녁|간식|커피|산책|걷|만나|연락|통화")
-        confirm = re.compile(r"맞(아요|죠|지|나요|을까요)[^.?]{0,12}\?|그렇죠\?|(요약|정리)(해 볼까요|하면 (될까요|맞을까요))")
+        confirm = re.compile(r"맞(아요|죠|지|나요|을까요)[^.?]{0,12}\?|그렇죠\?|(요약|정리)(해 (볼까요|봐도 될까요|볼게요)|하면 (될까요|맞을까요))")
         small_q = [i for i, t in enumerate(turns) if i >= 1 and ("?" in t.said or "궁금해요" in t.said or "알려" in t.said) and small.search(t.said) and not confirm.search(t.said)]
         if e.get("asks_small"):
             add("밤: 별일 없는 날 작고 구체적인 일을 물어봄", HARD, bool(small_q), "식사·산책·사람처럼 구체적인 질문이 없음")
@@ -109,6 +122,19 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
             first_tom = next((i for i, t in enumerate(turns) if re.search(r"내일", t.said) and "?" in t.said and re.search(r"일정|챙겨|목표|해내|걱정|특별한|하고 싶|계획", t.said)), None)
             add("밤: 하루 요약을 확인한 뒤에 내일 이야기를 물음", HARD, first_sum is not None and (first_tom is None or first_sum < first_tom),
                 f"요약 확인 턴={first_sum}, 내일 질문 턴={first_tom}")
+        if e.get("ends_cleanly"):      # 마무리는 묻지 않고 알린 뒤 같은 응답에서 끝내고, 작별 인사는 한 번만 한다 (덕담을 되풀이하며 대화가 안 끝나는 문제)
+            ft = [i for i, t in enumerate(turns) if i >= 1 and FAREWELL.search(t.said)]   # 첫 마디의 "편안한 밤이에요" 같은 인사는 작별이 아니다
+            add("밤: 작별 인사는 한 번만 하고 그 응답에서 대화를 끝냄", HARD,
+                log.ended_by == "end_session" and len(ft) <= 1 and all("end_session" in _names(turns[i]) for i in ft), f"작별 인사 턴={ft}, 종료={log.ended_by}")
+            asked = [i for i, t in enumerate(turns) if WRAP_Q.search(t.said)]
+            add("밤: 마무리해도 되는지 묻지 않음", HARD, not asked, f"{asked}번째 턴에서 마무리를 물음")
+            end_i = next((i for i, t in enumerate(turns) if "end_session" in _names(t)), None)
+            if end_i is not None and not END_INTENT.search(turns[end_i].heard):      # AI가 스스로 마무리한 경우: 요약 확인과 내일 이야기가 끝난 뒤여야 한다
+                s_i = next((i for i, t in enumerate(turns) if confirm.search(t.said)), None)
+                t_i = next((i for i, t in enumerate(turns) if re.search(r"내일", t.said) and "?" in t.said and re.search(r"일정|챙겨|목표|해내|걱정|특별한|하고 싶|계획", t.said)), None)
+                add("밤: 요약 확인과 내일 이야기를 마친 뒤에 마무리함", HARD, s_i is not None and t_i is not None and end_i > s_i and end_i > t_i,
+                    f"요약 확인 턴={s_i}, 내일 질문 턴={t_i}, 종료 턴={end_i}")
+                add("밤: 마무리하는 응답은 질문으로 끝나지 않음", HARD, not turns[end_i].said.strip().endswith("?"), turns[end_i].said)
         if "small_stop_from" in e:    # 말하기 싫다고 한 뒤에는 작은 일을 더 묻지 않는다
             late = [i for i in small_q if i >= e["small_stop_from"]]
             add("밤: 말하기 싫다고 한 뒤에는 작은 일을 더 묻지 않음", HARD, not late, f"{late}번째 턴")

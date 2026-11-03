@@ -79,6 +79,9 @@ SCENARIOS = {s.name: s for s in [
     Scenario("night_quiet_day_vague", "night", _night(),      # 끝까지 막연하게만 답하는 날: AI가 구체적인 질문을 해서 일기 재료를 끌어내는가
              ("별일 없었어요", "그냥 평범했어요", "딱히 없어요", "네 맞아요", "이제 잘게요"),
              expect={"farewell": True, "diary": True, "asks_small": True, "asks_summary": True}),
+    Scenario("night_wrap_up", "night", _night(),      # 이야기를 다 마친 뒤 "없어요", "그래", "알았다고"처럼 짧게만 답하는 날: 덕담을 되풀이하지 않고 끝나는가
+             ("별일 없었어요", "점심에 김치찌개 먹은 거 정도요", "맛있었어요", "네 맞아요", "없어요", "없어요", "응 그래요", "알았다고"),
+             expect={"ends_cleanly": True, "asks_summary": True}),
     Scenario("night_quiet_day_declines", "night", _night(),      # 말하기 싫어하면 더 캐묻지 않고 지어내지도 않는다
              ("별일 없었어요", "정말 없어요 그냥 피곤해요", "네 맞아요", "이제 잘게요"),
              expect={"farewell": True, "asks_summary": True, "small_stop_from": 2,

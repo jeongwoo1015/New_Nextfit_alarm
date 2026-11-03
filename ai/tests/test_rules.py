@@ -284,6 +284,60 @@ def content_scn(**kw):
     return scn("coaching", **base)
 
 
+# ---------- 밤 대화 마무리: 묻지 않고 "이제 마무리할게요", 작별 인사는 한 번만, 그 응답에서 end_session ----------
+CLOSING_BASE = [T("오늘 하루는 어땠어요?"), T("점심은 뭘 드셨어요?", heard="별일 없었어요"),
+                T("오늘은 김치찌개를 맛있게 먹은 평온한 하루였던 것 같아요, 맞아요?", heard="김치찌개요"),
+                T("내일 미리 챙길 일정이나 걱정이 있으세요?", heard="네 맞아요")]
+
+
+def test_ai_closes_by_itself_after_summary_and_tomorrow():
+    ok = log("night", CLOSING_BASE + [T("이제 마무리할게요. 편안한 밤 되세요.", [END], heard="없어요")], "end_session")
+    r = check(ok, scn("night", ends_cleanly=True))
+    for rule in ("밤: 작별 인사는 한 번만 하고 그 응답에서 대화를 끝냄", "밤: 마무리해도 되는지 묻지 않음", "밤: 요약 확인과 내일 이야기를 마친 뒤에 마무리함",
+                 "밤: 마무리하는 응답은 질문으로 끝나지 않음", "사용자가 끝내자고 하기 전에 AI가 끝내지 않음"):
+        assert rule not in failed(r), rule
+
+
+def test_asking_for_permission_to_close_fails():
+    bad = log("night", CLOSING_BASE + [T("더 하고 싶은 이야기가 없으시면 이제 마무리할까요?", [END], heard="없어요")], "end_session")
+    assert "밤: 마무리해도 되는지 묻지 않음" in failed(check(bad, scn("night", ends_cleanly=True)))
+
+
+def test_closing_before_summary_and_tomorrow_fails():
+    early = log("night", [T("오늘 하루는 어땠어요?"), T("이제 마무리할게요. 편안한 밤 되세요.", [END], heard="별일 없었어요")], "end_session")
+    r = check(early, scn("night", ends_cleanly=True))
+    assert "밤: 요약 확인과 내일 이야기를 마친 뒤에 마무리함" in failed(r)
+
+
+def test_closing_response_must_not_end_with_a_question():
+    bad = log("night", CLOSING_BASE + [T("이제 마무리할게요, 괜찮으시죠?", [END], heard="없어요")], "end_session")
+    assert "밤: 마무리하는 응답은 질문으로 끝나지 않음" in failed(check(bad, scn("night", ends_cleanly=True)))
+
+
+def test_end_without_closing_words_or_user_farewell_is_still_early():
+    early = log("night", [T("오늘 하루는 어땠어요?"), T("편안한 밤 되세요.", [END], heard="별일 없었어요")], "end_session")
+    assert "사용자가 끝내자고 하기 전에 AI가 끝내지 않음" in failed(check(early, scn("night")))
+    no_close = log("night", [T("내일 걱정이 있으세요?"), T("알겠어요.", [END], heard="없어요")], "end_session")
+    assert "사용자가 끝내자고 하기 전에 AI가 끝내지 않음" in failed(check(no_close, scn("night")))
+
+
+def test_short_ack_after_farewell_ends_immediately():
+    ok = log("night", [T("내일 걱정이 있으세요?"), T("알겠어요. 편안한 밤 되세요.", heard="없어요"), T("", [END], heard="알았다고")], "end_session")
+    assert "사용자가 끝내자고 하기 전에 AI가 끝내지 않음" not in failed(check(ok, scn("night")))
+
+
+def test_repeating_goodnight_wishes_without_ending_fails():
+    bad = log("night", CLOSING_BASE + [T("편안한 밤 되세요.", heard="없어요"), T("좋은 꿈 꾸세요.", heard="그래")], "turnComplete")
+    assert "밤: 작별 인사는 한 번만 하고 그 응답에서 대화를 끝냄" in failed(check(bad, scn("night", ends_cleanly=True)))
+
+
+def test_opening_greeting_is_not_a_farewell_and_empty_turns_are_skipped():
+    turns = [T("예준 님, 오늘 하루는 어땠어요? 편안한 밤이에요.")] + CLOSING_BASE[1:] + [T("", heard=""), T("편안한 밤 되세요.", heard="그래"), T("", [END], heard="알았다고")]
+    r = check(log("night", turns, "end_session"), scn("night", ends_cleanly=True))
+    assert "사용자가 끝내자고 하기 전에 AI가 끝내지 않음" not in failed(r)             # 작별 뒤 "알았다고"에 끝내는 것은 허용 (빈 턴은 건너뜀)
+    assert "밤: 작별 인사는 한 번만 하고 그 응답에서 대화를 끝냄" in failed(r)        # 다만 이상적인 동작(작별 응답에서 바로 종료)은 아니므로 엄격 검사는 실패
+
+
 # ---------- 코칭 중 오늘 시간 변경 (adjust_step_time) ----------
 def adj(step, sec):
     return {"name": "adjust_step_time", "args": {"step_order": step, "seconds": sec}}
