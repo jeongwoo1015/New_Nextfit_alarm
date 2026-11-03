@@ -25,9 +25,9 @@ object AlarmRepository {
         if (loaded) return
         loaded = true
         val app = context.applicationContext
-        val raw = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null)
-        alarms.addAll(if (raw == null) defaults() else parse(raw))
-        if (raw == null) persist(app)
+        // 기본 알람은 만들지 않음. 모닝콜 알람은 홈에서 서버와 동기화할 때 채워짐
+        val raw = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null) ?: return
+        alarms.addAll(parse(raw))
     }
 
     fun get(id: Int): Alarm? = alarms.firstOrNull { it.id == id }
@@ -215,12 +215,6 @@ object AlarmRepository {
             )
         }
     } catch (e: Exception) {
-        defaults()
+        emptyList()
     }
-
-    /** 첫 실행 기본값. 모닝콜 알람은 서버와 처음 동기화할 때 서버 알람(온보딩의 07:00)으로 바뀜 */
-    private fun defaults() = listOf(
-        Alarm(1, DEFAULT_LABEL, 7, 0, setOf(0, 1, 2, 3, 4), type = AlarmType.WAKE),
-        Alarm(2, "취침 알람", 22, 0, (0..6).toSet(), type = AlarmType.BEDTIME)
-    )
 }
