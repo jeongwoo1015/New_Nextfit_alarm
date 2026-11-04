@@ -41,6 +41,10 @@ QUIZ = fallback_steps("QUIZ", "GENERAL")
 COACH_STEPS = (Step(1, "물 한 잔", 60, "QA"), Step(2, "스트레칭", 120, "PLAY", "1. 목을 천천히 좌우로 돌려요.\n2. 어깨를 크게 돌려요."),
                Step(3, "오늘 할 일 3개 말하기", 120, "SPEECH"))
 
+COACH_STEPS_MINUTES = (Step(1, "독서", 900, "PLAY"), Step(2, "스트레칭", 150, "PLAY", "1. 목을 천천히 좌우로 돌려요.\n2. 어깨를 크게 돌려요."), Step(3, "물 한 잔", 60, "QA"),
+                       Step(4, "오늘 할 일 3개 말하기", 120, "SPEECH"))       # 15분, 2분 30초처럼 분 단위 시간이 많은 루틴
+EVENTS_MINUTES = (CalendarEvent("주간 회의", "09:15", "10:45"), CalendarEvent("치과", "18:45", "19:30"))                 # 15분·45분처럼 분이 있는 일정
+
 COACH_STEPS_RESUMED = tuple(Step(s.order + 3, s.name, s.planned_sec, s.response_type, s.script) for s in COACH_STEPS)   # 재연결: 앞 3단계를 끝내고 남은 단계 (번호가 4부터)
 
 SCENARIOS = {s.name: s for s in [
@@ -86,6 +90,11 @@ SCENARIOS = {s.name: s for s in [
              ("별일 없었어요", "정말 없어요 그냥 피곤해요", "네 맞아요", "이제 잘게요"),
              expect={"farewell": True, "asks_summary": True, "small_stop_from": 2,
                      "extract": {"diary_text": lambda v: not v or not re.search(r"김치|점심|산책|친구|회의|발표", v)}}),
+    Scenario("briefing_times", "briefing",    # 시각·일정 시각의 분을 "열다섯 분"이 아니라 숫자로 말하는가
+             BriefingInput(persona=Persona("예준", "FORMAL", "KIND"), morning_call_type="ROUTINE", program_name="현실 모닝루틴",
+                           now_hhmm="07:15", events_today=EVENTS_MINUTES, weather=WEATHER, night=None),
+             ("네 잘 잤어요", "네 준비됐어요"),
+             expect={"event_words": ["회의", "치과"], "expect_start": True}),
     Scenario("briefing_full", "briefing",
              BriefingInput(persona=Persona("예준", "FORMAL", "KIND"), morning_call_type="ROUTINE", program_name="현실 모닝루틴",
                            now_hhmm="07:02", events_today=EVENTS, weather=WEATHER, night=NIGHT_REC),
@@ -113,6 +122,9 @@ SCENARIOS = {s.name: s for s in [
     Scenario("coaching_routine", "coaching", CoachingInput(persona=Persona("예준"), steps=COACH_STEPS, night=NIGHT_REC),
              ("물 한 잔 마셨어요", "스트레칭은 오늘 건너뛸게요", "오늘 할 일은 보고서 쓰기, 운동하기, 장보기예요", "고마워요 이만 끝낼게요"),
              expect={"verdicts": {1: "done", 2: "skipped", 3: "done"}, "step_names": [s.name for s in COACH_STEPS], "farewell": True}),
+    Scenario("coaching_minutes", "coaching", CoachingInput(persona=Persona("예준"), steps=COACH_STEPS_MINUTES, night=NIGHT_REC),
+             ("독서 했어요", "스트레칭 했어요", "물 한 잔 마셨어요", "오늘 할 일은 보고서 쓰기, 운동하기, 장보기예요", "고마워요 이만 끝낼게요"),
+             expect={"verdicts": {1: "done", 2: "done", 3: "done", 4: "done"}, "step_names": [s.name for s in COACH_STEPS_MINUTES], "encourages": True, "farewell": True}),
     Scenario("coaching_time_change", "coaching", CoachingInput(persona=Persona("예준"), steps=COACH_STEPS, night=NIGHT_REC),
              ("물 한 잔 마셨어요", "스트레칭은 오늘 1분만 할게요", "스트레칭 했어요", "오늘 할 일은 보고서 쓰기, 운동하기, 장보기예요", "고마워요 이만 끝낼게요"),
              expect={"verdicts": {1: "done", 2: "done", 3: "done"}, "adjust": {2: 60}, "no_verdict_turns": (2,),

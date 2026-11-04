@@ -284,6 +284,30 @@ def content_scn(**kw):
     return scn("coaching", **base)
 
 
+# ---------- 시간 표기: "열다섯 분"이 아니라 15분 / 십오 분 ----------
+def test_native_korean_minutes_are_flagged():
+    rule = "시간은 '열다섯 분'이 아니라 15분·십오 분으로 말함"
+    for bad in ("회의는 아홉 시 열다섯 분에 시작해요.", "독서는 열다섯분 동안 해요.", "스트레칭은 스무 분이 아니라 두 분 반이에요."):
+        assert rule in failed(check(log("coaching", [T(bad)]), scn("coaching"))), bad
+    for ok in ("회의는 9시 15분에 시작해요.", "독서는 십오 분 동안 해요.", "지금은 일곱 시 이 분이에요.", "한 분이 오셨어요."):
+        assert rule not in failed(check(log("coaching", [T(ok)]), scn("coaching"))), ok
+
+
+# ---------- 루틴 중간 독려 ----------
+def test_encouragement_between_steps_is_required():
+    def coach(says):
+        turns = [T("첫 단계예요. 물 한 잔 마셔 주세요.")] + [T(txt, [rep(i, "done")], heard="했어요") for i, txt in enumerate(says, 1)]
+        return log("coaching", turns)
+    s = scn("coaching", verdicts={1: "done", 2: "done", 3: "done"}, encourages=True)
+    rule = "코칭: 단계 사이에 독려 한마디"
+    plain = coach(["잘하셨어요. 다음은 스트레칭이에요.", "좋아요. 마지막은 할 일 말하기예요.", "수고하셨어요."])
+    assert rule in failed(check(plain, s))
+    cheer = coach(["잘하셨어요. 다음은 스트레칭이에요.", "좋아요, 거의 다 왔어요. 마지막은 할 일 말하기예요.", "수고하셨어요."])
+    assert rule not in failed(check(cheer, s))
+    last_only = coach(["잘하셨어요. 다음은 스트레칭이에요.", "좋아요. 마지막은 할 일 말하기예요.", "정말 대단해요, 힘차게 하루를 시작해요."])    # 마지막 단계 뒤 마무리 칭찬은 세지 않는다
+    assert rule in failed(check(last_only, s))
+
+
 # ---------- 밤 대화 마무리: 묻지 않고 "이제 마무리할게요", 작별 인사는 한 번만, 그 응답에서 end_session ----------
 CLOSING_BASE = [T("오늘 하루는 어땠어요?"), T("점심은 뭘 드셨어요?", heard="별일 없었어요"),
                 T("오늘은 김치찌개를 맛있게 먹은 평온한 하루였던 것 같아요, 맞아요?", heard="김치찌개요"),

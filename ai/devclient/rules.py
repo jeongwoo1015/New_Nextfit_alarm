@@ -9,6 +9,8 @@ HARD, SOFT = "HARD", "SOFT"
 END_INTENT = re.compile(r"잘게|잘 ?자|이만|끊을게|그만|끝낼게|끝내|안녕|종료|들어갈게|가볼게")     # 사용자가 대화를 끝내겠다는 말
 READY = re.compile(r"준비|시작|응|네|좋아|그래|오케이|ㅇㅋ")                                      # 루틴을 시작할 준비가 됐다는 말
 ALARM_WORDS = re.compile(r"알람")
+NATIVE_UNIT = re.compile(r"(열|스무|스물|서른|마흔|쉰)(한|두|세|네|다섯|여섯|일곱|여덟|아홉)?\s?(분|초)")     # "열다섯 분"처럼 우리말 수로 분·초를 말함 (15분 / 십오 분이어야 한다)
+ENCOURAGE = re.compile(r"조금만|거의 다|힘내|화이팅|파이팅|벌써|절반|반이나|잘하고 (있|계)|잘 하고 (있|계)|계속 이렇게|이대로|멋져|훌륭|대단|힘차게")   # 단계 사이 독려 한마디
 ACCEPT = re.compile(r"응|네|그래|없어|알겠|알았|좋아|그렇게|오케이|ㅇㅋ")                 # 마무리를 받아들이는 짧은 대답
 WRAP_Q = re.compile(r"마무리할까|마칠까|이만 할까")                                      # 마무리해도 되는지 묻는 말 (밤 대화는 묻지 않고 알린다)
 CLOSE = re.compile(r"마무리할게")                                                       # AI가 "이제 마무리할게요"라고 알리는 말
@@ -84,6 +86,8 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
                  or (c["name"] == "adjust_step_time" and not (isinstance(c["args"].get("step_order"), int) and isinstance(c["args"].get("seconds"), int)
                                                               and c["args"]["seconds"] >= 0 and c["args"]["seconds"] % 30 == 0))]
     add("함수 호출 형식", HARD, not bad_calls, str(bad_calls))
+    native = [m.group(0) for t in turns for m in [NATIVE_UNIT.search(t.said)] if m]
+    add("시간은 '열다섯 분'이 아니라 15분·십오 분으로 말함", HARD, not native, f"우리말 수로 말함: {native[:3]}")
     sents = [s for t in texts for s in sentences(t) if not _from_script(s, scn)]       # 고정 스크립트는 그대로 읽는 것이 규칙이라 어조 검사에서 뺀다
     if scn.tone == "CASUAL":
         bad = [s for s in sents if POLITE_END.search(_ending(s))]
@@ -222,6 +226,12 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
                 continue
             mentioned = [nm for nm in names if nm in t.said]
             add(f"코칭: {i}번째 안내가 단계 하나만", SOFT, len(mentioned) <= 1, f"{mentioned}")
+        if e.get("encourages"):        # 단계를 마칠 때마다 짧은 반응에 그치지 않고, 중간중간 독려 한마디(조금만 더, 거의 다 왔어요 등)를 넣는다
+            last = max(want) if want else None
+            moves = [t for i, t in enumerate(turns) if i >= 1 and any(c["name"] == "report_step_result" and c["args"].get("step_order") != last for c in t.calls)]
+            cheered = [t for t in moves if ENCOURAGE.search(t.said)]
+            need = max(1, (len(moves) + 1) // 2)
+            add("코칭: 단계 사이에 독려 한마디", HARD, len(cheered) >= need, f"단계 전환 {len(moves)}번 중 독려 {len(cheered)}번 (필요 {need}번)")
         answers = e.get("answers", [])
         for i, t in enumerate(turns):
             leaked = [a for a in answers[i:] if a in t.said]
