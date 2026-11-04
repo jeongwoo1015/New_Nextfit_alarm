@@ -31,11 +31,15 @@ import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChecklistRtl
 import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SelfImprovement
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -79,13 +83,13 @@ internal val GENRES = listOf(
     Choice("POP", "팝"), Choice("JAZZ", "재즈"), Choice("CLASSIC", "클래식"), Choice("DANCE", "댄스"), Choice("ACOUSTIC", "어쿠스틱")
 )
 
-private data class ContentKind(val code: String, val label: String, val desc: String, val icon: String)
+private data class ContentKind(val code: String, val label: String, val desc: String, val icon: ImageVector)
 
 private val CONTENTS = listOf(
-    ContentKind("MEDITATION", "명상", "호흡과 몸 감각에 집중하며 차분하게 깨어나요", "🧘"),
-    ContentKind("EXERCISE", "운동", "가벼운 스트레칭과 동작으로 몸을 깨워요", "🤸"),
-    ContentKind("LANGUAGE", "외국어", "아침마다 짧은 표현을 소리 내어 익혀요", "🗣️"),
-    ContentKind("QUIZ", "퀴즈", "가벼운 퀴즈로 머리를 깨워요", "💡"),
+    ContentKind("MEDITATION", "명상", "호흡과 몸 감각에 집중하며 차분하게 깨어나요", Icons.Filled.SelfImprovement),
+    ContentKind("EXERCISE", "운동", "가벼운 스트레칭과 동작으로 몸을 깨워요", Icons.Filled.FitnessCenter),
+    ContentKind("LANGUAGE", "외국어", "아침마다 짧은 표현을 소리 내어 익혀요", Icons.Filled.Translate),
+    ContentKind("QUIZ", "퀴즈", "가벼운 퀴즈로 머리를 깨워요", Icons.Filled.Lightbulb),
 )
 
 // 콘텐츠 고정 시간·루틴 합계 상한은 서버 앱 설정 (RS_APP_CONFIG, 받기 전에는 5분·15분)
@@ -640,7 +644,8 @@ private fun RoutineStep(
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         StepTitle(
             if (isContent) "콘텐츠를 선택해 주세요" else "루틴을 선택해 주세요",
-            if (isContent) "매일 아침 $contentTime, 리스펙과 함께할 콘텐츠예요." else "탭해서 내 루틴에 담아 보세요."
+            if (isContent) "바쁜 아침이라 온전한 루틴이 어렵다면, 콘텐츠 하나만 골라 ${contentTime}으로 가볍게 시작해 보세요."
+            else "탭해서 내 루틴에 담아 보세요."
         )
 
         // 루틴 / 콘텐츠 전환
@@ -886,28 +891,37 @@ private fun PresetCard(preset: JSONObject, index: Int, total: Int, selected: Boo
 @Composable
 private fun ContentPicker(selected: String?, onSelect: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        CONTENTS.chunked(2).forEach { row ->
-            Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                row.forEach { c ->
-                    val on = c.code == selected
-                    val shape = RoundedCornerShape(22.dp)
-                    Column(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .heightIn(min = 150.dp)
-                            .clip(shape)
-                            .background(if (on) RespecColors.Lime.copy(alpha = 0.12f) else RespecColors.Card)
-                            .border(if (on) 2.dp else 1.dp, if (on) RespecColors.Lime else RespecColors.CardBorder, shape)
-                            .clickable { onSelect(c.code) }
-                            .padding(16.dp)
-                    ) {
-                        Text(c.icon, fontSize = 28.sp)
-                        Spacer(Modifier.height(8.dp))
-                        Text(c.label, color = if (on) RespecColors.Lime else Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                        Spacer(Modifier.height(4.dp))
-                        Text(c.desc, color = RespecColors.TextSub, fontSize = 12.sp, lineHeight = 17.sp)
-                    }
+        CONTENTS.forEach { c ->
+            val on = c.code == selected
+            val shape = RoundedCornerShape(22.dp)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .background(if (on) RespecColors.Lime.copy(alpha = 0.12f) else RespecColors.Card)
+                    .border(if (on) 2.dp else 1.dp, if (on) RespecColors.Lime else RespecColors.CardBorder, shape)
+                    .clickable { onSelect(c.code) }
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(if (on) RespecColors.Lime else RespecColors.Background),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(c.icon, null, tint = if (on) Color.Black else RespecColors.Lime, modifier = Modifier.size(24.dp))
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(c.label, color = if (on) RespecColors.Lime else Color.White, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+                    Spacer(Modifier.height(2.dp))
+                    Text(c.desc, color = RespecColors.TextSub, fontSize = 13.sp, lineHeight = 18.sp)
+                }
+                if (on) {
+                    Spacer(Modifier.width(10.dp))
+                    Icon(Icons.Filled.Check, null, tint = RespecColors.Lime, modifier = Modifier.size(22.dp))
                 }
             }
         }
