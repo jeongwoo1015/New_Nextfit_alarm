@@ -34,6 +34,7 @@ import com.example.respeclive.ui.night.NightChatScreen
 import com.example.respeclive.ui.diary.DiaryDayScreen
 import com.example.respeclive.ui.diary.DiaryScreen
 import com.example.respeclive.ui.onboarding.OnboardingScreen
+import com.example.respeclive.ui.profile.ProfileScreen
 import com.example.respeclive.ui.report.ReportScreen
 import com.example.respeclive.ui.routine.RoutineScreen
 import com.example.respeclive.ui.theme.RespecColors
@@ -140,7 +141,7 @@ private fun MainNav(
             composable("diaryDay/{date}") { entry ->
                 DiaryDayScreen(date = entry.arguments?.getString("date").orEmpty(), onBack = { nav.popBackStack() })
             }
-            composable("profile") { PlaceholderScreen("내 정보") }
+            composable("profile") { ProfileScreen() }
 
             composable(
                 "alarmEdit/{id}",
@@ -229,12 +230,5 @@ private fun RespecBottomBar(currentRoute: String?, onSelect: (String) -> Unit) {
                 )
             )
         }
-    }
-}
-
-@Composable
-private fun PlaceholderScreen(text: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text, color = RespecColors.TextSub)
     }
 }

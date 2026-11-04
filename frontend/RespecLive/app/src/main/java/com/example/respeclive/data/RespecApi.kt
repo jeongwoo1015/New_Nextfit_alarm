@@ -35,6 +35,18 @@ object RespecApi {
         return if (r.ok) r.json() else null
     }
 
+    /** 기본 정보 수정 (user_name, birth_date, gender 중 보낸 항목만) → UserOut */
+    suspend fun updateUser(changes: JSONObject): JSONObject? {
+        val r = ApiClient.patch("/users/me", changes) ?: return null
+        return if (r.ok) r.json() else null
+    }
+
+    /** 페르소나 수정 (user_call_name, tone, speech_style, voice_type, music_genre 중 보낸 항목만) → SettingOut */
+    suspend fun updateSetting(changes: JSONObject): JSONObject? {
+        val r = ApiClient.patch("/settings", changes) ?: return null
+        return if (r.ok) r.json() else null
+    }
+
     /** 선택 가능한 루틴 프리셋 (PresetOut 목록: template_id, template_name, target_desc, description, total_sec, items) */
     suspend fun presets(): List<JSONObject>? {
         val r = ApiClient.get("/presets") ?: return null

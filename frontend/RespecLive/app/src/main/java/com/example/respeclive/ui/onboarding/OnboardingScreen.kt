@@ -69,13 +69,13 @@ import java.util.UUID
 
 // ---------------- 선택지 (서버 값 ↔ 화면 이름, backend/domain/codes.py) ----------------
 
-private data class Choice(val code: String, val label: String)
+internal data class Choice(val code: String, val label: String)
 
-private val GENDERS = listOf(Choice("MALE", "남성"), Choice("FEMALE", "여성"), Choice("NONE", "선택 안 함"))
-private val TONES = listOf(Choice("FORMAL", "존댓말"), Choice("CASUAL", "반말"))
-private val SPEECH_STYLES = listOf(Choice("KIND", "다정한 말투"), Choice("FRIENDLY", "친근한 말투"), Choice("FIRM", "단호한 말투"))
-private val VOICES = listOf(Choice("FEMALE", "여성 목소리"), Choice("MALE", "남성 목소리"), Choice("NEUTRAL", "중성적인 목소리"))
-private val GENRES = listOf(
+internal val GENDERS = listOf(Choice("MALE", "남성"), Choice("FEMALE", "여성"), Choice("NONE", "선택 안 함"))
+internal val TONES = listOf(Choice("FORMAL", "존댓말"), Choice("CASUAL", "반말"))
+internal val SPEECH_STYLES = listOf(Choice("KIND", "다정한 말투"), Choice("FRIENDLY", "친근한 말투"), Choice("FIRM", "단호한 말투"))
+internal val VOICES = listOf(Choice("FEMALE", "여성 목소리"), Choice("MALE", "남성 목소리"), Choice("NEUTRAL", "중성적인 목소리"))
+internal val GENRES = listOf(
     Choice("POP", "팝"), Choice("JAZZ", "재즈"), Choice("CLASSIC", "클래식"), Choice("DANCE", "댄스"), Choice("ACOUSTIC", "어쿠스틱")
 )
 
@@ -104,7 +104,7 @@ private val CARD_GRADIENTS = listOf(
 )
 
 /** 말투 미리보기 문장 (어조 × 말투) */
-private fun previewLine(tone: String, style: String): String = when (tone to style) {
+internal fun previewLine(tone: String, style: String): String = when (tone to style) {
     "FORMAL" to "FRIENDLY" -> "좋은 아침이에요~ 오늘 하루도 신나게 시작해 봐요!"
     "FORMAL" to "FIRM" -> "일어날 시간입니다. 오늘 할 일을 바로 시작하세요."
     "CASUAL" to "KIND" -> "좋은 아침이야! 오늘도 함께 시작해 볼까?"
@@ -113,7 +113,7 @@ private fun previewLine(tone: String, style: String): String = when (tone to sty
     else -> "좋은 아침이에요! 오늘도 함께 시작해 볼까요?"
 }
 
-private fun labelOf(list: List<Choice>, code: String) = list.firstOrNull { it.code == code }?.label ?: code
+internal fun labelOf(list: List<Choice>, code: String) = list.firstOrNull { it.code == code }?.label ?: code
 
 private fun minutesText(sec: Int): String {
     val m = sec / 60
@@ -371,7 +371,7 @@ private fun FieldLabel(text: String) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ChipRow(choices: List<Choice>, selected: String, onSelect: (String) -> Unit) {
+internal fun ChipRow(choices: List<Choice>, selected: String, onSelect: (String) -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         choices.forEach { c -> Pill(c.label, c.code == selected) { onSelect(c.code) } }
     }
@@ -398,7 +398,7 @@ private fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun InputField(value: String, onChange: (String) -> Unit, placeholder: String, maxLen: Int) {
+internal fun InputField(value: String, onChange: (String) -> Unit, placeholder: String, maxLen: Int) {
     OutlinedTextField(
         value = value,
         onValueChange = { if (it.length <= maxLen) onChange(it) },
@@ -420,7 +420,6 @@ private fun InputField(value: String, onChange: (String) -> Unit, placeholder: S
 
 // ---------------- 1. 기본 정보 ----------------
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BasicInfoStep(
     name: String, onName: (String) -> Unit,
@@ -428,7 +427,6 @@ private fun BasicInfoStep(
     gender: String, onGender: (String) -> Unit
 ) {
     var showPicker by remember { mutableStateOf(false) }
-    val utc = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") } }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         StepTitle("기본 정보를 입력해 주세요", "AI가 나에게 맞게 대화할 수 있도록 알려주세요.")
@@ -461,23 +459,29 @@ private fun BasicInfoStep(
         }
     }
 
-    if (showPicker) {
-        val initial = birth?.let { runCatching { utc.parse(it)?.time }.getOrNull() } ?: utc.parse("2000-01-01")!!.time
-        val state = rememberDatePickerState(initialSelectedDateMillis = initial)
-        DatePickerDialog(
-            onDismissRequest = { showPicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    state.selectedDateMillis?.let { ms ->
-                        if (ms <= System.currentTimeMillis()) onBirth(utc.format(Date(ms)))
-                    }
-                    showPicker = false
-                }) { Text("확인") }
-            },
-            dismissButton = { TextButton(onClick = { showPicker = false }) { Text("취소") } }
-        ) {
-            DatePicker(state = state)
-        }
+    if (showPicker) BirthDatePicker(birth, onBirth) { showPicker = false }
+}
+
+/** 생년월일 달력 ("YYYY-MM-DD"). 미래 날짜는 고를 수 없음 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun BirthDatePicker(birth: String?, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    val utc = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") } }
+    val initial = birth?.let { runCatching { utc.parse(it)?.time }.getOrNull() } ?: utc.parse("2000-01-01")!!.time
+    val state = rememberDatePickerState(initialSelectedDateMillis = initial)
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                state.selectedDateMillis?.let { ms ->
+                    if (ms <= System.currentTimeMillis()) onPick(utc.format(Date(ms)))
+                }
+                onDismiss()
+            }) { Text("확인") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
+    ) {
+        DatePicker(state = state)
     }
 }
 
@@ -542,7 +546,7 @@ private fun PersonaStep(
  * 여기서는 기기 TTS의 음높이로 느낌만 보여 준다.
  */
 @Composable
-private fun VoicePreview(voice: String, line: String) {
+internal fun VoicePreview(voice: String, line: String) {
     val context = LocalContext.current
     var ready by remember { mutableStateOf(false) }
     var speaking by remember { mutableStateOf(false) }
