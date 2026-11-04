@@ -240,6 +240,21 @@ def test_tools_follow_the_session_plan():
     assert [d["name"] for d in build_setup("briefing", BriefingInput(content_name="퀴즈"))["tools"][0]["functionDeclarations"]] == ["start_routine", "end_session"]
 
 
+def test_time_words_rule_is_in_every_conversation():
+    rule = '"7시 15분", "15분", "30초"처럼 말하고, 분과 초를 "열다섯 분", "서른 초"처럼 우리말 수로 풀어 말하지 않는다'
+    for p in (night_prompt(NightInput()), briefing_prompt(BriefingInput()), coaching_prompt(CoachingInput(steps=STEPS)),
+              coaching_prompt(CoachingInput(morning_call_type="CONTENT", steps=STEPS))):
+        assert rule in p
+
+
+def test_routine_coaching_encourages_between_steps_but_content_does_not():
+    routine = coaching_prompt(CoachingInput(steps=STEPS))
+    assert "중간 독려(루틴 단계 사이):" in routine and "벌써 절반이에요." in routine and "독려 한마디를 담는다" in routine
+    assert "전체 두 문장을 넘기지 않는다" in routine and "부담 없는 격려만 한다" in routine and "독려를 덧붙이지 않는다" in routine
+    content = coaching_prompt(CoachingInput(morning_call_type="CONTENT", steps=STEPS))
+    assert "중간 독려" not in content                                     # 퀴즈·콘텐츠에는 적용하지 않는다
+
+
 def test_adjust_step_time_declaration_and_rules():
     decl = next(d for d in tools_for("coaching")[0]["functionDeclarations"] if d["name"] == "adjust_step_time")
     assert decl["parameters"]["required"] == ["step_order", "seconds"] and set(decl["parameters"]["properties"]) == {"step_order", "seconds"}

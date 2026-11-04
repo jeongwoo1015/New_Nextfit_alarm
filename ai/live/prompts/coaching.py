@@ -41,6 +41,11 @@ TIME_RULES = """시간 변경(오늘만):
 - 이미 안내한 단계에 대해 '못 했어요', '패스할게요'라고 답하는 것은 시간 변경이 아니라 판정이므로 report_step_result로 기록한다. 같은 단계에 두 함수를 함께 부르지 않는다.
 - 단계 시간의 합계가 15분을 넘게 늘려 달라는 요청은 어렵다고 짧게 말한다."""
 
+ENCOURAGE_RULES = """중간 독려(루틴 단계 사이):
+- 단계를 하나 마치고 다음 단계로 넘어갈 때는 짧은 반응에 독려 한마디를 담는다. 진행 상황을 짚어 힘을 북돋운다. 예) "벌써 절반이에요.", "조금만 더 힘내요.", "거의 다 왔어요." 독려도 직전 단계에 대한 반응 안에 넣어 전체 두 문장을 넘기지 않는다.
+- 같은 독려 표현을 연달아 쓰지 않는다. 못 했거나 건너뛴 단계 뒤에는 탓하지 않고 "괜찮아요, 다음은 할 수 있어요"처럼 부담 없는 격려만 한다.
+- 마지막 단계 뒤의 마무리는 아래 [마무리] 규칙을 따른다(여기서는 독려를 덧붙이지 않는다)."""
+
 COACH_CLOSING = """마무리: 모든 단계를 판정했으면 단계별 결과 전체를 반영해 최대 2문장으로 마무리한다(대부분 했으면 한 일을 칭찬하고, 일부만 했으면 한 단계를 짚어 격려하고, 거의 못 했어도 탓하지 않고 일어나 시작한 것을 격려한다). 하지 않은 단계를 한 것처럼 말하지 않는다. 하루를 응원한 뒤에는 대화를 스스로 끝내지 않고 사용자가 이어서 말하면 짧게 받아 준다.
 
 대화는 사용자가 끝낸다. 사용자가 끝내겠다고 분명히 말하면(예: 이만 끝낼게요, 고마워요 안녕) 짧은 작별 인사 뒤 end_session을 호출한다. AI가 먼저 끝내거나 호출하지 않으며, 아직 판정하지 않은 단계가 있을 때 사용자가 끝내겠다고 해도 그 단계를 판정 없이 두고 작별 인사만 한다."""
@@ -66,7 +71,7 @@ def coaching_prompt(inp: CoachingInput) -> str:
     steps = steps_block(label, inp.steps)
     return join_blocks(
         CONTENT_INTRO if content else COACH_INTRO, STEP_RULES.format(label=label, resume_line=RESUME_LINE if inp.resumed else ""),
-        "" if content else TIME_RULES, COACH_CLOSING,
+        "" if content else TIME_RULES, "" if content else ENCOURAGE_RULES, COACH_CLOSING,
         SAFETY_RULES, VOICE_RULES, persona_block(inp.persona), steps,
         night_record_block(inp.night) if inp.night else "",
         inp.strategy_block,
