@@ -41,7 +41,6 @@ import java.util.Locale
 import java.util.TimeZone
 
 private val DAY_NAMES = listOf("일", "월", "화", "수", "목", "금", "토")
-private val CONDITIONS = mapOf("GOOD" to "좋음", "NORMAL" to "보통", "TIRED" to "피곤함", "STRESSED" to "스트레스")
 
 /**
  * 하루 상세 (GET /diary/{date}): 사진, 그날 밤의 한 줄 일기, 그날 아침의 리포트(기상·루틴).
@@ -165,7 +164,7 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
         Card {
             val diary = night?.text("diary_text")
             Text(
-                diary?.let { "“$it”" } ?: when {
+                diary ?: when {
                     night == null -> "이날은 밤 대화 기록이 없어요"
                     night.optString("extract_status") == "PENDING" -> "밤 대화를 정리하는 중이에요. 잠시 뒤에 다시 확인해 주세요"
                     else -> "한 줄 일기가 없어요"
@@ -175,26 +174,6 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
                 fontWeight = if (diary != null) FontWeight.SemiBold else FontWeight.Normal,
                 lineHeight = 26.sp
             )
-            val condition = night?.text("condition_label")?.let { CONDITIONS[it] ?: it }
-            val conditionText = night?.text("condition_text")
-            if (condition != null || conditionText != null) {
-                Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    condition?.let { Chip("컨디션 · $it", RespecColors.Mint, RespecColors.MintDark) }
-                    conditionText?.let {
-                        Spacer(Modifier.width(8.dp))
-                        Text(it, color = RespecColors.TextSub, fontSize = 13.sp)
-                    }
-                }
-            }
-            night?.text("ai_summary")?.let {
-                Spacer(Modifier.height(12.dp))
-                Text(it, color = RespecColors.TextSub, fontSize = 14.sp, lineHeight = 21.sp)
-            }
-            night?.text("tomorrow_goal")?.let {
-                Spacer(Modifier.height(12.dp))
-                Text("다음 날 목표 · $it", color = RespecColors.Purple, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            }
         }
 
         // 이날의 리포트 (그날 아침 세션): 기상 시간 · 루틴 수행 · 루틴 성공률
@@ -293,7 +272,7 @@ private fun StepRow(step: JSONObject) {
     val (label, fg, bg) = when (step.optString("step_status")) {
         "DONE" -> Triple("완료", RespecColors.Mint, RespecColors.MintDark)
         "SKIPPED" -> Triple("건너뜀", RespecColors.TextSub, RespecColors.Disabled)
-        else -> Triple("못 했어요", RespecColors.Danger, RespecColors.Danger.copy(alpha = 0.15f))
+        else -> Triple("미완", RespecColors.Danger, RespecColors.Danger.copy(alpha = 0.15f))
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(step.optString("step_name"), color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
