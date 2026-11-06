@@ -1,7 +1,7 @@
 """기록 화면: 리포트, 한 줄 일기 캘린더·상세, 일기 사진."""
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from backend.app.deps import history_service
 from backend.core.auth import current_user_id
@@ -52,3 +52,9 @@ async def put_photo(day: date, request: Request, user_id: str = Depends(current_
                     svc: HistoryService = Depends(history_service)):
     """일기 대표 사진(jpg)을 본문 그대로 보낸다 (Content-Type: image/jpeg, 10MB 이하). 다시 올리면 덮어쓴다."""
     return PhotoOut(date=day, photo_url=svc.upload_photo(user_id, day, await request.body(), request.headers.get("content-type")))
+
+
+@router.delete("/diary/{day}/photo", status_code=status.HTTP_204_NO_CONTENT)
+def delete_photo(day: date, user_id: str = Depends(current_user_id), svc: HistoryService = Depends(history_service)):
+    """일기 대표 사진 지우기. 사진이 없어도 204."""
+    svc.delete_photo(user_id, day)

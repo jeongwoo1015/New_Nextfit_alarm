@@ -115,6 +115,19 @@ def test_photo_rules(client, clock):
     assert client.get("/diary/2026-11-05", headers=auth(USER_B)).json()["photo_url"] is None   # 다른 사용자에게 안 보임
 
 
+def test_delete_photo(client, clock, repos):
+    onboard(client)
+    client.put("/diary/2026-11-05/photo", content=b"jpg", headers={**H, "Content-Type": "image/jpeg"})
+    assert client.delete("/diary/2026-11-05/photo", headers=auth(USER_B)).status_code == 204   # 남의 사진은 안 지워짐
+    assert client.get("/diary/2026-11-05", headers=H).json()["photo_url"] is not None
+    assert client.delete("/diary/2026-11-05/photo", headers=H).status_code == 204
+    assert client.get("/diary/2026-11-05", headers=H).json()["photo_url"] is None
+    days = {d["date"]: d for d in client.get("/diary/calendar?month=2026-11", headers=H).json()}
+    assert days["2026-11-05"]["photo_url"] is None
+    assert ("photo", f"{USER_A}/2026-11-05.jpg") not in repos.storage.files
+    assert client.delete("/diary/2026-11-05/photo", headers=H).status_code == 204              # 없어도 204
+
+
 def test_delete_account(client, repos):
     onboard(client)
     client.put("/diary/2026-11-05/photo", content=b"jpg", headers={**H, "Content-Type": "image/jpeg"})

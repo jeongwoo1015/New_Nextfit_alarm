@@ -88,3 +88,7 @@ class HistoryService:
         check_media_type(content_type, codes.PHOTO_MIME_TYPES)
         photo = self.r.storage.upload_photo(user_id, day, data)
         return self._photo_url(photo.photo_path)
+
+    def delete_photo(self, user_id: str, day: date) -> None:
+        """하루 대표 사진 지우기. 사진이 없어도 성공(다시 눌러도 같은 결과)."""
+        self.r.storage.delete_photo(user_id, day)
