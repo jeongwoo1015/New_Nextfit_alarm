@@ -263,6 +263,15 @@ def test_storage(repos, uid):
     assert repos.storage.signed_url("photo", photo.photo_path, 60).startswith("http")
     assert repos.storage.signed_url("photo", f"{uid}/1999-01-01.jpg", 60) is None              # 없는 파일
 
+    d2 = date(2026, 11, 3)
+    path2 = repos.storage.upload_photo(uid, d2, b"\xff\xd8\xff\xd9").photo_path
+    assert repos.storage.delete_photo("00000000-0000-4000-8000-000000000000", d2) is False     # 남의 사진
+    assert repos.storage.get_photo(uid, d2) is not None
+    assert repos.storage.delete_photo(uid, d2) is True
+    assert repos.storage.get_photo(uid, d2) is None
+    assert repos.storage.signed_url("photo", path2, 60) is None                                # 파일도 지워짐
+    assert repos.storage.delete_photo(uid, d2) is False                                        # 다시 지우면 False
+
     with pytest.raises(ValidationFailed):                                                      # 버킷 제한: 10MB 초과
         repos.storage.upload_voice(uid, d, b"\x00" * (10 * 1024 * 1024 + 1))
     with pytest.raises(ValidationFailed):                                                      # 버킷 제한: jpeg가 아닌 형식
