@@ -543,7 +543,7 @@ fun NightChatScreen(onClose: () -> Unit) {
 
         Row(
             Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(48.dp, Alignment.CenterHorizontally),
+            horizontalArrangement = Arrangement.spacedBy(80.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.Top
         ) {
             RoundControl(
@@ -556,7 +556,7 @@ fun NightChatScreen(onClose: () -> Unit) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(
                     Modifier
-                        .size(76.dp * scale)
+                        .size(64.dp * scale)
                         .clip(CircleShape)
                         .background(RespecColors.Danger)
                         .clickable { endCall() },

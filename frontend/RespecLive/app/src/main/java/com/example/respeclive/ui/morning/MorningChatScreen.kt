@@ -605,7 +605,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
 
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(48.dp, Alignment.CenterHorizontally),
+                horizontalArrangement = Arrangement.spacedBy(80.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.Top
             ) {
                 MorningRoundControl(
@@ -618,7 +618,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(
                         Modifier
-                            .size(76.dp * scale)
+                            .size(64.dp * scale)
                             .clip(CircleShape)
                             .background(RespecColors.Danger)
                             .clickable { finish() },
