@@ -112,9 +112,10 @@ private const val REWAKE_LEVEL = 3
  * 세션 시작 → 브리핑 세션(시작 질문에 대답) → 안내 후 어젯밤 한 마디 → start_routine이면 코칭 세션(새 토큰) → 종료
  * 이미 다 마친 날 다시 열면 브리핑에서 루틴을 안내하지 않음
  * initialSession: 알람 수신 화면에서 이미 만든 세션 (없으면 여기서 만듦)
+ * onFinish: 통화가 끝나면 세션 id(세션을 만들지 못했으면 null)와 통화 길이(초)를 넘김
  */
 @Composable
-fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONObject? = null) {
+fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int) -> Unit, initialSession: JSONObject? = null) {
     val context = LocalContext.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
@@ -148,6 +149,11 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
     var liveSaying by remember { mutableStateOf(false) }   // 마무리 안내를 AI 목소리로 읽는 중 (자막은 AI가 실제로 한 말)
     var coachingStarted by remember { mutableStateOf(false) }   // 이번 통화의 단계를 받아 코칭 세션을 열었음
     var coachSpoke by remember { mutableStateOf(false) }        // 코칭 세션에서 AI가 첫 안내를 시작함
+
+    fun finish() {
+        val sid = sessionId ?: initialSession?.optJSONObject("session")?.optString("session_id")?.takeIf { it.isNotBlank() }
+        onFinish(sid, elapsed)
+    }
 
     LaunchedEffect(coachingStarted, aiSpeaking) {
         if (coachingStarted && aiSpeaking) coachSpoke = true
@@ -424,14 +430,14 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
         stage = Stage.Finished
         notice = "좋은 하루 보내세요!"
         delay(1000)
-        onFinish()
+        finish()
     }
 
     fun skipMessage() {
         if (stage == Stage.Message) messageDone[0]?.complete(Unit)
     }
 
-    BackHandler { onFinish() }
+    BackHandler { finish() }
 
     val live = status == LiveClient.Status.Live
     // 루틴·콘텐츠 준비 중: 코칭 세션의 AI가 첫 안내를 시작하기 전 (아직 대답할 것이 없음)
@@ -615,7 +621,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                             .size(76.dp * scale)
                             .clip(CircleShape)
                             .background(RespecColors.Danger)
-                            .clickable { onFinish() },
+                            .clickable { finish() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(Icons.Filled.CallEnd, "통화 종료", tint = Color.White, modifier = Modifier.size(32.dp))

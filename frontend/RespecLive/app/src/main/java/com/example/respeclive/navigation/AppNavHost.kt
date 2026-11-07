@@ -29,6 +29,7 @@ import com.example.respeclive.data.RespecApi
 import com.example.respeclive.ui.alarm.AlarmEditScreen
 import com.example.respeclive.ui.home.HomeScreen
 import com.example.respeclive.ui.morning.MorningCallScreen
+import com.example.respeclive.ui.morning.MorningReportScreen
 import com.example.respeclive.ui.nexty.NextyDebugScreen
 import com.example.respeclive.ui.night.NightCallScreen
 import com.example.respeclive.ui.night.NightChatScreen
@@ -166,7 +167,29 @@ private fun MainNav(
                             popUpTo("home")
                             launchSingleTop = true
                         }
+                    },
+                    onCallEnded = { sessionId, talkSec ->
+                        nav.navigate("morningReport/$sessionId/$talkSec") {
+                            popUpTo("home")
+                            launchSingleTop = true
+                        }
                     }
+                )
+            }
+            composable(
+                "morningReport/{sessionId}/{talkSec}",
+                arguments = listOf(navArgument("talkSec") { type = NavType.IntType })
+            ) { entry ->
+                MorningReportScreen(
+                    sessionId = entry.arguments?.getString("sessionId").orEmpty(),
+                    talkSec = entry.arguments?.getInt("talkSec") ?: 0,
+                    onOpenReport = {
+                        nav.navigate("report") {
+                            popUpTo("home")
+                            launchSingleTop = true
+                        }
+                    },
+                    onHome = { if (!nav.popBackStack("home", inclusive = false)) nav.navigate("home") }
                 )
             }
             composable("nightCall") {

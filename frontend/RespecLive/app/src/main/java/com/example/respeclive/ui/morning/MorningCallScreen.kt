@@ -52,10 +52,12 @@ private const val VOLUME_UP_SECONDS = 10
 /**
  * 알람 수신 화면 → 밀어서 받으면 아침 대화 화면.
  * 알람이 울리면 바로 서버 세션을 만든다 (스누즈 뒤 다시 울려도 같은 세션). 스누즈에도 세션 id가 필요하다.
+ * onCallEnded: 받은 통화가 끝났을 때 (세션 id, 통화 길이 초). 받지 않고 끄거나 세션이 없으면 onFinish
  */
 @Composable
 fun MorningCallScreen(
     onFinish: () -> Unit,
+    onCallEnded: (sessionId: String, talkSec: Int) -> Unit,
     onSnooze: () -> Unit = onFinish,
     alarmId: Int = -1,
     alarmLabel: String = "오전 6:00"
@@ -73,7 +75,11 @@ fun MorningCallScreen(
     }
 
     if (answered) {
-        MorningChatScreen(alarmId = alarmId, initialSession = session, onFinish = onFinish)
+        MorningChatScreen(
+            alarmId = alarmId,
+            initialSession = session,
+            onFinish = { sid, talkSec -> if (sid != null) onCallEnded(sid, talkSec) else onFinish() }
+        )
     } else {
         MorningIncomingScreen(
             onAnswer = { answered = true },

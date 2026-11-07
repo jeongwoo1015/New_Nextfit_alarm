@@ -331,7 +331,7 @@ private fun StepRow(step: JSONObject) {
 }
 
 /** 서버 시각(ISO, 시간대 포함) → 기기 시간대의 "HH:MM" */
-private fun clockOf(iso: String?): String? {
+internal fun clockOf(iso: String?): String? {
     iso ?: return null
     return try {
         val clean = iso.replace(Regex("\\.\\d+"), "").replace(Regex("Z$"), "+00:00")
