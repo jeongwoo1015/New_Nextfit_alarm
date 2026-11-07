@@ -16,8 +16,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +47,7 @@ private val DAY_NAMES = listOf("일", "월", "화", "수", "목", "금", "토")
 /**
  * 하루 상세 (GET /diary/{date}): 사진, 그날 밤의 한 줄 일기, 그날 아침의 리포트(기상·루틴).
  * 사진은 올리거나 바꿀 수 있음 (JPEG로 바꿔 PUT /diary/{date}/photo). 미래 날짜는 서버가 받지 않음.
+ * 올린 사진은 확인을 거쳐 지울 수 있음 (DELETE /diary/{date}/photo).
  */
 @Composable
 fun DiaryDayScreen(date: String, onBack: () -> Unit) {
@@ -53,6 +56,8 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
     var day by remember { mutableStateOf<JSONObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var uploading by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
 
     val cal = remember(date) {
@@ -128,7 +133,7 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
                 .aspectRatio(4f / 3f)
                 .clip(photoShape)
                 .border(1.dp, RespecColors.CardBorder, photoShape)
-                .clickable(enabled = !future && !uploading) {
+                .clickable(enabled = !future && !uploading && !deleting) {
                     picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 }
         ) {
@@ -154,7 +159,24 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
                         .clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f))
                         .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
-                    Text(if (uploading) "올리는 중…" else "사진 바꾸기", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        when {
+                            uploading -> "올리는 중…"
+                            deleting -> "지우는 중…"
+                            else -> "사진 바꾸기"
+                        },
+                        color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            if (photoUrl != null && !uploading && !deleting) {
+                Box(
+                    Modifier.align(Alignment.BottomStart).padding(12.dp)
+                        .clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f))
+                        .clickable { confirmDelete = true }
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Text("사진 삭제", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -226,6 +248,30 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
             Text(it, color = RespecColors.Danger, fontSize = 13.sp)
         }
         Spacer(Modifier.height(32.dp))
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            containerColor = RespecColors.Card,
+            title = { Text("사진을 삭제할까요?", color = RespecColors.Text, fontWeight = FontWeight.Bold) },
+            text = { Text("삭제한 사진은 되돌릴 수 없어요.", color = RespecColors.TextSub) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    deleting = true
+                    scope.launch {
+                        val ok = RespecApi.deleteDiaryPhoto(date)
+                        deleting = false
+                        if (ok) reload++
+                        else Toast.makeText(context, ApiClient.lastError ?: "사진을 삭제하지 못했어요", Toast.LENGTH_SHORT).show()
+                    }
+                }) { Text("삭제", color = RespecColors.Danger) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("취소", color = RespecColors.TextSub) }
+            }
+        )
     }
 }
 

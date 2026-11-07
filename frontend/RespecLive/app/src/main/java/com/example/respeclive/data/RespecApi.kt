@@ -261,6 +261,12 @@ object RespecApi {
         return if (r.ok) r.json()?.optString("photo_url")?.takeIf { it.isNotBlank() && it != "null" } else null
     }
 
+    /** 일기 사진 지우기 (사진이 없어도 성공) */
+    suspend fun deleteDiaryPhoto(date: String): Boolean {
+        val r = ApiClient.delete("/diary/$date/photo") ?: return false
+        return r.ok
+    }
+
     // ---------------- 음악 ----------------
 
     /** 음악 서명 URL. type: "rewake"(재기상, 12시간 유효) / "sleep"(수면). 없으면(404 MUSIC_NOT_FOUND) null */
