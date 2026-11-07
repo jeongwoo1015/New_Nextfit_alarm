@@ -16,8 +16,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,19 +24,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChecklistRtl
 import androidx.compose.material.icons.filled.ChatBubbleOutline
-import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SelfImprovement
-import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.QuestionMark
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.*
@@ -47,20 +41,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.respeclive.data.ApiClient
 import com.example.respeclive.data.DeviceLocation
 import com.example.respeclive.data.RespecApi
-import com.example.respeclive.data.RoutineCatalog
-import com.example.respeclive.data.durationText
 import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.launch
@@ -86,29 +76,12 @@ internal val GENRES = listOf(
 private data class ContentKind(val code: String, val label: String, val desc: String, val icon: ImageVector)
 
 private val CONTENTS = listOf(
-    ContentKind("MEDITATION", "명상", "호흡과 몸 감각에 집중하며 차분하게 깨어나요", Icons.Filled.SelfImprovement),
-    ContentKind("EXERCISE", "운동", "가벼운 스트레칭과 동작으로 몸을 깨워요", Icons.Filled.FitnessCenter),
-    ContentKind("LANGUAGE", "외국어", "아침마다 짧은 표현을 소리 내어 익혀요", Icons.Filled.Translate),
-    ContentKind("QUIZ", "퀴즈", "가벼운 퀴즈로 머리를 깨워요", Icons.Filled.Lightbulb),
+    ContentKind("EXERCISE", "스트레칭", "넥스티와 함께 몸을 깨우며 건강한 아침을 시작해요", Icons.Filled.Accessibility),
+    ContentKind("LANGUAGE", "외국어", "매일 다른 영어 문장을 듣고 소리 내어 따라 읽어요", Icons.Filled.Translate),
+    ContentKind("QUIZ", "퀴즈", "인물 · 끝말잇기 · 음악 · 상식 퀴즈로 머리를 깨워요", Icons.Filled.QuestionMark),
 )
 
-// 콘텐츠 고정 시간·루틴 합계 상한은 서버 앱 설정 (RS_APP_CONFIG, 받기 전에는 5분·15분)
-private val contentTime: String get() = durationText(RoutineCatalog.limits.contentSec)
-private val routineMaxTime: String get() = durationText(RoutineCatalog.limits.routineMaxSec)
-
-private val STEP_TITLES = listOf("기본 정보 입력", "페르소나 설정", "루틴 선택", "시작하기")
-
-// 프리셋 카드의 띠 (카드 그라데이션 위라 테마와 상관없이 같은 색)
-private val PRESET_TAG = Color(0xFFFFE3B8)
-
-// 루틴 카드 배경 (사진 대신)
-private val CARD_GRADIENTS = listOf(
-    listOf(Color(0xFF3A3F5C), Color(0xFF8C7A6B)),
-    listOf(Color(0xFF2F4A4A), Color(0xFF8DA08A)),
-    listOf(Color(0xFF3B2F4F), Color(0xFF9A7FA8)),
-    listOf(Color(0xFF4A3A2A), Color(0xFFB08D62)),
-    listOf(Color(0xFF26384F), Color(0xFF6E8FB0)),
-)
+private val STEP_TITLES = listOf("기본 정보", "페르소나 설정", "아침 콘텐츠", "시작하기")
 
 /** 말투 미리보기 문장 (어조 × 말투) */
 internal fun previewLine(tone: String, style: String): String = when (tone to style) {
@@ -122,16 +95,7 @@ internal fun previewLine(tone: String, style: String): String = when (tone to st
 
 internal fun labelOf(list: List<Choice>, code: String) = list.firstOrNull { it.code == code }?.label ?: code
 
-private fun minutesText(sec: Int): String {
-    val m = sec / 60
-    val s = sec % 60
-    return if (s == 0) "${m}분" else "${m}분 ${s}초"
-}
-
-/**
- * 온보딩 4단계: 기본 정보 → 페르소나 → 루틴(프리셋) / 콘텐츠 선택 → 확인 후 POST /onboarding.
- * 루틴 시간 조정은 알람 세부 설정에서 한다 (기본 10분, 상한 15분).
- */
+/** 온보딩 4단계: 기본 정보 → 페르소나 → 아침 콘텐츠 선택 → 확인 후 POST /onboarding */
 @Composable
 fun OnboardingScreen(onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
@@ -153,34 +117,15 @@ fun OnboardingScreen(onDone: () -> Unit) {
     var voice by rememberSaveable { mutableStateOf("FEMALE") }
     var genre by rememberSaveable { mutableStateOf("POP") }
     // 3단계
-    var isContent by rememberSaveable { mutableStateOf(false) }
-    var templateId by rememberSaveable { mutableStateOf<String?>(null) }
     var contentType by rememberSaveable { mutableStateOf<String?>(null) }
 
-    var presets by remember { mutableStateOf<List<JSONObject>?>(null) }
-    var presetsError by remember { mutableStateOf<String?>(null) }
     var submitting by remember { mutableStateOf(false) }
     var submitError by remember { mutableStateOf<String?>(null) }
-
-    fun loadPresets() {
-        presetsError = null
-        scope.launch {
-            val list = RespecApi.presets()
-            presets = list
-            if (list == null) presetsError = ApiClient.lastError ?: "루틴 목록을 불러오지 못했어요"
-        }
-    }
-    LaunchedEffect(Unit) {
-        loadPresets()
-        RoutineCatalog.loadLimits()
-    }
-
-    val selectedPreset = presets?.firstOrNull { it.optString("template_id") == templateId }
 
     val canNext = when (step) {
         0 -> name.isNotBlank() && birth != null
         1 -> callName.isNotBlank()
-        2 -> if (isContent) contentType != null else selectedPreset != null
+        2 -> contentType != null
         else -> !submitting
     }
 
@@ -194,8 +139,8 @@ fun OnboardingScreen(onDone: () -> Unit) {
             .put("speech_style", style)
             .put("voice_type", voice)
             .put("music_genre", genre)
-            .put("morning_call_type", if (isContent) "CONTENT" else "ROUTINE")
-        if (isContent) body.put("content_type", contentType) else body.put("template_id", templateId)
+            .put("morning_call_type", "CONTENT")
+            .put("content_type", contentType)
         submitting = true
         submitError = null
         scope.launch {
@@ -237,20 +182,10 @@ fun OnboardingScreen(onDone: () -> Unit) {
                     callName, { callName = it }, tone, { tone = it }, style, { style = it },
                     voice, { voice = it }, genre, { genre = it }
                 )
-                2 -> RoutineStep(
-                    isContent = isContent,
-                    onTypeChange = { isContent = it },
-                    presets = presets,
-                    presetsError = presetsError,
-                    onRetry = { loadPresets() },
-                    templateId = templateId,
-                    onPreset = { templateId = it },
-                    contentType = contentType,
-                    onContent = { contentType = it }
-                )
+                2 -> ContentStep(contentType) { contentType = it }
                 else -> SummaryStep(
                     callName = callName, tone = tone, style = style, voice = voice, genre = genre,
-                    isContent = isContent, preset = selectedPreset, contentType = contentType,
+                    contentType = contentType,
                     error = submitError,
                     onEdit = { step = it }
                 )
@@ -630,270 +565,14 @@ private fun Waveform(active: Boolean) {
     }
 }
 
-// ---------------- 3. 루틴 / 콘텐츠 선택 ----------------
+// ---------------- 3. 아침 콘텐츠 선택 ----------------
 
 @Composable
-private fun RoutineStep(
-    isContent: Boolean,
-    onTypeChange: (Boolean) -> Unit,
-    presets: List<JSONObject>?,
-    presetsError: String?,
-    onRetry: () -> Unit,
-    templateId: String?,
-    onPreset: (String) -> Unit,
-    contentType: String?,
-    onContent: (String) -> Unit
-) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        StepTitle(
-            if (isContent) "콘텐츠를 선택해 주세요" else "루틴을 선택해 주세요",
-            if (isContent) "바쁜 아침이라 온전한 루틴이 어렵다면, 콘텐츠 하나만 골라 ${contentTime}으로 가볍게 시작해 보세요."
-            else "탭해서 내 루틴에 담아 보세요."
-        )
-
-        // 루틴 / 콘텐츠 전환
-        val shape = RoundedCornerShape(50)
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(shape)
-                .background(RespecColors.Card)
-                .border(1.dp, RespecColors.CardBorder, shape)
-                .padding(4.dp)
-        ) {
-            listOf(false to "루틴", true to "콘텐츠").forEach { (content, label) ->
-                val selected = isContent == content
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .clip(shape)
-                        .background(if (selected) RespecColors.Lime else Color.Transparent)
-                        .clickable { onTypeChange(content) }
-                        .padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        label,
-                        color = if (selected) RespecColors.OnAccent else RespecColors.TextSub,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.height(16.dp))
-
-        if (isContent) {
-            ContentPicker(contentType, onContent)
-        } else {
-            when {
-                presets == null && presetsError == null -> Box(Modifier.fillMaxWidth().height(300.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = RespecColors.Lime)
-                }
-                presets.isNullOrEmpty() -> Column(
-                    Modifier.fillMaxWidth().padding(vertical = 40.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        presetsError ?: "선택할 수 있는 루틴이 없어요",
-                        color = RespecColors.TextSub, fontSize = 14.sp, textAlign = TextAlign.Center
-                    )
-                    TextButton(onClick = onRetry) { Text("다시 불러오기", color = RespecColors.AccentText) }
-                }
-                else -> PresetPager(presets, templateId, onPreset)
-            }
-        }
-    }
-}
-
-@Composable
-private fun PresetPager(presets: List<JSONObject>, templateId: String?, onPreset: (String) -> Unit) {
-    val pager = rememberPagerState { presets.size }
-    val current = presets[pager.currentPage.coerceIn(presets.indices)]
-    val currentId = current.optString("template_id")
-    val picked = currentId == templateId
-
-    // 계정 헤더 (인스타그램 피드 형태)
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier.size(36.dp).clip(CircleShape).background(RespecColors.Lime),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("R", color = RespecColors.OnAccent, fontWeight = FontWeight.ExtraBold)
-        }
-        Spacer(Modifier.width(10.dp))
+private fun ContentStep(selected: String?, onSelect: (String) -> Unit) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Column {
-            Text("Re:Spec 추천 루틴", color = RespecColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Text("모닝 루틴 · ${presets.size}가지 스타일", color = RespecColors.TextSub, fontSize = 12.sp)
+            StepTitle("모닝콜 끝에\n무엇을 함께 할까요?", "브리핑이 끝나면 넥스티가 하나를 같이 해요.")
         }
-    }
-    Spacer(Modifier.height(12.dp))
-
-    HorizontalPager(
-        state = pager,
-        contentPadding = PaddingValues(end = 40.dp),
-        pageSpacing = 12.dp,
-        modifier = Modifier.fillMaxWidth()
-    ) { page ->
-        val p = presets[page]
-        PresetCard(
-            preset = p,
-            index = page,
-            total = presets.size,
-            selected = p.optString("template_id") == templateId,
-            onClick = { onPreset(p.optString("template_id")) }
-        )
-    }
-
-    Spacer(Modifier.height(10.dp))
-    // 페이지 점
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-        repeat(presets.size) { i ->
-            Box(
-                Modifier
-                    .padding(horizontal = 3.dp)
-                    .size(if (i == pager.currentPage) 8.dp else 6.dp)
-                    .clip(CircleShape)
-                    .background(if (i == pager.currentPage) RespecColors.Lime else RespecColors.CardBorder)
-            )
-        }
-    }
-
-    // 담기
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = { onPreset(currentId) }) {
-            Text(
-                if (picked) "담기됨" else "담기",
-                color = if (picked) RespecColors.AccentText else RespecColors.Text,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.width(4.dp))
-            Icon(
-                if (picked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                null,
-                tint = if (picked) RespecColors.AccentText else RespecColors.Text
-            )
-        }
-    }
-
-    Text(
-        buildString {
-            append("Re:Spec  ")
-            append(current.optString("template_name"))
-            if (presets.size > 1) append(" 외 ${presets.size - 1}개")
-        },
-        color = RespecColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold
-    )
-    // 프리셋 설명 (DESCRIPTION)
-    current.optString("description").takeIf { it.isNotBlank() && it != "null" }?.let {
-        Spacer(Modifier.height(4.dp))
-        Text(it, color = RespecColors.Text.copy(alpha = 0.85f), fontSize = 13.sp, lineHeight = 19.sp)
-        Spacer(Modifier.height(4.dp))
-    }
-    Text("옆으로 넘겨 다른 루틴도 확인해 보세요.", color = RespecColors.TextSub, fontSize = 13.sp)
-
-    Spacer(Modifier.height(16.dp))
-    val totalSec = current.optInt("total_sec", 600)
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("루틴 시간", color = RespecColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.width(14.dp))
-        Box(
-            Modifier.clip(RoundedCornerShape(50)).background(RespecColors.Lime)
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-        ) {
-            Text("기본 ${minutesText(totalSec)}", color = RespecColors.OnAccent, fontWeight = FontWeight.Bold)
-        }
-    }
-    Spacer(Modifier.height(6.dp))
-    Text(
-        "항목별 시간은 알람 설정에서 ${durationText(RoutineCatalog.limits.stepSec)} 단위로 바꿀 수 있어요 (최대 $routineMaxTime)",
-        color = RespecColors.TextSub, fontSize = 12.sp
-    )
-    Spacer(Modifier.height(8.dp))
-}
-
-@Composable
-private fun PresetCard(preset: JSONObject, index: Int, total: Int, selected: Boolean, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(22.dp)
-    val items = preset.optJSONArray("items")?.let { a ->
-        (0 until a.length()).mapNotNull { a.optJSONObject(it) }.sortedBy { it.optInt("item_order") }
-    }.orEmpty()
-    val badge = preset.optString("target_desc").takeIf { it.isNotBlank() && it != "null" } ?: "추천 루틴 ${index + 1}"
-
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(min = maxWidth * 1.25f)
-                .clip(shape)
-                .background(Brush.verticalGradient(CARD_GRADIENTS[index % CARD_GRADIENTS.size]))
-                .border(if (selected) 2.dp else 1.dp, if (selected) RespecColors.Lime else RespecColors.CardBorder, shape)
-                .clickable(onClick = onClick)
-                .padding(14.dp)
-        ) {
-            Text(
-                badge,
-                color = Color.Black,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(PRESET_TAG)
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                    .widthIn(max = 180.dp)
-            )
-            Text(
-                "${index + 1}/$total",
-                color = Color.White,
-                fontSize = 12.sp,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-            )
-
-            // 위쪽 배지와 겹치지 않도록 위 여백을 둠 (항목이 많으면 카드가 늘어남)
-            Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(top = 36.dp)) {
-                Text(
-                    preset.optString("template_name"),
-                    color = Color.White,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    lineHeight = 28.sp
-                )
-                Spacer(Modifier.height(10.dp))
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(PRESET_TAG.copy(alpha = 0.94f))
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    // 항목: 이름 · 기본 시간 (ITEM_ORDER 순)
-                    items.forEach { item ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                item.optString("item_name"),
-                                color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text(durationText(item.optInt("default_duration_sec")), color = Color.Black.copy(alpha = 0.7f), fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ContentPicker(selected: String?, onSelect: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         CONTENTS.forEach { c ->
             val on = c.code == selected
             val shape = RoundedCornerShape(22.dp)
@@ -901,7 +580,7 @@ private fun ContentPicker(selected: String?, onSelect: (String) -> Unit) {
                 Modifier
                     .fillMaxWidth()
                     .clip(shape)
-                    .background(if (on) RespecColors.Lime.copy(alpha = 0.12f) else RespecColors.Card)
+                    .background(if (on) RespecColors.Lime.copy(alpha = 0.15f) else RespecColors.Card)
                     .border(if (on) 2.dp else 1.dp, if (on) RespecColors.Lime else RespecColors.CardBorder, shape)
                     .clickable { onSelect(c.code) }
                     .padding(16.dp),
@@ -910,7 +589,7 @@ private fun ContentPicker(selected: String?, onSelect: (String) -> Unit) {
                 Box(
                     Modifier
                         .size(44.dp)
-                        .clip(CircleShape)
+                        .clip(RoundedCornerShape(14.dp))
                         .background(if (on) RespecColors.Lime else RespecColors.Background),
                     contentAlignment = Alignment.Center
                 ) {
@@ -918,19 +597,31 @@ private fun ContentPicker(selected: String?, onSelect: (String) -> Unit) {
                 }
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(c.label, color = if (on) RespecColors.AccentText else RespecColors.Text, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(c.label, color = RespecColors.Text, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(2.dp))
                     Text(c.desc, color = RespecColors.TextSub, fontSize = 13.sp, lineHeight = 18.sp)
                 }
-                if (on) {
-                    Spacer(Modifier.width(10.dp))
-                    Icon(Icons.Filled.Check, null, tint = RespecColors.AccentText, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(10.dp))
+                // 선택: 체크가 든 원 / 나머지: 빈 원
+                Box(
+                    Modifier
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(if (on) RespecColors.Text else Color.Transparent)
+                        .border(1.5.dp, if (on) RespecColors.Text else RespecColors.TextSub, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (on) Icon(Icons.Filled.Check, "선택됨", tint = RespecColors.Background, modifier = Modifier.size(16.dp))
                 }
             }
         }
+        Spacer(Modifier.height(4.dp))
         Text(
-            "콘텐츠는 매일 ${contentTime}으로 진행돼요. 세부 주제는 알람 설정에서 고를 수 있어요.",
-            color = RespecColors.TextSub, fontSize = 12.sp
+            "나중에 알람 설정에서 언제든 바꿀 수 있어요.",
+            color = RespecColors.TextSub,
+            fontSize = 13.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }
@@ -940,15 +631,14 @@ private fun ContentPicker(selected: String?, onSelect: (String) -> Unit) {
 @Composable
 private fun SummaryStep(
     callName: String, tone: String, style: String, voice: String, genre: String,
-    isContent: Boolean, preset: JSONObject?, contentType: String?,
+    contentType: String?,
     error: String?,
     onEdit: (Int) -> Unit
 ) {
     val content = CONTENTS.firstOrNull { it.code == contentType }
-    val stepCount = preset?.optJSONArray("items")?.length() ?: 0
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        StepTitle("이제, 시작할 준비가 되었어요!", "지금까지 설정한 내용을 확인하고\n내일 아침부터 새로운 루틴을 시작해 보세요.")
+        StepTitle("이제, 시작할 준비가 되었어요!", "지금까지 설정한 내용을 확인하고\n내일 아침부터 넥스티와 함께 시작해 보세요.")
         val shape = RoundedCornerShape(24.dp)
         Column(
             Modifier
@@ -961,20 +651,7 @@ private fun SummaryStep(
             SummaryRow(Icons.Filled.ChatBubbleOutline, "말투", labelOf(SPEECH_STYLES, style), badge = labelOf(TONES, tone)) { onEdit(1) }
             SummaryRow(Icons.Filled.GraphicEq, "목소리", labelOf(VOICES, voice)) { onEdit(1) }
             SummaryRow(Icons.Filled.MusicNote, "음악 장르", labelOf(GENRES, genre)) { onEdit(1) }
-            if (isContent) {
-                SummaryRow(Icons.Filled.ChecklistRtl, "선택한 콘텐츠", content?.label ?: "-") { onEdit(2) }
-                SummaryRow(Icons.Filled.Timer, "콘텐츠 시간", "$contentTime (고정)", last = true) { onEdit(2) }
-            } else {
-                SummaryRow(
-                    Icons.Filled.ChecklistRtl, "선택한 루틴",
-                    preset?.let { "${it.optString("template_name")} (${stepCount}단계)" } ?: "-"
-                ) { onEdit(2) }
-                SummaryRow(
-                    Icons.Filled.Timer, "루틴 시간",
-                    "기본 ${minutesText(preset?.optInt("total_sec", 600) ?: 600)} · 알람 설정에서 조정",
-                    last = true
-                ) { onEdit(2) }
-            }
+            SummaryRow(Icons.Filled.ChecklistRtl, "아침 콘텐츠", content?.label ?: "-", last = true) { onEdit(2) }
         }
         if (error != null) {
             Spacer(Modifier.height(12.dp))
