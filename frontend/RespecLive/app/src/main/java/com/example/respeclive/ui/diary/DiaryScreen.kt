@@ -114,7 +114,7 @@ fun DiaryScreen(onOpenDay: (String) -> Unit) {
             MonthButton("‹", enabled = true) { prevMonth() }
             Text(
                 "${ym.year}년 ${ym.month}월",
-                color = Color.White,
+                color = RespecColors.Text,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.ExtraBold,
                 modifier = Modifier.weight(1f),
@@ -176,7 +176,7 @@ private fun MonthButton(text: String, enabled: Boolean, onClick: () -> Unit) {
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Text(text, color = if (enabled) Color.White else RespecColors.Disabled, fontSize = 22.sp)
+        Text(text, color = if (enabled) RespecColors.Text else RespecColors.Disabled, fontSize = 22.sp)
     }
 }
 
@@ -205,7 +205,7 @@ private fun DayCell(day: Int, info: JSONObject?, future: Boolean, onClick: () ->
         Modifier
             .fillMaxSize()
             .clip(shape)
-            .background(Color(0xFF15161A))
+            .background(RespecColors.Card)
             .border(1.dp, RespecColors.CardBorder, shape)
             .clickable(enabled = !future, onClick = onClick)
     ) {
@@ -249,7 +249,7 @@ internal fun RateRing(rate: Float, size: Dp, stroke: Dp, label: String?, labelSi
             drawArc(RespecColors.Disabled, 0f, 360f, false, topLeft, arcSize, style = Stroke(w))
             drawArc(color, -90f, 360f * rate.coerceIn(0f, 1f), false, topLeft, arcSize, style = Stroke(w, cap = StrokeCap.Round))
         }
-        label?.let { Text(it, color = Color.White, fontSize = labelSize, fontWeight = FontWeight.Bold) }
+        label?.let { Text(it, color = RespecColors.Text, fontSize = labelSize, fontWeight = FontWeight.Bold) }
     }
 }
 

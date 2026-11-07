@@ -98,6 +98,9 @@ private val routineMaxTime: String get() = durationText(RoutineCatalog.limits.ro
 
 private val STEP_TITLES = listOf("기본 정보 입력", "페르소나 설정", "루틴 선택", "시작하기")
 
+// 프리셋 카드의 띠 (카드 그라데이션 위라 테마와 상관없이 같은 색)
+private val PRESET_TAG = Color(0xFFFFE3B8)
+
 // 루틴 카드 배경 (사진 대신)
 private val CARD_GRADIENTS = listOf(
     listOf(Color(0xFF3A3F5C), Color(0xFF8C7A6B)),
@@ -222,7 +225,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
             .padding(horizontal = 20.dp)
     ) {
         Spacer(Modifier.height(16.dp))
-        Text("Re:Spec", color = RespecColors.Lime, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
+        Text("Re:Spec", color = RespecColors.AccentText, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
         Spacer(Modifier.height(18.dp))
         StepIndicator(step)
         Spacer(Modifier.height(22.dp))
@@ -263,9 +266,9 @@ fun OnboardingScreen(onDone: () -> Unit) {
                     shape = RoundedCornerShape(30.dp),
                     border = BorderStroke(1.dp, RespecColors.CardBorder)
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = RespecColors.Text)
                     Spacer(Modifier.width(8.dp))
-                    FitText("이전으로", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    FitText("이전으로", color = RespecColors.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
             }
             Button(
@@ -275,15 +278,15 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 shape = RoundedCornerShape(30.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = RespecColors.Lime,
-                    contentColor = Color.Black,
+                    contentColor = RespecColors.OnAccent,
                     disabledContainerColor = RespecColors.Disabled,
                     disabledContentColor = RespecColors.TextSub
                 )
             ) {
                 if (submitting) {
-                    CircularProgressIndicator(Modifier.size(22.dp), color = Color.Black, strokeWidth = 2.dp)
+                    CircularProgressIndicator(Modifier.size(22.dp), color = RespecColors.OnAccent, strokeWidth = 2.dp)
                 } else {
-                    FitText(if (step == 3) "시작하기" else "다음으로", color = if (canNext) Color.Black else RespecColors.TextSub,
+                    FitText(if (step == 3) "시작하기" else "다음으로", color = if (canNext) RespecColors.OnAccent else RespecColors.TextSub,
                         fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.width(8.dp))
                     Icon(Icons.AutoMirrored.Filled.ArrowForward, null)
@@ -324,7 +327,7 @@ private fun StepIndicator(step: Int) {
                     ) {
                         Text(
                             "${i + 1}",
-                            color = if (current) Color.Black else RespecColors.TextSub,
+                            color = if (current) RespecColors.OnAccent else RespecColors.TextSub,
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp
                         )
@@ -333,7 +336,7 @@ private fun StepIndicator(step: Int) {
                 Spacer(Modifier.height(6.dp))
                 Text(
                     title,
-                    color = if (i == step) RespecColors.Lime else RespecColors.TextSub,
+                    color = if (i == step) RespecColors.AccentText else RespecColors.TextSub,
                     fontSize = 12.sp,
                     fontWeight = if (i == step) FontWeight.Bold else FontWeight.Normal,
                     maxLines = 1
@@ -345,7 +348,7 @@ private fun StepIndicator(step: Int) {
 
 @Composable
 private fun StepTitle(title: String, sub: String? = null) {
-    Text(title, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+    Text(title, color = RespecColors.Text, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
     if (sub != null) {
         Spacer(Modifier.height(6.dp))
         Text(sub, color = RespecColors.TextSub, fontSize = 14.sp)
@@ -370,7 +373,7 @@ private fun FormCard(content: @Composable ColumnScope.() -> Unit) {
 
 @Composable
 private fun FieldLabel(text: String) {
-    Text(text, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp))
+    Text(text, color = RespecColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp))
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -394,7 +397,7 @@ private fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
     ) {
         Text(
             text,
-            color = if (selected) Color.Black else Color.White,
+            color = if (selected) RespecColors.OnAccent else RespecColors.Text,
             fontSize = 15.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
         )
@@ -411,8 +414,8 @@ internal fun InputField(value: String, onChange: (String) -> Unit, placeholder: 
         shape = RoundedCornerShape(16.dp),
         placeholder = { Text(placeholder, color = RespecColors.TextSub) },
         colors = OutlinedTextFieldDefaults.colors(
-            focusedTextColor = Color.White,
-            unfocusedTextColor = Color.White,
+            focusedTextColor = RespecColors.Text,
+            unfocusedTextColor = RespecColors.Text,
             focusedContainerColor = RespecColors.Background,
             unfocusedContainerColor = RespecColors.Background,
             focusedBorderColor = RespecColors.Lime,
@@ -453,7 +456,7 @@ private fun BasicInfoStep(
             ) {
                 Text(
                     birth?.replace("-", ". ") ?: "생년월일을 선택해 주세요",
-                    color = if (birth != null) Color.White else RespecColors.TextSub,
+                    color = if (birth != null) RespecColors.Text else RespecColors.TextSub,
                     fontSize = 16.sp
                 )
             }
@@ -530,7 +533,7 @@ private fun PersonaStep(
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text("미리보기", color = RespecColors.TextSub, fontSize = 12.sp)
-                    Text("“$line”", color = Color.White, fontSize = 15.sp)
+                    Text("“$line”", color = RespecColors.Text, fontSize = 15.sp)
                 }
             }
 
@@ -671,7 +674,7 @@ private fun RoutineStep(
                 ) {
                     Text(
                         label,
-                        color = if (selected) Color.Black else RespecColors.TextSub,
+                        color = if (selected) RespecColors.OnAccent else RespecColors.TextSub,
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp
                     )
@@ -695,7 +698,7 @@ private fun RoutineStep(
                         presetsError ?: "선택할 수 있는 루틴이 없어요",
                         color = RespecColors.TextSub, fontSize = 14.sp, textAlign = TextAlign.Center
                     )
-                    TextButton(onClick = onRetry) { Text("다시 불러오기", color = RespecColors.Lime) }
+                    TextButton(onClick = onRetry) { Text("다시 불러오기", color = RespecColors.AccentText) }
                 }
                 else -> PresetPager(presets, templateId, onPreset)
             }
@@ -716,11 +719,11 @@ private fun PresetPager(presets: List<JSONObject>, templateId: String?, onPreset
             Modifier.size(36.dp).clip(CircleShape).background(RespecColors.Lime),
             contentAlignment = Alignment.Center
         ) {
-            Text("R", color = Color.Black, fontWeight = FontWeight.ExtraBold)
+            Text("R", color = RespecColors.OnAccent, fontWeight = FontWeight.ExtraBold)
         }
         Spacer(Modifier.width(10.dp))
         Column {
-            Text("Re:Spec 추천 루틴", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text("Re:Spec 추천 루틴", color = RespecColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Text("모닝 루틴 · ${presets.size}가지 스타일", color = RespecColors.TextSub, fontSize = 12.sp)
         }
     }
@@ -761,14 +764,14 @@ private fun PresetPager(presets: List<JSONObject>, templateId: String?, onPreset
         TextButton(onClick = { onPreset(currentId) }) {
             Text(
                 if (picked) "담기됨" else "담기",
-                color = if (picked) RespecColors.Lime else Color.White,
+                color = if (picked) RespecColors.AccentText else RespecColors.Text,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.width(4.dp))
             Icon(
                 if (picked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
                 null,
-                tint = if (picked) RespecColors.Lime else Color.White
+                tint = if (picked) RespecColors.AccentText else RespecColors.Text
             )
         }
     }
@@ -779,12 +782,12 @@ private fun PresetPager(presets: List<JSONObject>, templateId: String?, onPreset
             append(current.optString("template_name"))
             if (presets.size > 1) append(" 외 ${presets.size - 1}개")
         },
-        color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold
+        color = RespecColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold
     )
     // 프리셋 설명 (DESCRIPTION)
     current.optString("description").takeIf { it.isNotBlank() && it != "null" }?.let {
         Spacer(Modifier.height(4.dp))
-        Text(it, color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp, lineHeight = 19.sp)
+        Text(it, color = RespecColors.Text.copy(alpha = 0.85f), fontSize = 13.sp, lineHeight = 19.sp)
         Spacer(Modifier.height(4.dp))
     }
     Text("옆으로 넘겨 다른 루틴도 확인해 보세요.", color = RespecColors.TextSub, fontSize = 13.sp)
@@ -792,13 +795,13 @@ private fun PresetPager(presets: List<JSONObject>, templateId: String?, onPreset
     Spacer(Modifier.height(16.dp))
     val totalSec = current.optInt("total_sec", 600)
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("루틴 시간", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text("루틴 시간", color = RespecColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(14.dp))
         Box(
             Modifier.clip(RoundedCornerShape(50)).background(RespecColors.Lime)
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            Text("기본 ${minutesText(totalSec)}", color = Color.Black, fontWeight = FontWeight.Bold)
+            Text("기본 ${minutesText(totalSec)}", color = RespecColors.OnAccent, fontWeight = FontWeight.Bold)
         }
     }
     Spacer(Modifier.height(6.dp))
@@ -838,7 +841,7 @@ private fun PresetCard(preset: JSONObject, index: Int, total: Int, selected: Boo
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .clip(RoundedCornerShape(6.dp))
-                    .background(RespecColors.Mint)
+                    .background(PRESET_TAG)
                     .padding(horizontal = 8.dp, vertical = 4.dp)
                     .widthIn(max = 180.dp)
             )
@@ -867,7 +870,7 @@ private fun PresetCard(preset: JSONObject, index: Int, total: Int, selected: Boo
                     Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(RespecColors.Mint.copy(alpha = 0.92f))
+                        .background(PRESET_TAG.copy(alpha = 0.94f))
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
@@ -911,17 +914,17 @@ private fun ContentPicker(selected: String?, onSelect: (String) -> Unit) {
                         .background(if (on) RespecColors.Lime else RespecColors.Background),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(c.icon, null, tint = if (on) Color.Black else RespecColors.Lime, modifier = Modifier.size(24.dp))
+                    Icon(c.icon, null, tint = if (on) RespecColors.OnAccent else RespecColors.AccentText, modifier = Modifier.size(24.dp))
                 }
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(c.label, color = if (on) RespecColors.Lime else Color.White, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(c.label, color = if (on) RespecColors.AccentText else RespecColors.Text, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(2.dp))
                     Text(c.desc, color = RespecColors.TextSub, fontSize = 13.sp, lineHeight = 18.sp)
                 }
                 if (on) {
                     Spacer(Modifier.width(10.dp))
-                    Icon(Icons.Filled.Check, null, tint = RespecColors.Lime, modifier = Modifier.size(22.dp))
+                    Icon(Icons.Filled.Check, null, tint = RespecColors.AccentText, modifier = Modifier.size(22.dp))
                 }
             }
         }
@@ -998,17 +1001,17 @@ private fun SummaryRow(
                 .padding(horizontal = 18.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(icon, null, tint = RespecColors.Lime, modifier = Modifier.size(28.dp))
+            Icon(icon, null, tint = RespecColors.AccentText, modifier = Modifier.size(28.dp))
             Spacer(Modifier.width(18.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(title, color = RespecColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(2.dp))
                 Text(value, color = RespecColors.TextSub, fontSize = 13.sp)
             }
             if (badge != null) {
                 Text(
                     badge,
-                    color = RespecColors.Lime,
+                    color = RespecColors.AccentText,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier

@@ -40,7 +40,9 @@ import com.example.respeclive.ui.onboarding.VOICES
 import com.example.respeclive.ui.onboarding.VoicePreview
 import com.example.respeclive.ui.onboarding.labelOf
 import com.example.respeclive.ui.onboarding.previewLine
+import com.example.respeclive.ui.theme.AppTheme
 import com.example.respeclive.ui.theme.RespecColors
+import com.example.respeclive.ui.theme.ThemeMode
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -51,6 +53,9 @@ private const val FIELD_VOICE = "voice_type"
 
 /** 기본 정보(PATCH /users/me)에 저장하는 항목. 나머지는 페르소나(PATCH /settings) */
 private val USER_FIELDS = setOf("user_name", FIELD_BIRTH, "gender")
+
+/** 자정부터 지난 분 → "07:03" */
+private fun clockText(minute: Int) = "%02d:%02d".format(minute / 60, minute % 60)
 
 /** 항목 하나를 고치는 창: choices가 있으면 선택 칩, 없으면 글자 입력 */
 private class EditField(
@@ -124,6 +129,21 @@ fun ProfileScreen() {
                     InfoRow("목소리", labelOf(VOICES, voice)) { editing = EditField(FIELD_VOICE, "목소리", voice, VOICES) }
                     InfoRow("음악 장르", labelOf(GENRES, genre)) { editing = EditField("music_genre", "음악 장르", genre, GENRES) }
                 }
+
+                SectionTitle("화면 테마")
+                ChipRow(ThemeMode.entries.map { Choice(it.name, it.label) }, AppTheme.mode.name) { code ->
+                    AppTheme.select(context, ThemeMode.valueOf(code))
+                }
+                if (AppTheme.mode == ThemeMode.AUTO) {
+                    val sun = AppTheme.sun
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        if (sun != null) "해 뜨면 라이트, 해 지면 다크로 바뀌어요 (오늘 ${clockText(sun.riseMinute)} · ${clockText(sun.setMinute)})"
+                        else "해가 뜨고 지지 않는 날이라 계절에 맞춰 보여 줘요",
+                        color = RespecColors.TextSub,
+                        fontSize = 13.sp
+                    )
+                }
                 Spacer(Modifier.height(24.dp))
             }
 
@@ -150,7 +170,7 @@ fun ProfileScreen() {
             verticalArrangement = Arrangement.Center
         ) {
             Text(error.orEmpty(), color = RespecColors.TextSub, fontSize = 14.sp, textAlign = TextAlign.Center)
-            TextButton(onClick = { reload++ }) { Text("다시 불러오기", color = RespecColors.Lime) }
+            TextButton(onClick = { reload++ }) { Text("다시 불러오기", color = RespecColors.AccentText) }
         }
         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(color = RespecColors.Lime)
@@ -176,7 +196,7 @@ private fun EditDialog(
     AlertDialog(
         onDismissRequest = { if (!saving) onDismiss() },
         containerColor = RespecColors.Card,
-        title = { Text(field.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold) },
+        title = { Text(field.title, color = RespecColors.Text, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 val choices = field.choices
@@ -188,7 +208,7 @@ private fun EditDialog(
                 if (field.key == FIELD_TONE || field.key == FIELD_STYLE) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("예시", color = RespecColors.TextSub, fontSize = 12.sp)
-                        Text("“$line”", color = Color.White, fontSize = 14.sp)
+                        Text("“$line”", color = RespecColors.Text, fontSize = 14.sp)
                     }
                 }
                 if (field.key == FIELD_VOICE) VoicePreview(value, line)
@@ -216,7 +236,7 @@ private fun EditDialog(
                 if (saving) {
                     CircularProgressIndicator(Modifier.size(18.dp), color = RespecColors.Lime, strokeWidth = 2.dp)
                 } else {
-                    Text("저장", color = if (value.isNotBlank()) RespecColors.Lime else RespecColors.TextSub, fontWeight = FontWeight.Bold)
+                    Text("저장", color = if (value.isNotBlank()) RespecColors.AccentText else RespecColors.TextSub, fontWeight = FontWeight.Bold)
                 }
             }
         },
@@ -230,7 +250,7 @@ private fun EditDialog(
 private fun SectionTitle(text: String) {
     Text(
         text,
-        color = Color.White,
+        color = RespecColors.Text,
         fontSize = 18.sp,
         fontWeight = FontWeight.Bold,
         modifier = Modifier.padding(top = 16.dp, bottom = 10.dp)
@@ -265,7 +285,7 @@ private fun InfoRow(label: String, value: String, first: Boolean = false, onClic
         Spacer(Modifier.width(16.dp))
         Text(
             value,
-            color = Color.White,
+            color = RespecColors.Text,
             fontSize = 15.sp,
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.End,

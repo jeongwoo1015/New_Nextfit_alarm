@@ -153,9 +153,9 @@ private fun MorningIncomingScreen(
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Filled.Call, null, tint = RespecColors.Lime, modifier = Modifier.size(28.dp))
+            Icon(Icons.Filled.Call, null, tint = RespecColors.AccentText, modifier = Modifier.size(28.dp))
             Spacer(Modifier.height(12.dp))
-            Text("AI 모닝콜", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("AI 모닝콜", color = RespecColors.Text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             Text("지금 당신의 하루가 시작돼요", color = RespecColors.TextSub, fontSize = 14.sp)
         }
@@ -181,11 +181,11 @@ private fun MorningIncomingScreen(
                             .border(1.dp, RespecColors.CardBorder, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Filled.WbSunny, null, tint = RespecColors.Lime, modifier = Modifier.size(orb * 96 / 260))
+                        Icon(Icons.Filled.WbSunny, null, tint = RespecColors.AccentText, modifier = Modifier.size(orb * 96 / 260))
                     }
                 }
                 Spacer(Modifier.height(20.dp))
-                Text("리스펙", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+                Text("리스펙", color = RespecColors.Text, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(16.dp))
                 Row(
                     Modifier
@@ -195,9 +195,9 @@ private fun MorningIncomingScreen(
                         .padding(horizontal = 18.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Filled.Alarm, null, tint = RespecColors.Lime, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Filled.Alarm, null, tint = RespecColors.AccentText, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text(alarmLabel, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(alarmLabel, color = RespecColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -262,13 +262,13 @@ private fun SwipeToAnswer(onComplete: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text("밀어서 받기", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("밀어서 받기", color = RespecColors.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Row {
                 repeat(3) {
                     Icon(
                         Icons.Filled.ChevronRight,
                         null,
-                        tint = RespecColors.Lime,
+                        tint = RespecColors.AccentText,
                         modifier = Modifier
                             .size(20.dp)
                             .alpha(chevronAlpha)
@@ -295,7 +295,7 @@ private fun SwipeToAnswer(onComplete: () -> Unit) {
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Filled.Call, null, tint = Color.Black, modifier = Modifier.size(30.dp))
+            Icon(Icons.Filled.Call, null, tint = RespecColors.OnAccent, modifier = Modifier.size(30.dp))
         }
     }
 }

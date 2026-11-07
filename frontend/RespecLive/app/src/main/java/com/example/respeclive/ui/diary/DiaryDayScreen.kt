@@ -116,7 +116,7 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
             Spacer(Modifier.width(14.dp))
             Text(
                 "${cal.get(Calendar.MONTH) + 1}월 ${cal.get(Calendar.DAY_OF_MONTH)}일 ${DAY_NAMES[cal.get(Calendar.DAY_OF_WEEK) - 1]}요일",
-                color = RespecColors.Lime, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold
+                color = RespecColors.AccentText, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold
             )
         }
 
@@ -169,7 +169,7 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
                     night.optString("extract_status") == "PENDING" -> "밤 대화를 정리하는 중이에요. 잠시 뒤에 다시 확인해 주세요"
                     else -> "한 줄 일기가 없어요"
                 },
-                color = if (diary != null) Color.White else RespecColors.TextSub,
+                color = if (diary != null) RespecColors.Text else RespecColors.TextSub,
                 fontSize = if (diary != null) 18.sp else 15.sp,
                 fontWeight = if (diary != null) FontWeight.SemiBold else FontWeight.Normal,
                 lineHeight = 26.sp
@@ -186,11 +186,11 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
             val rate = summary?.text("routine_completion_rate")?.toFloatOrNull()
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatTile("기상 시간", Modifier.weight(1f)) {
-                    FitText(clockOf(session.text("first_response_at")) ?: "-", color = RespecColors.Lime,
+                    FitText(clockOf(session.text("first_response_at")) ?: "-", color = RespecColors.AccentText,
                         fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
                 }
                 StatTile("루틴 수행", Modifier.weight(1f)) {
-                    FitText(if (total > 0) "$done / $total" else "-", color = RespecColors.Lime,
+                    FitText(if (total > 0) "$done / $total" else "-", color = RespecColors.AccentText,
                         fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
                 }
                 StatTile("루틴 성공률", Modifier.weight(1f)) {
@@ -199,10 +199,10 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
                         BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             val ring = minOf(68.dp, maxWidth, maxHeight)
                             RateRing(rate ?: 0f, ring, ring * 7 / 68, "${((rate ?: 0f) * 100).toInt()}%", 17.sp * (ring / 68.dp),
-                                color = RespecColors.Lime)
+                                color = RespecColors.AccentText)
                         }
                     } else {
-                        Text("-", color = RespecColors.Lime, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("-", color = RespecColors.AccentText, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
                     }
                 }
             }
@@ -231,7 +231,7 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
 
 @Composable
 private fun SectionTitle(text: String) {
-    Text(text, color = RespecColors.Lime, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold,
+    Text(text, color = RespecColors.AccentText, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold,
         modifier = Modifier.padding(top = 26.dp, bottom = 12.dp))
 }
 
@@ -275,7 +275,7 @@ private fun StepRow(step: JSONObject) {
         else -> Triple("미완", RespecColors.Danger, RespecColors.Danger.copy(alpha = 0.15f))
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(step.optString("step_name"), color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        Text(step.optString("step_name"), color = RespecColors.Text, fontSize = 15.sp, modifier = Modifier.weight(1f))
         step.text("planned_duration_sec")?.toIntOrNull()?.takeIf { it > 0 }?.let { sec ->
             Text(if (sec % 60 == 0) "${sec / 60}분" else "${sec / 60}분 ${sec % 60}초", color = RespecColors.TextSub, fontSize = 13.sp)
             Spacer(Modifier.width(10.dp))

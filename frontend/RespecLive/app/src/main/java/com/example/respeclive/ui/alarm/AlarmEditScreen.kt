@@ -158,7 +158,7 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "뒤로", tint = RespecColors.Purple)
             }
             Spacer(Modifier.width(14.dp))
-            Text("알람 설정", color = RespecColors.Lime, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
+            Text("알람 설정", color = RespecColors.AccentText, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
         }
 
         // 시간 휠
@@ -188,7 +188,7 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
             ) {
                 Wheel(listOf("오전", "오후"), ampm, small = true, modifier = Modifier.weight(1f)) { ampm = it }
                 Wheel((1..12).map { "$it" }, hour12 - 1, modifier = Modifier.weight(1f)) { hour12 = it + 1 }
-                Text(":", color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.Bold)
+                Text(":", color = RespecColors.Text, fontSize = 40.sp, fontWeight = FontWeight.Bold)
                 Wheel((0..59).map { "%02d".format(it) }, minute, modifier = Modifier.weight(1f)) { minute = it }
             }
         }
@@ -216,7 +216,7 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
                 ) {
                     Text(
                         name,
-                        color = if (on) Color.White else RespecColors.TextSub,
+                        color = if (on) RespecColors.Text else RespecColors.TextSub,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -246,8 +246,8 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
                 )
             },
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
+                focusedTextColor = RespecColors.Text,
+                unfocusedTextColor = RespecColors.Text,
                 focusedContainerColor = RespecColors.Card,
                 unfocusedContainerColor = RespecColors.Card,
                 focusedBorderColor = RespecColors.Purple,
@@ -291,8 +291,8 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
             shape = RoundedCornerShape(30.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = RespecColors.Lime,
-                contentColor = Color.Black,
-                disabledContainerColor = RespecColors.Banner,
+                contentColor = RespecColors.OnAccent,
+                disabledContainerColor = RespecColors.Disabled,
                 disabledContentColor = RespecColors.TextSub
             )
         ) {
@@ -323,7 +323,7 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
         AlertDialog(
             onDismissRequest = { showPresetDialog = false },
             containerColor = RespecColors.Card,
-            title = { Text("프리셋 선택", color = Color.White, fontWeight = FontWeight.Bold) },
+            title = { Text("프리셋 선택", color = RespecColors.Text, fontWeight = FontWeight.Bold) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     val list = presets
@@ -339,7 +339,7 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
                         ) {
                             Text(
                                 p.optString("template_name"),
-                                color = if (on) RespecColors.Lime else Color.White,
+                                color = if (on) RespecColors.AccentText else RespecColors.Text,
                                 fontWeight = if (on) FontWeight.ExtraBold else FontWeight.SemiBold,
                                 fontSize = 16.sp
                             )
@@ -361,10 +361,10 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
         AlertDialog(
             onDismissRequest = { pendingPreset = null },
             containerColor = RespecColors.Card,
-            title = { Text("프리셋을 바꿀까요?", color = Color.White, fontWeight = FontWeight.Bold) },
+            title = { Text("프리셋을 바꿀까요?", color = RespecColors.Text, fontWeight = FontWeight.Bold) },
             text = { Text("바꾸면 이 알람의 항목 시간 설정이 처음으로 돌아가요.", color = RespecColors.TextSub) },
             confirmButton = {
-                TextButton(onClick = { templateId = next; pendingPreset = null }) { Text("바꾸기", color = RespecColors.Lime) }
+                TextButton(onClick = { templateId = next; pendingPreset = null }) { Text("바꾸기", color = RespecColors.AccentText) }
             },
             dismissButton = {
                 TextButton(onClick = { pendingPreset = null }) { Text("취소", color = RespecColors.TextSub) }
@@ -378,7 +378,7 @@ private fun SectionTitle(icon: androidx.compose.ui.graphics.vector.ImageVector, 
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = RespecColors.Purple, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(10.dp))
-        Text(text, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text(text, color = RespecColors.Text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -420,7 +420,7 @@ private fun Wheel(
             Box(Modifier.height(ITEM_H).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Text(
                     text,
-                    color = if (selected) Color.White else RespecColors.TextSub,
+                    color = if (selected) RespecColors.Text else RespecColors.TextSub,
                     fontSize = when {
                         small -> if (selected) 22.sp else 18.sp
                         else -> if (selected) 44.sp else 30.sp

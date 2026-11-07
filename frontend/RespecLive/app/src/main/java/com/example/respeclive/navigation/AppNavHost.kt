@@ -29,6 +29,7 @@ import com.example.respeclive.data.RespecApi
 import com.example.respeclive.ui.alarm.AlarmEditScreen
 import com.example.respeclive.ui.home.HomeScreen
 import com.example.respeclive.ui.morning.MorningCallScreen
+import com.example.respeclive.ui.nexty.NextyDebugScreen
 import com.example.respeclive.ui.night.NightCallScreen
 import com.example.respeclive.ui.night.NightChatScreen
 import com.example.respeclive.ui.diary.DiaryDayScreen
@@ -73,7 +74,7 @@ fun AppNavHost(
     }
     when (needOnboarding) {
         null -> Box(Modifier.fillMaxSize().background(RespecColors.Background), contentAlignment = Alignment.Center) {
-            Text("Re:Spec", color = RespecColors.Lime, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+            Text("Re:Spec", color = RespecColors.AccentText, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
         }
         true -> OnboardingScreen(onDone = { needOnboarding = false })
         false -> MainNav(launch, onLaunchHandled)
@@ -132,9 +133,11 @@ private fun MainNav(
                         nav.navigate("nightCall")
                     },
                     onCreateAlarm = { nav.navigate("alarmEdit/-1") },
-                    onEditAlarm = { id -> nav.navigate("alarmEdit/$id") }
+                    onEditAlarm = { id -> nav.navigate("alarmEdit/$id") },
+                    onOpenDebug = { nav.navigate("nextyDebug") }
                 )
             }
+            composable("nextyDebug") { NextyDebugScreen(onBack = { nav.popBackStack() }) }
             composable("routine") { RoutineScreen() }
             composable("report") { ReportScreen() }
             composable("diary") { DiaryScreen(onOpenDay = { date -> nav.navigate("diaryDay/$date") }) }
@@ -198,7 +201,7 @@ private fun RespecTopBar(title: String) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(title, color = RespecColors.Lime, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
+        Text(title, color = RespecColors.AccentText, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
         Box(
             modifier = Modifier
                 .size(44.dp)
@@ -222,8 +225,8 @@ private fun RespecBottomBar(currentRoute: String?, onSelect: (String) -> Unit) {
                 icon = { Icon(tab.icon, contentDescription = tab.label) },
                 label = { Text(tab.label, fontSize = 12.sp) },
                 colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = RespecColors.Lime,
-                    selectedTextColor = RespecColors.Lime,
+                    selectedIconColor = RespecColors.AccentText,
+                    selectedTextColor = RespecColors.AccentText,
                     unselectedIconColor = RespecColors.TextSub,
                     unselectedTextColor = RespecColors.TextSub,
                     indicatorColor = Color.Transparent

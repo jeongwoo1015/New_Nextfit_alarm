@@ -54,7 +54,7 @@ internal fun CallTypeToggle(isContent: Boolean, onChange: (Boolean) -> Unit) {
                     .padding(vertical = 12.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text(label, color = if (selected) Color.Black else RespecColors.TextSub, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text(label, color = if (selected) RespecColors.OnAccent else RespecColors.TextSub, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
         }
     }
@@ -77,7 +77,7 @@ internal fun PresetRow(name: String?, onClick: () -> Unit) {
         Column(Modifier.weight(1f)) {
             Text("프리셋", color = RespecColors.TextSub, fontSize = 13.sp)
             Spacer(Modifier.height(2.dp))
-            Text(name ?: "프리셋을 골라 주세요", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Text(name ?: "프리셋을 골라 주세요", color = RespecColors.Text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
         }
         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = RespecColors.Purple)
     }
@@ -109,7 +109,7 @@ internal fun RoutineItemsEditor(
             LinearProgressIndicator(
                 progress = { (total.toFloat() / limits.routineMaxSec).coerceIn(0f, 1f) },
                 modifier = Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(4.dp)),
-                color = if (over) RespecColors.Danger else RespecColors.Lime,
+                color = if (over) RespecColors.Danger else RespecColors.AccentText,
                 trackColor = RespecColors.Disabled,
                 drawStopIndicator = {}
             )
@@ -155,7 +155,7 @@ private fun ItemRow(item: RoutineCatalog.Item, sec: Int, step: Int, max: Int, on
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                 FitText(
                     item.name,
-                    color = Color.White,
+                    color = RespecColors.Text,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                     minSize = 11.sp,
@@ -197,7 +197,7 @@ private fun ItemRow(item: RoutineCatalog.Item, sec: Int, step: Int, max: Int, on
             StepButton(Icons.Filled.Remove, "줄이기", button, enabled = sec > 0) { onChange((sec - step).coerceAtLeast(0)) }
             FitText(
                 if (removed) "0" else durationText(sec),
-                color = Color.White,
+                color = RespecColors.Text,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
@@ -218,7 +218,7 @@ private fun StepButton(icon: ImageVector, desc: String, size: Dp, enabled: Boole
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, desc, tint = if (enabled) Color.White else RespecColors.TextSub, modifier = Modifier.size(size * 0.53f))
+        Icon(icon, desc, tint = if (enabled) RespecColors.Text else RespecColors.TextSub, modifier = Modifier.size(size * 0.53f))
     }
 }
 
@@ -259,7 +259,7 @@ private fun ChipRow(choices: List<Pair<String, String>>, selected: String?, onSe
                     .clickable { onSelect(code) }
                     .padding(horizontal = 16.dp, vertical = 10.dp)
             ) {
-                Text(label, color = if (on) RespecColors.Mint else Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text(label, color = if (on) RespecColors.Mint else RespecColors.Text, fontWeight = FontWeight.Bold, fontSize = 14.sp)
             }
         }
     }

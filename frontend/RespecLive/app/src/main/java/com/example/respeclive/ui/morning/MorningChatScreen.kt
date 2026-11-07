@@ -493,7 +493,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                 val ring = minOf(RING_SIZE, maxHeight - 30.dp, maxWidth).coerceAtLeast(0.dp)
                 val k = ring / RING_SIZE
                 val tint = when (phase) {
-                    MPhase.AiSpeaking -> RespecColors.Lime
+                    MPhase.AiSpeaking -> RespecColors.AccentText
                     MPhase.Playing -> RespecColors.Mint
                     MPhase.Listening -> RespecColors.Purple
                 }
@@ -531,7 +531,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                                     Spacer(Modifier.height(4.dp * k))
                                     Text(
                                         "$doneCount / ${items.size}",
-                                        color = Color.White,
+                                        color = RespecColors.Text,
                                         fontSize = 30.sp * k,
                                         fontWeight = FontWeight.ExtraBold
                                     )
@@ -586,10 +586,10 @@ fun MorningChatScreen(alarmId: Int, onFinish: () -> Unit, initialSession: JSONOb
                                 shape = RoundedCornerShape(26.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = RespecColors.Lime,
-                                    contentColor = Color.Black
+                                    contentColor = RespecColors.OnAccent
                                 )
                             ) {
-                                FitText(doneText, color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+                                FitText(doneText, color = RespecColors.OnAccent, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
                             }
                         }
                     }
@@ -692,7 +692,7 @@ private fun GaugeRing(
                 if (fill > 0f) {
                     // 은은한 빛
                     drawArc(
-                        color = RespecColors.Lime.copy(alpha = 0.22f * fill),
+                        color = RespecColors.AccentText.copy(alpha = 0.22f * fill),
                         startAngle = start,
                         sweepAngle = sweep,
                         useCenter = false,
@@ -722,7 +722,7 @@ private fun MorningHeader(elapsed: Int) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(10.dp).clip(CircleShape).background(RespecColors.Mint))
             Spacer(Modifier.width(8.dp))
-            Text("리스펙", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
+            Text("리스펙", color = RespecColors.Text, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
         }
         FitText(
             "AI 모닝콜 통화 중 · %02d:%02d".format(elapsed / 60, elapsed % 60),
@@ -748,12 +748,12 @@ private fun BannerCard(banner: Banner) {
             Modifier.size(40.dp).clip(CircleShape).background(RespecColors.Lime),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Filled.Star, null, tint = Color.Black, modifier = Modifier.size(22.dp))
+            Icon(Icons.Filled.Star, null, tint = RespecColors.OnAccent, modifier = Modifier.size(22.dp))
         }
         Spacer(Modifier.width(12.dp))
         Column {
-            Text(banner.title, color = RespecColors.Lime, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
-            Text(banner.sub, color = Color.White, fontSize = 13.sp)
+            Text(banner.title, color = RespecColors.AccentText, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+            Text(banner.sub, color = RespecColors.Text, fontSize = 13.sp)
         }
     }
 }
@@ -765,12 +765,12 @@ private fun MorningRoundControl(icon: ImageVector, label: String, size: Dp, acti
             Modifier
                 .size(size)
                 .clip(CircleShape)
-                .background(if (active) Color.White else RespecColors.Card)
+                .background(if (active) RespecColors.Text else RespecColors.Card)
                 .border(1.dp, RespecColors.CardBorder, shape = CircleShape)
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, label, tint = if (active) Color.Black else Color.White)
+            Icon(icon, label, tint = if (active) RespecColors.Background else RespecColors.Text)
         }
         Spacer(Modifier.height(8.dp))
         Text(label, color = RespecColors.TextSub, fontSize = 13.sp)

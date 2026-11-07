@@ -175,7 +175,7 @@ fun SubtitleBox(text: String, fromUser: Boolean = false, pageKey: Any? = null, m
     val height = SUBTITLE_HEIGHT * rememberScreenScale()
     val pages = splitSubtitlePages(text)
     val page = pages.last()
-    val accent = if (fromUser) RespecColors.Purple else RespecColors.Lime
+    val accent = if (fromUser) RespecColors.Purple else RespecColors.AccentText
 
     Row(
         modifier
@@ -210,7 +210,7 @@ fun SubtitleBox(text: String, fromUser: Boolean = false, pageKey: Any? = null, m
                 // 폭이 좁거나 글꼴이 커서 한 페이지가 박스를 넘으면 글자를 줄여 박스 안에 맞춤
                 BasicText(
                     shown,
-                    style = TextStyle(color = Color.White, fontSize = 17.sp, lineHeight = 1.53.em),
+                    style = TextStyle(color = RespecColors.Text, fontSize = 17.sp, lineHeight = 1.53.em),
                     autoSize = TextAutoSize.StepBased(minFontSize = 12.sp, maxFontSize = 17.sp, stepSize = 0.5.sp)
                 )
             }

@@ -575,7 +575,7 @@ private fun CallHeader(elapsed: Int, musicOn: Boolean, onMusicChange: (Boolean) 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(10.dp).clip(CircleShape).background(RespecColors.Mint))
                 Spacer(Modifier.width(8.dp))
-                Text("리스펙", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
+                Text("리스펙", color = RespecColors.Text, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
             }
             FitText(
                 "AI 굿나잇콜 통화 중 · %02d:%02d".format(elapsed / 60, elapsed % 60),
@@ -591,16 +591,16 @@ private fun CallHeader(elapsed: Int, musicOn: Boolean, onMusicChange: (Boolean) 
                 .padding(start = 14.dp, end = 6.dp, top = 2.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Filled.MusicNote, null, tint = RespecColors.Lime, modifier = Modifier.size(18.dp))
+            Icon(Icons.Filled.MusicNote, null, tint = RespecColors.AccentText, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text("수면 음악", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+            Text("수면 음악", color = RespecColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
             Spacer(Modifier.width(4.dp))
             Switch(
                 checked = musicOn,
                 onCheckedChange = onMusicChange,
                 modifier = Modifier.scale(0.8f),
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.Black,
+                    checkedThumbColor = RespecColors.OnAccent,
                     checkedTrackColor = RespecColors.Lime,
                     checkedBorderColor = RespecColors.Lime,
                     uncheckedThumbColor = RespecColors.TextSub,
@@ -625,7 +625,7 @@ private fun VoiceOrb(size: Dp, phase: Phase, level: Float, isSaveStep: Boolean, 
     val smoothLevel by animateFloatAsState(level, tween(120), label = "level")
 
     val tint = when (phase) {
-        Phase.AiSpeaking -> RespecColors.Lime
+        Phase.AiSpeaking -> RespecColors.AccentText
         Phase.Recording -> if (isSaveStep) RespecColors.Danger else RespecColors.Mint
         else -> RespecColors.Purple
     }
@@ -712,7 +712,7 @@ private fun AnswerArea(
                         text = hint,
                         color = when {
                             recording && isSaveStep -> RespecColors.Danger
-                            isSaveStep -> RespecColors.Lime
+                            isSaveStep -> RespecColors.AccentText
                             else -> RespecColors.TextSub
                         },
                         fontSize = 14.sp,
@@ -721,7 +721,7 @@ private fun AnswerArea(
                     Spacer(Modifier.height(4.dp))
                     if (recording) {
                         TextButton(onClick = onFinishNow) {
-                            Text("말 끝났어요", color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("말 끝났어요", color = RespecColors.Text, fontWeight = FontWeight.Bold)
                         }
                     } else {
                         TextButton(onClick = onSkip) {
@@ -736,13 +736,13 @@ private fun AnswerArea(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         FitText(
                             "한 마디를 녹음했어요 ($time)",
-                            color = Color.White,
+                            color = RespecColors.Text,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.weight(1f, fill = false)
                         )
                         TextButton(onClick = onPreview) {
-                            Text("▶ 들어보기", color = RespecColors.Lime, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                            Text("▶ 들어보기", color = RespecColors.AccentText, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
                     }
                     Text("내일 아침 모닝콜에서 들려드릴까요?", color = RespecColors.TextSub, fontSize = 14.sp, textAlign = TextAlign.Center)
@@ -762,10 +762,10 @@ private fun AnswerArea(
                             shape = RoundedCornerShape(26.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = RespecColors.Lime,
-                                contentColor = Color.Black
+                                contentColor = RespecColors.OnAccent
                             )
                         ) {
-                            FitText("저장하기", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+                            FitText("저장하기", color = RespecColors.OnAccent, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
                         }
                     }
                 }
@@ -781,12 +781,12 @@ private fun RoundControl(icon: ImageVector, label: String, size: Dp, active: Boo
             Modifier
                 .size(size)
                 .clip(CircleShape)
-                .background(if (active) Color.White else RespecColors.Card)
+                .background(if (active) RespecColors.Text else RespecColors.Card)
                 .border(1.dp, RespecColors.CardBorder, CircleShape)
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, label, tint = if (active) Color.Black else Color.White)
+            Icon(icon, label, tint = if (active) RespecColors.Background else RespecColors.Text)
         }
         Spacer(Modifier.height(8.dp))
         Text(label, color = RespecColors.TextSub, fontSize = 13.sp)

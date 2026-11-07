@@ -143,7 +143,7 @@ fun ReportScreen() {
         // 연속 달성일
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             StreakCard(Icons.Outlined.LocalFireDepartment, Flame, "현재 연속 달성일", any?.optInt("current_streak"), Modifier.weight(1f))
-            StreakCard(Icons.Outlined.EmojiEvents, RespecColors.Lime, "최장 연속 달성일", any?.optInt("best_streak"), Modifier.weight(1f))
+            StreakCard(Icons.Outlined.EmojiEvents, RespecColors.AccentText, "최장 연속 달성일", any?.optInt("best_streak"), Modifier.weight(1f))
         }
 
         error?.takeIf { any == null }?.let {
@@ -177,9 +177,9 @@ private fun VerticalLine(modifier: Modifier = Modifier) {
 @Composable
 private fun SummaryLine(label: String, value: String, detail: String? = null) {
     Row(verticalAlignment = Alignment.Bottom) {
-        Text(label, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, modifier = Modifier.padding(bottom = 5.dp))
+        Text(label, color = RespecColors.Text.copy(alpha = 0.85f), fontSize = 14.sp, modifier = Modifier.padding(bottom = 5.dp))
         Spacer(Modifier.width(10.dp))
-        Text(value, color = RespecColors.Lime, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
+        Text(value, color = RespecColors.AccentText, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
         detail?.let {
             Spacer(Modifier.width(8.dp))
             Text(it, color = RespecColors.TextSub, fontSize = 13.sp, modifier = Modifier.padding(bottom = 5.dp))
@@ -192,16 +192,16 @@ private fun RateColumn(rate: Float?, label: String, color: Color, modifier: Modi
     Column(modifier.padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         RateRing(rate = rate ?: 0f, size = 84.dp, stroke = 9.dp, label = percent(rate), labelSize = 18.sp, color = color)
         Spacer(Modifier.height(10.dp))
-        Text(label, color = Color.White, fontSize = 15.sp)
+        Text(label, color = RespecColors.Text, fontSize = 15.sp)
     }
 }
 
 @Composable
 private fun CardHeader(icon: ImageVector, title: String, period: String, onPeriod: (String) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, contentDescription = null, tint = RespecColors.Lime, modifier = Modifier.size(22.dp))
+        Icon(icon, contentDescription = null, tint = RespecColors.AccentText, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(10.dp))
-        FitText(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f).padding(end = 8.dp))
+        FitText(title, color = RespecColors.Text, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f).padding(end = 8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             PERIODS.forEach { (key, label) ->
                 val selected = key == period
@@ -215,7 +215,7 @@ private fun CardHeader(icon: ImageVector, title: String, period: String, onPerio
                 ) {
                     Text(
                         label,
-                        color = if (selected) Color.Black else RespecColors.TextSub,
+                        color = if (selected) RespecColors.OnAccent else RespecColors.TextSub,
                         fontSize = 12.sp, fontWeight = FontWeight.Bold
                     )
                 }
@@ -312,7 +312,7 @@ private fun RoutineBarChart(buckets: List<Bucket>, modifier: Modifier) {
     val best = buckets.withIndex().filter { it.value.rate != null }.maxByOrNull { it.value.rate!! }?.index
     val mint = RespecColors.Mint
     val lime = RespecColors.Lime
-    val empty = Color(0xFF3A3D42)
+    val empty = RespecColors.Disabled
     val grid = RespecColors.CardBorder
 
     Column(modifier) {
@@ -373,13 +373,13 @@ private fun StreakCard(icon: ImageVector, tint: Color, label: String, days: Int?
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
-            Text(label, color = Color.White, fontSize = 14.sp, maxLines = 1)
+            Text(label, color = RespecColors.Text, fontSize = 14.sp, maxLines = 1)
         }
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.Bottom) {
-            Text(days?.toString() ?: "-", color = RespecColors.Lime, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
+            Text(days?.toString() ?: "-", color = RespecColors.AccentText, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
             Spacer(Modifier.width(6.dp))
-            Text("일", color = Color.White, fontSize = 15.sp, modifier = Modifier.padding(bottom = 5.dp))
+            Text("일", color = RespecColors.Text, fontSize = 15.sp, modifier = Modifier.padding(bottom = 5.dp))
         }
     }
 }

@@ -40,6 +40,12 @@ object DeviceLocation {
         Place(loc.latitude, loc.longitude, districtName(app, loc.latitude, loc.longitude))
     }
 
+    /** 위도·경도만 (자동 테마의 일출·일몰 계산용). 권한이나 위치가 없으면 null */
+    fun lastCoordinates(context: Context): Pair<Double, Double>? {
+        if (!hasPermission(context)) return null
+        return latest(context.applicationContext)?.let { it.latitude to it.longitude }
+    }
+
     /** 켜져 있는 제공자들의 마지막 위치 중 가장 최근 것 */
     @SuppressLint("MissingPermission")
     private fun latest(context: Context): Location? {

@@ -48,7 +48,8 @@ private val dayNames = listOf("월", "화", "수", "목", "금", "토", "일")
 fun HomeScreen(
     onStartNightChat: () -> Unit,
     onCreateAlarm: () -> Unit,
-    onEditAlarm: (Int) -> Unit
+    onEditAlarm: (Int) -> Unit,
+    onOpenDebug: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -80,7 +81,7 @@ fun HomeScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Bottom
         ) {
-            Text("알람 목록", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text("알람 목록", color = RespecColors.Text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             Text("${alarms.size}개", color = RespecColors.TextSub, fontSize = 14.sp)
         }
 
@@ -125,7 +126,9 @@ fun HomeScreen(
 
         Spacer(Modifier.height(16.dp))   // 목록 끝과 띄워 둠
         SwipeBanner(text = "밀어서 취침 전 대화 시작하기 →", onComplete = onStartNightChat)
-        Spacer(Modifier.height(16.dp))
+        TextButton(onClick = onOpenDebug, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+            Text("디버그", color = RespecColors.TextSub, fontSize = 13.sp)
+        }
     }
 }
 
@@ -167,7 +170,7 @@ private fun AlarmCard(
                 checked = alarm.enabled,
                 onCheckedChange = onToggle,
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.Black,
+                    checkedThumbColor = RespecColors.OnAccent,
                     checkedTrackColor = RespecColors.Lime,
                     checkedBorderColor = RespecColors.Lime,
                     uncheckedThumbColor = RespecColors.TextSub,
@@ -178,7 +181,7 @@ private fun AlarmCard(
         }
         Text(
             alarm.timeText(),
-            color = Color.White,
+            color = RespecColors.Text,
             fontSize = 48.sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.alpha(dim)
@@ -189,7 +192,7 @@ private fun AlarmCard(
             if (summary.isNotEmpty()) {
                 Text(
                     summary,
-                    color = if (alarm.isContent) RespecColors.Mint else RespecColors.Lime,
+                    color = if (alarm.isContent) RespecColors.Mint else RespecColors.AccentText,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -216,7 +219,7 @@ private fun AlarmCard(
                         .clickable { onDay(index) },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(name, color = if (on) Color.White else RespecColors.TextSub, fontSize = 13.sp)
+                    Text(name, color = if (on) RespecColors.Text else RespecColors.TextSub, fontSize = 13.sp)
                 }
             }
         }
@@ -234,7 +237,7 @@ private fun TypeBadge(text: String, content: Boolean) {
     ) {
         Text(
             text,
-            color = if (content) RespecColors.Mint else Color.White,
+            color = if (content) RespecColors.Mint else RespecColors.Text,
             fontWeight = FontWeight.Bold,
             fontSize = 12.sp
         )
@@ -258,7 +261,7 @@ private fun SwipeBanner(text: String, onComplete: () -> Unit) {
             .height(64.dp)
             .clip(shape)
             .background(RespecColors.Banner)
-            .border(1.dp, RespecColors.PurpleDark, shape)
+            .border(1.dp, RespecColors.Banner, shape)
             .onSizeChanged { widthPx = it.width.toFloat() },
         contentAlignment = Alignment.CenterStart
     ) {
@@ -267,7 +270,7 @@ private fun SwipeBanner(text: String, onComplete: () -> Unit) {
             text,
             modifier = Modifier.fillMaxWidth().padding(start = knobSize + inset * 2, end = 16.dp),
             textAlign = TextAlign.Center,
-            color = RespecColors.Purple,
+            color = RespecColors.OnBanner,
             fontWeight = FontWeight.Bold,
             fontSize = 16.sp
         )
@@ -277,7 +280,7 @@ private fun SwipeBanner(text: String, onComplete: () -> Unit) {
                 .padding(inset)
                 .size(knobSize)
                 .clip(CircleShape)
-                .background(RespecColors.Purple)
+                .background(RespecColors.Sun)
                 .draggable(
                     orientation = Orientation.Horizontal,
                     state = rememberDraggableState { delta ->
@@ -290,7 +293,7 @@ private fun SwipeBanner(text: String, onComplete: () -> Unit) {
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Filled.Bedtime, contentDescription = null, tint = RespecColors.Banner)
+            Icon(Icons.Filled.Bedtime, contentDescription = null, tint = Color(0xFF1F2547))
         }
     }
 }

@@ -61,7 +61,7 @@ fun RoutineScreen() {
     ) {
         Text(
             "오늘의 체크리스트",
-            color = Color.White,
+            color = RespecColors.Text,
             fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(top = 8.dp)
@@ -100,7 +100,7 @@ private fun AlarmSection(board: RoutineRepository.AlarmChecklist, onToggle: (Rou
     val done = items.count { it.done }
     val skipped = items.count { it.skipped }
     val dim = if (alarm.enabled) 1f else 0.5f
-    val accent = if (alarm.isContent) RespecColors.Mint else RespecColors.Lime   // 루틴 라임, 콘텐츠 민트
+    val accent = if (alarm.isContent) RespecColors.Mint else RespecColors.AccentText   // 루틴과 콘텐츠를 색으로 구분
     val shape = RoundedCornerShape(28.dp)
 
     Column(
@@ -123,7 +123,7 @@ private fun AlarmSection(board: RoutineRepository.AlarmChecklist, onToggle: (Rou
             )
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(alarm.label, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(alarm.label, color = RespecColors.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 val summary = alarmSummary(alarm)
                 if (summary.isNotEmpty()) {
                     Text(summary, color = accent, fontSize = 13.sp)
@@ -186,7 +186,7 @@ private fun RoutineRow(item: Routine, checkable: Boolean, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text(item.title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(item.title, color = RespecColors.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             val sub = listOfNotNull(
                 item.durationSec?.takeIf { it > 0 }?.let { durationText(it) },
                 "건너뜀".takeIf { item.skipped },
@@ -206,7 +206,7 @@ private fun RoutineRow(item: Routine, checkable: Boolean, onClick: () -> Unit) {
                     .background(RespecColors.Mint),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Filled.Check, null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.Check, null, tint = RespecColors.OnAccent, modifier = Modifier.size(18.dp))
             }
             item.skipped -> Box(
                 Modifier
