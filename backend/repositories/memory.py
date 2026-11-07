@@ -368,6 +368,12 @@ class MemoryStorageClient:
     def get_photo(self, user_id, diary_date):
         return self.photos.get((user_id, diary_date))
 
+    def delete_photo(self, user_id, diary_date):
+        photo = self.photos.pop((user_id, diary_date), None)
+        if photo:
+            self.files.pop(("photo", photo.photo_path), None)
+        return photo is not None
+
     def list_photos(self, user_id, since, until):
         return sorted((p for (u, d), p in self.photos.items() if u == user_id and since <= d <= until), key=lambda p: p.diary_date)
 

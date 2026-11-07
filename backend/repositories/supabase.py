@@ -523,6 +523,15 @@ class SupabaseStorageClient(_Base):
         q = self._select("rs_diary_photo").eq("user_id", user_id).eq("diary_date", diary_date.isoformat())
         return _model(DiaryPhoto, _first(self._run(q)))
 
+    def delete_photo(self, user_id, diary_date):
+        """파일을 먼저 지운다. 파일 삭제가 실패해도 행이 남아 있어야 다시 지울 수 있다. 없었으면 False."""
+        photo = self.get_photo(user_id, diary_date)
+        if not photo:
+            return False
+        self.delete_files("photo", [photo.photo_path])
+        self._run(self.db.table("rs_diary_photo").delete().eq("diary_photo_id", photo.diary_photo_id))
+        return True
+
     def list_photos(self, user_id, since, until):
         q = (self._select("rs_diary_photo").eq("user_id", user_id)
              .gte("diary_date", since.isoformat()).lte("diary_date", until.isoformat()).order("diary_date"))
