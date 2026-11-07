@@ -11,7 +11,7 @@ import org.json.JSONObject
 /**
  * 알람 목록 저장소. 목록은 Compose 상태라 변경되면 화면이 자동 갱신됨.
  * 모닝콜 알람은 서버(GET/POST/PATCH/DELETE /alarms)가 기준이고 기기에는 사본을 둬서 오프라인에서도 울림.
- * 취침 알람은 서버에 없어 기기에만 저장.
+ * 굿나잇콜 알람은 서버에 없어 기기에만 저장.
  */
 object AlarmRepository {
     private const val PREFS = "respec_alarms"
@@ -64,9 +64,17 @@ object AlarmRepository {
      */
     suspend fun save(context: Context, alarm: Alarm, routineItems: JSONArray? = null): String? {
         if (alarm.type != AlarmType.WAKE) {
-            onMain { upsert(context, alarm) }
+            // 모닝콜을 굿나잇콜로 바꾸면 서버의 모닝콜 알람을 먼저 지움 (굿나잇콜은 기기에만 저장)
+            val serverId = alarm.serverId ?: get(alarm.id)?.serverId
+            if (serverId != null && !RespecApi.deleteAlarm(serverId)) {
+                return ApiClient.lastError ?: "모닝콜 알람을 굿나잇콜로 바꾸지 못했어요"
+            }
+            onMain {
+                upsert(context, alarm.copy(serverId = null, templateId = null, contentType = null, contentOption = null))
+            }
             return null
         }
+        // 굿나잇콜을 모닝콜로 바꾸면 serverId가 없어 아래에서 서버에 새로 만듦
         val routineTemplate = if (alarm.isContent) null else
             routineTemplate(alarm) ?: return ApiClient.lastError ?: "루틴 프리셋을 찾지 못했어요"
         val body = editableFields(alarm, routineTemplate)
@@ -86,14 +94,6 @@ object AlarmRepository {
     suspend fun setEnabled(context: Context, id: Int, enabled: Boolean): String? {
         val a = get(id) ?: return null
         return change(context, a, a.copy(enabled = enabled), JSONObject().put("enabled", enabled))
-    }
-
-    /** 요일 켜기/끄기. 마지막 남은 요일은 끌 수 없음 */
-    suspend fun toggleDay(context: Context, id: Int, day: Int): String? {
-        val a = get(id) ?: return null
-        val newDays = if (day in a.days) a.days - day else a.days + day
-        if (newDays.isEmpty()) return "요일을 하나 이상 선택해 주세요"
-        return change(context, a, a.copy(days = newDays), JSONObject().put("repeat_days", repeatDays(newDays)))
     }
 
     suspend fun delete(context: Context, id: Int): String? {

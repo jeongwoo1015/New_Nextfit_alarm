@@ -10,6 +10,9 @@ val THEMES = listOf("EXERCISE" to "운동", "LANGUAGE" to "외국어", "MEDITATI
 
 fun themeLabel(code: String?): String? = THEMES.firstOrNull { it.first == code }?.second
 
+/** 알람을 만들 때 고를 수 있는 아침 콘텐츠 (루틴·명상은 고르지 않기로 함) */
+val MORNING_CONTENTS = listOf("EXERCISE" to "운동", "LANGUAGE" to "외국어", "QUIZ" to "퀴즈")
+
 /** 콘텐츠 세부 (서버 CONTENT_OPTIONS, backend/domain/codes.py. 팀 확정 전 예시 값) */
 val CONTENT_OPTIONS = mapOf(
     "MEDITATION" to listOf("BREATH" to "호흡", "BODY_SCAN" to "바디스캔"),

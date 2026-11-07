@@ -16,14 +16,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.LocalOffer
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -33,19 +34,20 @@ import com.example.respeclive.alarm.AlarmScheduler
 import com.example.respeclive.data.Alarm
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
-import com.example.respeclive.data.RoutineCatalog
-import com.example.respeclive.data.THEMES
+import com.example.respeclive.data.MORNING_CONTENTS
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.launch
-import org.json.JSONArray
-import org.json.JSONObject
 import kotlin.math.abs
 
 private val ITEM_H = 56.dp
 private val DAY_NAMES = listOf("월", "화", "수", "목", "금", "토", "일")
 private const val NAME_MAX = 20
 
-/** alarmId == -1 이면 새 알람 */
+/**
+ * 알람 만들기·고치기 (alarmId == -1 이면 새 알람): 시간 → 요일 → 이름 → 모닝콜 / 굿나잇콜.
+ * 모닝콜이면 아침 콘텐츠(운동·외국어·퀴즈)를 고르고, 굿나잇콜은 더 고를 것이 없음.
+ * 모닝콜은 서버에, 굿나잇콜은 기기에만 저장. 종류를 바꾸면 저장할 때 AlarmRepository가 옮김.
+ */
 @Composable
 fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -58,76 +60,38 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
     var minute by remember { mutableIntStateOf(existing?.minute ?: 0) }
     var days by remember { mutableStateOf(existing?.days ?: setOf(0, 1, 2, 3, 4)) }
     var label by remember { mutableStateOf(existing?.label ?: "") }
-    val isBedtime = existing?.type == AlarmType.BEDTIME
+    var isBedtime by remember { mutableStateOf(existing?.type == AlarmType.BEDTIME) }
 
-    // 알람 유형·프리셋·콘텐츠. 새 알람은 기존 모닝콜 알람의 값을 따름
+    // 아침 콘텐츠: 이 알람의 값 → 다른 모닝콜 알람의 값. 루틴 알람이거나 이제 고를 수 없는 값(명상)이면 선택 안 함
     val sample = existing ?: AlarmRepository.alarms.firstOrNull { it.type == AlarmType.WAKE }
-    var isContent by remember { mutableStateOf(sample?.isContent ?: false) }
-    var templateId by remember {
-        mutableStateOf(sample?.templateId ?: AlarmRepository.alarms.firstOrNull { it.templateId != null }?.templateId)
-    }
-    var contentType by remember { mutableStateOf(sample?.contentType ?: THEMES.first().first) }
-    var contentOption by remember { mutableStateOf(existing?.contentOption) }
-
-    // 항목 시간: 이 알람에 저장된 값(같은 프리셋일 때) 또는 프리셋 기본 시간. 바꾼 값만 durations에
-    var routineItems by remember { mutableStateOf<List<RoutineCatalog.Item>>(emptyList()) }
-    val durations = remember { mutableStateMapOf<String, Int>() }
-    var itemsEdited by remember { mutableStateOf(false) }
-    var presets by remember { mutableStateOf<List<JSONObject>?>(null) }
-    var showPresetDialog by remember { mutableStateOf(false) }
-    var pendingPreset by remember { mutableStateOf<String?>(null) }   // 바꾸기 전 확인 중인 프리셋
-
-    LaunchedEffect(Unit) {
-        RoutineCatalog.loadLimits()
-        presets = RoutineCatalog.loadPresets()
-        if (templateId == null) templateId = presets?.firstOrNull()?.optString("template_id")?.takeIf { it.isNotBlank() }
-    }
-    LaunchedEffect(templateId) {
-        val tid = templateId ?: return@LaunchedEffect
-        RoutineCatalog.ensurePreset(tid)
-        val saved = existing?.takeIf { it.templateId == tid }?.let { RoutineCatalog.loadRoutine(it, force = true) }
-        routineItems = (saved ?: RoutineCatalog.presetRoutine(tid))?.items.orEmpty()
-        durations.clear()
-        itemsEdited = false
+    var contentType by remember {
+        mutableStateOf(sample?.contentType?.takeIf { code -> MORNING_CONTENTS.any { it.first == code } })
     }
 
-    val total = routineItems.sumOf { durations[it.templateItemId] ?: it.durationSec }
-    val routineValid = templateId != null && routineItems.isNotEmpty() &&
-        total <= RoutineCatalog.limits.routineMaxSec && total > 0
     val scope = rememberCoroutineScope()
     var saving by remember { mutableStateOf(false) }   // 서버 저장·삭제 중에는 버튼을 막음
-
-    /** 프리셋을 바꾸면 서버가 이 알람의 항목 시간 설정을 지우므로, 바꾼 값이 있으면 먼저 확인 */
-    fun pickPreset(id: String) {
-        showPresetDialog = false
-        if (id == templateId) return
-        val customized = itemsEdited || routineItems.any { it.customized }
-        if (existing?.templateId != null && customized) pendingPreset = id else templateId = id
-    }
+    val canSave = !saving && label.isNotBlank() && (isBedtime || contentType != null)
 
     fun save() {
-        val base = existing ?: Alarm(id = AlarmRepository.nextId(), label = "", hour = 0, minute = 0, days = emptySet())
-        val content = isContent && !isBedtime
+        val base = existing ?: Alarm(
+            id = AlarmRepository.nextId(), label = "", hour = 0, minute = 0, days = emptySet(),
+            type = if (isBedtime) AlarmType.BEDTIME else AlarmType.WAKE
+        )
         val alarm = base.copy(
+            type = if (isBedtime) AlarmType.BEDTIME else AlarmType.WAKE,
             label = label.trim(),
             hour = (hour12 % 12) + if (ampm == 1) 12 else 0,
             minute = minute,
             days = days,
             enabled = true,
-            templateId = if (content) null else templateId,
-            contentType = if (content) contentType else null,
-            contentOption = if (content) contentOption else null
+            templateId = null,
+            contentType = if (isBedtime) null else contentType,
+            // 세부 주제는 고르지 않음. 같은 콘텐츠면 이전 값 유지
+            contentOption = if (isBedtime) null else existing?.contentOption?.takeIf { existing.contentType == contentType }
         )
-        // 기본 시간과 다른 항목만 보냄 (보내지 않은 항목은 서버가 기본 시간으로)
-        val items = if (!content && itemsEdited) JSONArray().apply {
-            routineItems.forEach { item ->
-                val sec = durations[item.templateItemId] ?: item.durationSec
-                if (sec != item.defaultSec) put(JSONObject().put("template_item_id", item.templateItemId).put("duration_sec", sec))
-            }
-        } else null
         saving = true
         scope.launch {
-            val error = AlarmRepository.save(context, alarm, items)
+            val error = AlarmRepository.save(context, alarm)
             saving = false
             Toast.makeText(context, error ?: AlarmScheduler.describeRemaining(alarm), Toast.LENGTH_SHORT).show()
             if (error == null) onBack()
@@ -258,33 +222,23 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
 
         Spacer(Modifier.height(28.dp))
 
-        // 알람 유형 (취침 알람에는 없음): 루틴이면 프리셋·항목 시간, 콘텐츠면 종류·세부
+        // 알람 종류
+        SectionTitle(Icons.Filled.Alarm, "알람 종류")
+        Spacer(Modifier.height(12.dp))
+        AlarmKindToggle(isBedtime) { isBedtime = it }
+
+        // 모닝콜이면 아침 콘텐츠. 굿나잇콜은 더 고를 것이 없음
         if (!isBedtime) {
-            SectionTitle(Icons.Filled.Tune, "아침에 할 일")
-            Spacer(Modifier.height(12.dp))
-            CallTypeToggle(isContent) { isContent = it }
-            Spacer(Modifier.height(16.dp))
-            if (isContent) {
-                ContentEditor(
-                    contentType = contentType,
-                    contentOption = contentOption,
-                    onType = { if (it != contentType) { contentType = it; contentOption = null } },
-                    onOption = { contentOption = it }
-                )
-            } else {
-                PresetRow(templateId?.let { RoutineCatalog.presetNames[it] }) { showPresetDialog = true }
-                Spacer(Modifier.height(16.dp))
-                RoutineItemsEditor(routineItems, durations) { id, sec ->
-                    durations[id] = sec
-                    itemsEdited = true
-                }
-            }
             Spacer(Modifier.height(28.dp))
+            SectionTitle(Icons.Filled.WbSunny, "아침 콘텐츠")
+            Spacer(Modifier.height(12.dp))
+            MorningContentPicker(contentType) { contentType = it }
         }
 
+        Spacer(Modifier.height(28.dp))
         Button(
             onClick = { save() },
-            enabled = label.isNotBlank() && !saving && (isBedtime || isContent || routineValid),
+            enabled = canSave,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(60.dp),
@@ -317,64 +271,10 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
         }
         Spacer(Modifier.height(24.dp))
     }
-
-    // 프리셋 고르기: 이름 (TEMPLATE_NAME)과 대상 (TARGET_DESC)
-    if (showPresetDialog) {
-        AlertDialog(
-            onDismissRequest = { showPresetDialog = false },
-            containerColor = RespecColors.Card,
-            title = { Text("프리셋 선택", color = RespecColors.Text, fontWeight = FontWeight.Bold) },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    val list = presets
-                    if (list == null) Text("프리셋을 불러오지 못했어요", color = RespecColors.TextSub)
-                    list?.forEach { p ->
-                        val id = p.optString("template_id")
-                        val on = id == templateId
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable { pickPreset(id) }
-                                .padding(vertical = 12.dp)
-                        ) {
-                            Text(
-                                p.optString("template_name"),
-                                color = if (on) RespecColors.AccentText else RespecColors.Text,
-                                fontWeight = if (on) FontWeight.ExtraBold else FontWeight.SemiBold,
-                                fontSize = 16.sp
-                            )
-                            p.optString("target_desc").takeIf { it.isNotBlank() && it != "null" }?.let {
-                                Text(it, color = RespecColors.TextSub, fontSize = 13.sp)
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showPresetDialog = false }) { Text("닫기", color = RespecColors.Purple) }
-            }
-        )
-    }
-
-    // 프리셋을 바꾸면 항목 시간 설정이 처음으로 돌아감 (서버 트리거가 RS_ALARM_ROUTINE_ITEM을 지움)
-    pendingPreset?.let { next ->
-        AlertDialog(
-            onDismissRequest = { pendingPreset = null },
-            containerColor = RespecColors.Card,
-            title = { Text("프리셋을 바꿀까요?", color = RespecColors.Text, fontWeight = FontWeight.Bold) },
-            text = { Text("바꾸면 이 알람의 항목 시간 설정이 처음으로 돌아가요.", color = RespecColors.TextSub) },
-            confirmButton = {
-                TextButton(onClick = { templateId = next; pendingPreset = null }) { Text("바꾸기", color = RespecColors.AccentText) }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingPreset = null }) { Text("취소", color = RespecColors.TextSub) }
-            }
-        )
-    }
 }
 
 @Composable
-private fun SectionTitle(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
+private fun SectionTitle(icon: ImageVector, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = RespecColors.Purple, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(10.dp))
