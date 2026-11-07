@@ -39,9 +39,13 @@ import com.example.respeclive.ui.onboarding.OnboardingScreen
 import com.example.respeclive.ui.profile.ProfileScreen
 import com.example.respeclive.ui.report.ReportScreen
 import com.example.respeclive.ui.routine.RoutineScreen
+import com.example.respeclive.ui.start.StartScreen
 import com.example.respeclive.ui.theme.RespecColors
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
+
+private const val START_SCREEN_MIN_MS = 1200L
 
 private data class TabItem(val route: String, val label: String, val icon: ImageVector)
 
@@ -73,12 +77,16 @@ fun AppNavHost(
         val profile = withTimeoutOrNull(8_000) { RespecApi.profile() }
         needOnboarding = profile != null && !profile.optBoolean("onboarding_done", true)
     }
-    when (needOnboarding) {
-        null -> Box(Modifier.fillMaxSize().background(RespecColors.Background), contentAlignment = Alignment.Center) {
-            Text("Re:Spec", color = RespecColors.AccentText, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
-        }
-        true -> OnboardingScreen(onDone = { needOnboarding = false })
-        false -> MainNav(launch, onLaunchHandled)
+    // 서버 응답이 빨라도 시작 화면이 보이도록 잠깐 유지. 알람으로 열렸으면 기다리지 않음
+    var startShown by remember { mutableStateOf(launch != null) }
+    LaunchedEffect(Unit) {
+        delay(START_SCREEN_MIN_MS)
+        startShown = true
+    }
+    when {
+        needOnboarding == null || !startShown -> StartScreen()
+        needOnboarding == true -> OnboardingScreen(onDone = { needOnboarding = false })
+        else -> MainNav(launch, onLaunchHandled)
     }
 }
 

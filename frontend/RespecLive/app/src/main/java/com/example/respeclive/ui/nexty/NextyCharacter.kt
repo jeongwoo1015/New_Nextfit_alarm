@@ -55,10 +55,10 @@ private const val SHOULDER_X = 54f
 private const val SHOULDER_Y = 128f
 
 /** 표정 (눈과 입만 바뀜) */
-enum class NextyFace { NORMAL, HAPPY, SLEEPY, FOCUS }
+enum class NextyFace { NORMAL, HAPPY, GRIN, SLEEPY, FOCUS }
 
 /** 동작에 함께 그리는 소품·효과 */
-enum class NextyProp { NONE, CUP, MEMO, SUN, STRETCH_LINES, SPARKLES }
+enum class NextyProp { NONE, CUP, MEMO, SUN, STRETCH_LINES, SPARKLES, WELCOME_SPARKLES }
 
 /**
  * 한 순간의 자세. 팔 각도는 아래로 내린 상태가 0, 바깥으로 들수록 커지고 위로 곧게 올리면 180.
@@ -104,6 +104,13 @@ enum class NextyMotion(
     val steps: List<NextyStep>
 ) {
     IDLE("기본", false, NextyFace.NORMAL, NextyProp.NONE, listOf(NextyStep(NextyPose(), 1000))),
+    WELCOME(
+        "반기기", false, NextyFace.GRIN, NextyProp.WELCOME_SPARKLES,
+        listOf(
+            NextyStep(welcomePose(158f), 700),
+            NextyStep(welcomePose(148f), 700)
+        )
+    ),
     CHEER(
         "칭찬", false, NextyFace.HAPPY, NextyProp.SPARKLES,
         listOf(
@@ -180,6 +187,11 @@ enum class NextyMotion(
         }
     )
 }
+
+// 두 팔을 머리 양옆으로 들어 반기기
+private fun welcomePose(shoulder: Float) = NextyPose(
+    leftShoulder = shoulder, leftElbow = 20f, rightShoulder = shoulder, rightElbow = 20f, leftReach = 3f, rightReach = 3f
+)
 
 // 한 팔을 들어 흔들기
 private fun wavePose(shoulder: Float, elbow: Float) = NextyPose(rightShoulder = shoulder, rightElbow = elbow, rightReach = 1.9f)
@@ -354,7 +366,7 @@ private fun DrawScope.drawFace(face: NextyFace, eyeOpen: Float, mouthOpen: Float
     listOf(80f, 120f).forEach { x ->
         when (face) {
             NextyFace.NORMAL -> drawOpenEye(x, eyeOpen)
-            NextyFace.HAPPY -> drawArc(   // 웃는 눈 ∩
+            NextyFace.HAPPY, NextyFace.GRIN -> drawArc(   // 웃는 눈 ∩
                 OUTLINE, 200f, 140f, false, Offset(x - 7f, 103f), Size(14f, 12f),
                 style = Stroke(OUTLINE_W, cap = StrokeCap.Round)
             )
@@ -374,6 +386,10 @@ private fun DrawScope.drawFace(face: NextyFace, eyeOpen: Float, mouthOpen: Float
                 OUTLINE, 20f, 140f, false, Offset(85f, 108f), Size(30f, 24f),
                 style = Stroke(OUTLINE_W, cap = StrokeCap.Round)
             )
+            NextyFace.GRIN -> {   // 활짝 웃는 입: 아래로 둥근 반원과 혀
+                drawArc(OUTLINE, 0f, 180f, true, Offset(84f, 112f), Size(32f, 26f))
+                drawOval(BLUSH, Offset(93f, 130f), Size(14f, 7f))
+            }
             NextyFace.SLEEPY -> drawOval(OUTLINE, Offset(96f, 125f), Size(8f, 6f))
             else -> drawArc(
                 OUTLINE, 25f, 130f, false, Offset(90f, 113f), Size(20f, 14f),
@@ -455,6 +471,11 @@ private fun DrawScope.drawBackgroundProp(prop: NextyProp, breath: Float) {
             drawSparkle(Offset(12f, 96f), 11f + breath * 3f)
             drawSparkle(Offset(190f, 62f), 8f + (1f - breath) * 3f)
         }
+        NextyProp.WELCOME_SPARKLES -> {
+            drawSparkle(Offset(2f, 70f), 8f + breath * 3f)
+            drawSparkle(Offset(200f, 36f), 11f + (1f - breath) * 3f)
+            drawSparkle(Offset(204f, 104f), 7f + breath * 2f, BLUSH)
+        }
         else -> Unit
     }
 }
@@ -506,7 +527,7 @@ private fun DrawScope.drawSun(c: Offset, radius: Float) {
 }
 
 /** 끝이 네 개인 반짝임 */
-private fun DrawScope.drawSparkle(c: Offset, r: Float) {
+private fun DrawScope.drawSparkle(c: Offset, r: Float, color: Color = SUN_RAY) {
     val k = r * 0.22f
     val star = Path().apply {
         moveTo(c.x, c.y - r)
@@ -516,7 +537,7 @@ private fun DrawScope.drawSparkle(c: Offset, r: Float) {
         quadraticTo(c.x - k, c.y - k, c.x, c.y - r)
         close()
     }
-    drawPath(star, SUN_RAY)
+    drawPath(star, color)
 }
 
 // ---------------- 팔·다리 ----------------

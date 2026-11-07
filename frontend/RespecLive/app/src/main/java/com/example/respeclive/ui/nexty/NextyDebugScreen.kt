@@ -40,6 +40,7 @@ private val BANNER_CHECK = Color(0xFFFFD45C)
 private val FACE_LABELS = mapOf(
     NextyFace.NORMAL to "기본",
     NextyFace.HAPPY to "칭찬",
+    NextyFace.GRIN to "활짝",
     NextyFace.SLEEPY to "졸림",
     NextyFace.FOCUS to "집중"
 )
