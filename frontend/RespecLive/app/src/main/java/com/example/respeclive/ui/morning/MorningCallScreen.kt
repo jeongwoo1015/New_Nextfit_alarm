@@ -15,7 +15,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,6 +40,9 @@ import com.example.respeclive.data.AlarmType
 import com.example.respeclive.data.RespecApi
 import com.example.respeclive.data.RoutineRepository
 import com.example.respeclive.ui.common.FitText
+import com.example.respeclive.ui.nexty.MorningDecor
+import com.example.respeclive.ui.nexty.NextyCharacter
+import com.example.respeclive.ui.nexty.NextyMotion
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -187,11 +189,13 @@ private fun MorningIncomingScreen(
                             .border(1.dp, RespecColors.CardBorder, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Filled.WbSunny, null, tint = RespecColors.AccentText, modifier = Modifier.size(orb * 96 / 260))
+                        // 손 흔드는 넥스티. 원 안에 여유 있게 (캐릭터 높이가 원의 약 60%)
+                        NextyCharacter(NextyMotion.WAVE, Modifier.size(orb * 180 / 260))
+                        MorningDecor(RespecColors.AccentText, Modifier.fillMaxSize())
                     }
                 }
                 Spacer(Modifier.height(20.dp))
-                Text("리스펙", color = RespecColors.Text, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+                Text("넥스티", color = RespecColors.Text, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(16.dp))
                 Row(
                     Modifier

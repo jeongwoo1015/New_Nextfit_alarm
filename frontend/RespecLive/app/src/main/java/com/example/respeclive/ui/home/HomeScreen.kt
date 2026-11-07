@@ -36,6 +36,7 @@ import com.example.respeclive.data.Alarm
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.ui.common.FitText
+import com.example.respeclive.ui.theme.AppTheme
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -59,59 +60,65 @@ fun HomeScreen(
         AlarmRepository.sync(context)
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp)
-    ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp, bottom = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom
-        ) {
-            Text("알람 목록", color = RespecColors.Text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            Text("${alarms.size}개", color = RespecColors.TextSub, fontSize = 14.sp)
-        }
+    Column(Modifier.fillMaxSize()) {
+        // 넥스티 장면은 화면 양옆 끝까지, 나머지는 좌우 여백 안에
+        HomeScene(night = AppTheme.isDark)
 
         Column(
             Modifier
                 .weight(1f)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(horizontal = 20.dp)
         ) {
-            alarms.forEach { alarm ->
-                AlarmCard(
-                    alarm = alarm,
-                    onClick = { onEditAlarm(alarm.id) },
-                    onToggle = { checked ->
-                        scope.launch {
-                            val error = AlarmRepository.setEnabled(context, alarm.id, checked)
-                            val message = error ?: if (checked) AlarmScheduler.describeRemaining(alarm) else null
-                            message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
-                        }
-                    }
-                )
-            }
-
-            OutlinedButton(
-                onClick = onCreateAlarm,
-                modifier = Modifier
+            Row(
+                Modifier
                     .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(28.dp),
-                border = BorderStroke(2.dp, RespecColors.Purple)
+                    .padding(top = 4.dp, bottom = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
             ) {
-                Text("+ 나만의 알람 만들기", color = RespecColors.Purple, fontWeight = FontWeight.Bold)
+                Text("알람 목록", color = RespecColors.Text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text("${alarms.size}개", color = RespecColors.TextSub, fontSize = 14.sp)
             }
-            Spacer(Modifier.height(8.dp))
-        }
 
-        Spacer(Modifier.height(16.dp))   // 목록 끝과 띄워 둠
-        SwipeBanner(text = "밀어서 취침 전 대화 시작하기 →", onComplete = onStartNightChat)
-        TextButton(onClick = onOpenDebug, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-            Text("디버그", color = RespecColors.TextSub, fontSize = 13.sp)
+            Column(
+                Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                alarms.forEach { alarm ->
+                    AlarmCard(
+                        alarm = alarm,
+                        onClick = { onEditAlarm(alarm.id) },
+                        onToggle = { checked ->
+                            scope.launch {
+                                val error = AlarmRepository.setEnabled(context, alarm.id, checked)
+                                val message = error ?: if (checked) AlarmScheduler.describeRemaining(alarm) else null
+                                message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+                            }
+                        }
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = onCreateAlarm,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    border = BorderStroke(2.dp, RespecColors.Purple)
+                ) {
+                    Text("+ 나만의 알람 만들기", color = RespecColors.Purple, fontWeight = FontWeight.Bold)
+                }
+                // 넥스티 디버그 화면으로 (나만의 알람 만들기 바로 아래)
+                TextButton(onClick = onOpenDebug, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                    Text("디버그", color = RespecColors.TextSub, fontSize = 13.sp)
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))   // 목록 끝과 띄워 둠
+            SwipeBanner(text = "밀어서 취침 전 대화 시작하기 →", onComplete = onStartNightChat)
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
@@ -123,52 +130,56 @@ private fun AlarmCard(
     onClick: () -> Unit,
     onToggle: (Boolean) -> Unit
 ) {
-    val shape = RoundedCornerShape(24.dp)
+    val shape = RoundedCornerShape(20.dp)
     val dim = if (alarm.enabled) 1f else 0.5f
+    val night = alarm.type == AlarmType.BEDTIME
 
-    Column(
+    Row(
         Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(RespecColors.Card)
             .border(1.dp, RespecColors.CardBorder, shape)
             .clickable(onClick = onClick)
-            .padding(20.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // 알람 종류 옆에 알람 이름
-            TypeBadge(night = alarm.type == AlarmType.BEDTIME)
-            Spacer(Modifier.width(8.dp))
-            Text(
-                alarm.label,
-                color = RespecColors.TextSub, fontSize = 16.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            Switch(
-                checked = alarm.enabled,
-                onCheckedChange = onToggle,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = RespecColors.OnAccent,
-                    checkedTrackColor = RespecColors.Lime,
-                    checkedBorderColor = RespecColors.Lime,
-                    uncheckedThumbColor = RespecColors.TextSub,
-                    uncheckedTrackColor = RespecColors.Disabled,
-                    uncheckedBorderColor = RespecColors.Disabled
+        Column(Modifier.weight(1f)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // 알람 종류 옆에 알람 이름
+                TypeBadge(night = night)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    alarm.label,
+                    color = RespecColors.TextSub, fontSize = 15.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
+                Switch(
+                    checked = alarm.enabled,
+                    onCheckedChange = onToggle,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = RespecColors.OnAccent,
+                        checkedTrackColor = RespecColors.Lime,
+                        checkedBorderColor = RespecColors.Lime,
+                        uncheckedThumbColor = RespecColors.TextSub,
+                        uncheckedTrackColor = RespecColors.Disabled,
+                        uncheckedBorderColor = RespecColors.Disabled
+                    )
+                )
+            }
+            Text(
+                alarm.timeText(),
+                color = RespecColors.Text,
+                fontSize = 38.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.alpha(dim)
             )
         }
-        Text(
-            alarm.timeText(),
-            color = RespecColors.Text,
-            fontSize = 48.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.alpha(dim)
-        )
     }
 }
 

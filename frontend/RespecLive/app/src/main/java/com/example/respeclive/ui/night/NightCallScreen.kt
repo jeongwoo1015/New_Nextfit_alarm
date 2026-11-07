@@ -25,6 +25,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.respeclive.ui.nexty.NextyCharacter
+import com.example.respeclive.ui.nexty.NextyFace
+import com.example.respeclive.ui.nexty.NextyMotion
+import com.example.respeclive.ui.nexty.NightDecor
 import com.example.respeclive.ui.theme.RespecColors
 
 @Composable
@@ -72,7 +76,7 @@ fun NightCallScreen(
             Text("오늘 하루를 함께 마무리해요", color = RespecColors.TextSub, fontSize = 14.sp)
         }
 
-        // 발신자 (캐릭터 없이 아이콘 + 파동)
+        // 발신자: 달 수면모자를 쓴 졸린 넥스티 + 파동
         // 세로가 짧은 폰에서는 아래 버튼이 잘리지 않도록 동그라미를 남은 공간에 맞춰 줄임
         // (아래 이름·시각 칩 자리 약 150dp)
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -94,11 +98,18 @@ fun NightCallScreen(
                             .border(1.dp, RespecColors.CardBorder, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Filled.Bedtime, null, tint = RespecColors.AccentText, modifier = Modifier.size(orb * 96 / 260))
+                        // 원 안에 여유 있게 (캐릭터 높이가 원의 약 60%)
+                        NextyCharacter(
+                            NextyMotion.IDLE,
+                            Modifier.size(orb * 180 / 260),
+                            face = NextyFace.SLEEPY,
+                            night = true
+                        )
+                        NightDecor(RespecColors.AccentText, Modifier.fillMaxSize())
                     }
                 }
                 Spacer(Modifier.height(20.dp))
-                Text("리스펙", color = RespecColors.Text, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+                Text("넥스티", color = RespecColors.Text, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(16.dp))
                 Row(
                     Modifier

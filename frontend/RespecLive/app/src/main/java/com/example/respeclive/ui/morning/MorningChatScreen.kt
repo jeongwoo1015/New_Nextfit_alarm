@@ -36,7 +36,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -67,6 +66,8 @@ import com.example.respeclive.ui.common.SubtitleBox
 import com.example.respeclive.ui.common.rememberHeldUserLine
 import com.example.respeclive.ui.common.rememberScreenScale
 import com.example.respeclive.ui.common.rememberSpokenPage
+import com.example.respeclive.ui.nexty.NextyCharacter
+import com.example.respeclive.ui.nexty.NextyMotion
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -91,6 +92,9 @@ private const val BTN_DONE = "완료했어요"
 /** 루틴 게이지 최대 크기 (자리가 모자라면 줄어듦) */
 private val RING_SIZE = 240.dp
 private const val BTN_LATER = "오늘은 건너뛸게요"
+
+/** 퀴즈 답에 O / X로 반응하는 시간 */
+private const val QUIZ_REACTION_MS = 2800L
 
 /** 앱이 보내는 이벤트: 코칭 중 모든 단계를 판정함 */
 private const val ROUTINE_OVER = "routine_over"
@@ -257,7 +261,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             val before = items.filter { it.done }.mapNotNull { it.stepOrder }.toSet()
             RoutineRepository.applyView(v)
             val newly = items.firstOrNull { it.done && it.stepOrder !in before }
-            if (newly != null) banner = Banner("${items.count { it.done }}번째 루틴 완료!", newly.title)
+            if (newly != null) banner = Banner("${items.count { it.done }}번째 스텝 완료!", newly.title)
         }
 
         client.onToolCall = { call ->
@@ -474,10 +478,54 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
         preparing -> notice
         else -> lastLine?.text ?: notice
     }
-    // 게이지·개수는 이번 통화에서 코칭을 시작한 뒤에만 (브리핑·메시지 중에는 표시 안 함)
+    // 단계 타이머·시범은 이번 통화에서 코칭을 시작한 뒤에만 (브리핑·메시지 중에는 표시 안 함)
     val showRoutine = coachingStarted && RoutineRepository.hasSteps
-    val doneCount = items.count { it.done }
-    val currentTitle = items.firstOrNull { !it.done && !it.skipped }?.title
+    val currentStep = items.firstOrNull { !it.done && !it.skipped }
+    val currentTitle = currentStep?.title
+    val contentType = RoutineRepository.session?.contentType
+
+    // 단계 타이머: AI가 코칭 안내를 시작한 뒤, 단계가 바뀔 때마다 그 단계의 계획 시간부터 줄어듦 (계획 시간이 없으면 없음)
+    var stepStartMs by remember { mutableLongStateOf(0L) }
+    var nowMs by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(currentStep?.stepOrder, coachSpoke) { stepStartMs = System.currentTimeMillis() }
+    LaunchedEffect(showRoutine) {
+        while (showRoutine) {
+            nowMs = System.currentTimeMillis()
+            delay(200)
+        }
+    }
+    val stepTotalMs = currentStep?.durationSec?.takeIf { it > 0 }?.times(1000L)
+    val remainingMs = stepTotalMs?.takeIf { coachSpoke }?.let { (it - (nowMs - stepStartMs)).coerceIn(0L, it) }
+    val timerFraction = if (remainingMs != null && stepTotalMs != null) remainingMs.toFloat() / stepTotalMs else null
+
+    // 퀴즈: 사용자가 답한 바로 뒤 넥스티의 말로 맞고 틀림을 알아내 잠깐 몸으로 O / X
+    // (서버 판정은 답만 하면 done이라 정답 여부가 없음. 말이 끝나기 전에도 분명한 표현이면 바로 반응)
+    var reaction by remember { mutableStateOf<NextyMotion?>(null) }
+    var judgedAt by remember { mutableLongStateOf(-1L) }
+    LaunchedEffect(lines, aiSpeaking) {
+        if (contentType != "QUIZ" || !coachingStarted || lines.size < 2) return@LaunchedEffect
+        val line = lines.last()
+        if (line.atMs == judgedAt || line.role != LiveClient.Role.Assistant || lines[lines.lastIndex - 1].role != LiveClient.Role.User) {
+            return@LaunchedEffect
+        }
+        quizReaction(line.text, finished = !aiSpeaking)?.let {
+            judgedAt = line.atMs
+            reaction = it
+        }
+    }
+    LaunchedEffect(reaction) {
+        if (reaction != null) {
+            delay(QUIZ_REACTION_MS)
+            reaction = null
+        }
+    }
+    val shownReaction = reaction
+    // 원 안 넥스티: 퀴즈 반응 → 스트레칭 시범(단계 이름에 맞는 동작) → 기본
+    val coachMotion = when {
+        shownReaction != null -> shownReaction
+        contentType == "EXERCISE" && currentStep != null -> stretchMotionFor(currentStep.title, currentStep.stepOrder ?: 1)
+        else -> NextyMotion.IDLE
+    }
     // 루틴을 모두 판정했으면 완료/건너뛰기 버튼을 숨기고, 코칭을 끌지 않고 바로 마무리로
     val routineOver = stage == Stage.Coaching && items.isNotEmpty() && currentTitle == null
     LaunchedEffect(routineOver) { if (routineOver) toolEvents.trySend(ROUTINE_OVER) }
@@ -505,11 +553,11 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.size(ring), contentAlignment = Alignment.Center) {
-                        // 코칭 중에는 루틴 게이지만, 그 전(브리핑·메시지)에는 파동과 테두리
+                        // 코칭 중에는 단계 타이머 링만, 그 전(브리핑·메시지)에는 파동과 테두리
                         if (!showRoutine) OrbHalo(ring, tint)
-                        GaugeRing(
-                            total = if (showRoutine) items.size else 0,
-                            done = doneCount,
+                        TimerRing(
+                            remaining = timerFraction,
+                            visible = showRoutine,
                             stroke = 12.dp * k,
                             modifier = Modifier.size(ring)
                         ) {
@@ -523,25 +571,19 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center
                             ) {
-                                Icon(
-                                    when (phase) {
-                                        MPhase.Listening -> Icons.Filled.Mic
-                                        MPhase.Playing -> Icons.Filled.PlayArrow
-                                        MPhase.AiSpeaking -> Icons.Filled.WbSunny
-                                    },
-                                    null,
-                                    tint = tint,
-                                    modifier = Modifier.size(if (showRoutine) 44.dp * k else ring * 64 / 230)
-                                )
+                                // 햇살 꼭지 넥스티 (말할 때 입이 움직임). 코칭 중에는 스트레칭 시범·퀴즈 O/X를 몸으로
                                 if (showRoutine) {
-                                    Spacer(Modifier.height(4.dp * k))
-                                    Text(
-                                        "$doneCount / ${items.size}",
-                                        color = RespecColors.Text,
-                                        fontSize = 30.sp * k,
-                                        fontWeight = FontWeight.ExtraBold
+                                    NextyCharacter(
+                                        coachMotion,
+                                        Modifier.size(ring * 176 / 240),
+                                        speaking = phase == MPhase.AiSpeaking && shownReaction == null
                                     )
-                                    FitText("루틴 완료", color = RespecColors.TextSub, fontSize = 13.sp * k, minSize = 8.sp)
+                                } else {
+                                    NextyCharacter(
+                                        NextyMotion.IDLE,
+                                        Modifier.size(ring * 134 / 240),
+                                        speaking = phase == MPhase.AiSpeaking
+                                    )
                                 }
                             }
                         }
@@ -552,7 +594,8 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                             phase == MPhase.Playing -> "어젯밤의 내가 남긴 한 마디 · 탭하면 건너뛰기"
                             preparing -> "곧 시작해요"
                             phase == MPhase.Listening -> "듣고 있어요"
-                            stage == Stage.Coaching && currentTitle != null -> "지금은 · $currentTitle"
+                            stage == Stage.Coaching && currentTitle != null ->
+                                "지금은 · $currentTitle" + (remainingMs?.let { " · ${(it + 999) / 1000}초" } ?: "")
                             stage == Stage.Briefing -> "아침 브리핑"
                             else -> "리스펙이 이야기하는 중"
                         },
@@ -671,55 +714,66 @@ private fun OrbHalo(size: Dp, tint: Color) {
     )
 }
 
-/** 루틴 개수만큼 나뉜 원형 게이지. 완료할 때마다 한 칸씩 라임색으로 채워짐 */
+/**
+ * 원 둘레의 단계 타이머. remaining(1 → 0)만큼 위에서부터 시계 방향으로 강조색 호가 남고, 시간이 지나면 줄어듦.
+ * remaining이 null(계획 시간이 없는 단계)이면 빈 테두리만. visible이 false면 아무것도 그리지 않음
+ */
 @Composable
-private fun GaugeRing(
-    total: Int,
-    done: Int,
+private fun TimerRing(
+    remaining: Float?,
+    visible: Boolean,
     stroke: Dp,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    val animated by animateFloatAsState(done.toFloat(), tween(800), label = "gauge")
+    val animated by animateFloatAsState(remaining ?: 0f, tween(250), label = "timer")
 
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
-            if (total <= 0) return@Canvas
-            val stroke = stroke.toPx()
-            val gap = 8f
-            val slice = 360f / total
-            val arcSize = Size(size.width - stroke, size.height - stroke)
-            val topLeft = Offset(stroke / 2, stroke / 2)
-
-            for (i in 0 until total) {
-                val fill = (animated - i).coerceIn(0f, 1f)
-                val start = -90f + i * slice + gap / 2
-                val sweep = slice - gap
-                if (fill > 0f) {
-                    // 은은한 빛
-                    drawArc(
-                        color = RespecColors.AccentText.copy(alpha = 0.22f * fill),
-                        startAngle = start,
-                        sweepAngle = sweep,
-                        useCenter = false,
-                        topLeft = topLeft,
-                        size = arcSize,
-                        style = Stroke(width = stroke * 1.9f, cap = StrokeCap.Round)
-                    )
-                }
+            if (!visible) return@Canvas
+            val w = stroke.toPx()
+            val arcSize = Size(size.width - w, size.height - w)
+            val topLeft = Offset(w / 2, w / 2)
+            drawArc(RespecColors.Disabled, 0f, 360f, false, topLeft, arcSize, style = Stroke(w))
+            if (remaining != null && animated > 0f) {
+                // 은은한 빛
                 drawArc(
-                    color = lerp(RespecColors.Disabled, RespecColors.Lime, fill),
-                    startAngle = start,
-                    sweepAngle = sweep,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = arcSize,
-                    style = Stroke(width = stroke, cap = StrokeCap.Round)
+                    RespecColors.AccentText.copy(alpha = 0.18f), -90f, 360f * animated, false, topLeft, arcSize,
+                    style = Stroke(w * 1.9f, cap = StrokeCap.Round)
                 )
+                drawArc(RespecColors.Lime, -90f, 360f * animated, false, topLeft, arcSize, style = Stroke(w, cap = StrokeCap.Round))
             }
         }
         content()
     }
+}
+
+/** 스트레칭 단계 이름에 맞는 넥스티 시범 동작. 맞는 것이 없으면 단계 순서대로 돌아가며 보여 줌 */
+private fun stretchMotionFor(name: String, order: Int): NextyMotion = when {
+    "옆구리" in name -> NextyMotion.RAINBOW
+    "허리" in name -> NextyMotion.WAIST
+    "가슴" in name || "어깨" in name -> NextyMotion.CHEST_W
+    "기지개" in name || "팔" in name || "만세" in name -> NextyMotion.STRETCH
+    "목" in name -> NextyMotion.NECK
+    else -> STRETCH_CYCLE[(order - 1).mod(STRETCH_CYCLE.size)]
+}
+
+private val STRETCH_CYCLE = listOf(
+    NextyMotion.STRETCH, NextyMotion.RAINBOW, NextyMotion.CHEST_W, NextyMotion.NECK, NextyMotion.WAIST
+)
+
+private val QUIZ_WRONG = Regex("아쉬|틀렸|틀리셨|아니에요|아닙니다")
+private val QUIZ_RIGHT = Regex("정답이|정답입|맞았|맞아요|맞습니다|맞혔|맞히셨|맞추셨|맞췄")
+
+/**
+ * 퀴즈 답 뒤 넥스티의 말 → O / X. 분명한 표현(맞았어요, 아쉬워요 등)은 말하는 중에도 바로,
+ * '정답은 ○○'처럼 애매한 표현은 말을 마친 뒤(finished)에만 오답으로 봄. 알 수 없으면 null
+ */
+private fun quizReaction(text: String, finished: Boolean): NextyMotion? = when {
+    QUIZ_WRONG.containsMatchIn(text) -> NextyMotion.QUIZ_X
+    QUIZ_RIGHT.containsMatchIn(text) -> NextyMotion.QUIZ_O
+    finished && "정답은" in text -> NextyMotion.QUIZ_X
+    else -> null
 }
 
 @Composable

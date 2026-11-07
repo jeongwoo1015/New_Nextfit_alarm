@@ -72,7 +72,7 @@ fun MorningReportScreen(sessionId: String, talkSec: Int, onOpenReport: () -> Uni
             ReportHeader(session?.text("session_date"))
             when {
                 loaded != null && session != null -> {
-                    ReportTitle(loaded.optJSONObject("progress"))
+                    ReportTitle(loaded.optJSONObject("progress"), session.text("content_type"))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         StatTile("기상 시간", clockOf(session.text("first_response_at")) ?: "-", RespecColors.Text, Modifier.weight(1f))
                         StatTile("대화 시간", talkLabel(talkSec), RespecColors.Text, Modifier.weight(1f))
@@ -139,15 +139,20 @@ private fun ReportHeader(date: String?) {
     }
 }
 
-/** 별이 흩어진 축하 문구. 루틴 결과에 맞춰 문구가 달라짐 */
+/** 별이 흩어진 축하 문구. 오늘 한 아침 콘텐츠와 마친 정도에 맞춰 문구가 달라짐 */
 @Composable
-private fun ReportTitle(progress: JSONObject?) {
+private fun ReportTitle(progress: JSONObject?, contentType: String?) {
     val total = progress?.optInt("total") ?: 0
     val done = progress?.optInt("done") ?: 0
     val (title, sub) = when {
-        done > 0 && done == total -> "오늘 아침도 해냈어요!" to "${done}개의 루틴을 완료했어요"
-        done > 0 -> "오늘 아침도 해냈어요!" to "${total}개 중 ${done}개의 루틴을 완료했어요"
-        total > 0 -> "좋은 아침이에요!" to "남은 루틴은 루틴 탭에서 이어서 할 수 있어요"
+        done > 0 && done == total -> "오늘 아침도 해냈어요!" to when (contentType) {
+            "EXERCISE" -> "스트레칭으로 몸까지 활짝 깨웠어요"
+            "QUIZ" -> "퀴즈로 머리까지 말끔하게 깨웠어요"
+            "LANGUAGE" -> "오늘의 영어 문장까지 챙겼어요"
+            else -> "오늘 아침 할 일을 모두 마쳤어요"
+        }
+        done > 0 -> "오늘 아침도 해냈어요!" to "${total}개 중 ${done}개를 해냈어요. 시작이 반이에요"
+        total > 0 -> "좋은 아침이에요!" to "제때 일어난 것만으로도 충분히 잘했어요"
         else -> "좋은 아침이에요!" to "오늘도 좋은 하루 보내세요"
     }
     Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {

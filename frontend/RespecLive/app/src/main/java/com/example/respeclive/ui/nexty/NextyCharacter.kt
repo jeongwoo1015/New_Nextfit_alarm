@@ -54,12 +54,13 @@ private const val LOWER_ARM = 16f
 private const val MAX_UPPER_REACH = 1.5f
 private const val SHOULDER_X = 54f
 private const val SHOULDER_Y = 128f
+private const val CROSS_ARM_DROP = 28f      // 오답 X 팔을 어깨 높이에서 내린 정도 (눈이 보이도록)
 
 /** 표정 (눈과 입만 바뀜) */
-enum class NextyFace { NORMAL, HAPPY, GRIN, SLEEPY, FOCUS }
+enum class NextyFace { NORMAL, HAPPY, GRIN, SLEEPY, FOCUS, WINCE }
 
 /** 동작에 함께 그리는 소품·효과 */
-enum class NextyProp { NONE, CUP, MEMO, SUN, STRETCH_LINES, SPARKLES, WELCOME_SPARKLES }
+enum class NextyProp { NONE, CUP, MEMO, SUN, STRETCH_LINES, SPARKLES, WELCOME_SPARKLES, ARM_CIRCLE, ARM_CROSS }
 
 /**
  * 한 순간의 자세. 팔 각도는 아래로 내린 상태가 0, 바깥으로 들수록 커지고 위로 곧게 올리면 180.
@@ -110,6 +111,29 @@ enum class NextyMotion(
         listOf(
             NextyStep(welcomePose(158f), 700),
             NextyStep(welcomePose(148f), 700)
+        )
+    ),
+    WAVE(
+        "손 흔들기", false, NextyFace.GRIN, NextyProp.NONE,
+        listOf(
+            NextyStep(wavePose(150f, 18f), 450),
+            NextyStep(wavePose(128f, 36f), 450)
+        )
+    ),
+    // 퀴즈 정답: 두 팔을 둥글게 들어 머리 위에서 맞닿는 동그라미(O). 팔은 자세 대신 곡선으로 그림 (ARM_CIRCLE)
+    QUIZ_O(
+        "정답 O", false, NextyFace.HAPPY, NextyProp.ARM_CIRCLE,
+        listOf(
+            NextyStep(NextyPose(), 450),
+            NextyStep(NextyPose(stretch = 1.04f), 550)
+        )
+    ),
+    // 퀴즈 오답: 배 앞에서 두 팔뚝을 대각선으로 엇갈려 X. 팔은 자세 대신 따로 그림 (ARM_CROSS)
+    QUIZ_X(
+        "오답 X", false, NextyFace.WINCE, NextyProp.ARM_CROSS,
+        listOf(
+            NextyStep(NextyPose(tilt = -3f), 450),
+            NextyStep(NextyPose(tilt = 3f), 450)
         )
     ),
     CHEER(
@@ -338,15 +362,25 @@ private fun DrawScope.drawNexty(
     rotate(pose.tilt, base) {
         scale(1f - breath * 0.012f, pose.stretch + breath * 0.016f, base) {
             if (!night) drawSunRays()
-            // 팔은 몸 뒤에서 나오고, 몸 쪽으로 굽힌 팔(허리에 손, 머리에 손, 소품 들기)은 끝부분만 몸 앞으로 다시 그림
-            drawArmBehind(left = true, pose.leftShoulder, pose.leftElbow, pose.leftReach)
-            drawArmBehind(left = false, pose.rightShoulder, pose.rightElbow, pose.rightReach)
+            // 팔은 몸 뒤에서 나오고, 몸 쪽으로 굽힌 팔(허리에 손, 머리에 손, 소품 들기)은 끝부분만 몸 앞으로 다시 그림.
+            // 동그라미 팔(ARM_CIRCLE)·X 팔(ARM_CROSS)은 두 마디 팔로는 모양이 안 나와 따로 그림
+            val customArms = prop == NextyProp.ARM_CIRCLE || prop == NextyProp.ARM_CROSS
+            if (prop == NextyProp.ARM_CIRCLE) {
+                drawCircleArms()
+            } else if (!customArms) {
+                drawArmBehind(left = true, pose.leftShoulder, pose.leftElbow, pose.leftReach)
+                drawArmBehind(left = false, pose.rightShoulder, pose.rightElbow, pose.rightReach)
+            }
             drawBody()
             drawFace(face, eyeOpen, mouthOpen)
             if (night) drawNightCap()
             drawHeldProp(prop, pose)
-            drawForearmInFront(left = true, pose.leftShoulder, pose.leftElbow, pose.leftReach)
-            drawForearmInFront(left = false, pose.rightShoulder, pose.rightElbow, pose.rightReach)
+            if (prop == NextyProp.ARM_CROSS) {
+                drawCrossArms()
+            } else if (!customArms) {
+                drawForearmInFront(left = true, pose.leftShoulder, pose.leftElbow, pose.leftReach)
+                drawForearmInFront(left = false, pose.rightShoulder, pose.rightElbow, pose.rightReach)
+            }
         }
     }
 }
@@ -383,8 +417,18 @@ private fun DrawScope.drawFace(face: NextyFace, eyeOpen: Float, mouthOpen: Float
                 OUTLINE, 20f, 140f, false, Offset(x - 7f, 102f), Size(14f, 10f),
                 style = Stroke(OUTLINE_W, cap = StrokeCap.Round)
             )
+            NextyFace.WINCE -> {   // 찡그린 눈 > <
+                val inward = if (x < 100f) 1f else -1f
+                val eye = Path().apply {
+                    moveTo(x - 6f * inward, 103f)
+                    lineTo(x + 5f * inward, 109f)
+                    lineTo(x - 6f * inward, 115f)
+                }
+                drawPath(eye, OUTLINE, style = Stroke(OUTLINE_W, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
         }
     }
+    if (face == NextyFace.WINCE) drawSweat()
 
     if (mouthOpen > 0f) {
         val h = 4f + mouthOpen * 5f
@@ -400,12 +444,68 @@ private fun DrawScope.drawFace(face: NextyFace, eyeOpen: Float, mouthOpen: Float
                 drawOval(BLUSH, Offset(93f, 130f), Size(14f, 7f))
             }
             NextyFace.SLEEPY -> drawOval(OUTLINE, Offset(96f, 125f), Size(8f, 6f))
+            NextyFace.WINCE -> {   // 물결 입
+                val wave = Path().apply {
+                    moveTo(88f, 128f)
+                    quadraticTo(91f, 124f, 94f, 128f)
+                    quadraticTo(97f, 132f, 100f, 128f)
+                    quadraticTo(103f, 124f, 106f, 128f)
+                    quadraticTo(109f, 132f, 112f, 128f)
+                }
+                drawPath(wave, OUTLINE, style = Stroke(OUTLINE_W * 0.8f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
             else -> drawArc(
                 OUTLINE, 25f, 130f, false, Offset(90f, 113f), Size(20f, 14f),
                 style = Stroke(OUTLINE_W, cap = StrokeCap.Round)
             )
         }
     }
+}
+
+/**
+ * 퀴즈 정답의 동그라미 팔: 몸 옆(어깨 아래, 몸에 가려짐)에서 바깥으로 둥글게 올라가 머리 위에서 두 손이 맞닿음.
+ * 한 팔씩 윤곽선과 색을 다 그려, 나중에 그린 팔의 윤곽선이 맞닿은 두 손의 경계가 되게 함
+ */
+private fun DrawScope.drawCircleArms() {
+    listOf(-1f, 1f).forEach { side ->
+        val arm = Path().apply {
+            moveTo(100f + side * 50f, 132f)
+            cubicTo(100f + side * 94f, 100f, 100f + side * 72f, 20f, 100f + side * 9f, 22f)
+        }
+        drawPath(arm, OUTLINE, style = Stroke(ARM_W + OUTLINE_W * 2f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(arm, BODY, style = Stroke(ARM_W, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+/**
+ * 퀴즈 오답의 X 팔: 위팔 없이 두 팔뚝만 몸 앞에서 엇갈림. 어깨 자리(SHOULDER_X)에서 조금 아래로 내려온 곳에서 시작해
+ * 살짝 휘며 입 앞(약 y 139)에서 교차하고 반대쪽 눈 옆까지 올라감. 팔 윗선이 눈 아래 끝(y 117)보다 아래라 눈은 보임.
+ * 왼팔 기준 좌표이고 오른팔은 좌우를 뒤집음. 오른팔을 나중에 그려 겹친 곳의 윤곽선으로 교차가 보이게 함
+ */
+private fun DrawScope.drawCrossArms() {
+    listOf(1f, -1f).forEach { side ->
+        fun x(v: Float) = 100f + side * (v - 100f)
+        val arm = Path().apply {
+            moveTo(x(100f - SHOULDER_X), SHOULDER_Y + CROSS_ARM_DROP)
+            quadraticTo(x(82f), 132f + CROSS_ARM_DROP, x(134f), 88f + CROSS_ARM_DROP)
+        }
+        drawPath(arm, OUTLINE, style = Stroke(ARM_W + OUTLINE_W * 2f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(arm, BODY, style = Stroke(ARM_W, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+/** 머리 오른쪽 옆의 땀방울 (찡그린 표정) */
+private fun DrawScope.drawSweat() {
+    val drop = Path().apply {
+        moveTo(166f, 80f)
+        cubicTo(169f, 86f, 172f, 89f, 172f, 93f)
+        cubicTo(172f, 97f, 169f, 99f, 166f, 99f)
+        cubicTo(163f, 99f, 160f, 97f, 160f, 93f)
+        cubicTo(160f, 89f, 163f, 86f, 166f, 80f)
+        close()
+    }
+    drawPath(drop, WATER)
+    drawPath(drop, OUTLINE, style = Stroke(OUTLINE_W * 0.7f, join = StrokeJoin.Round))
 }
 
 private fun DrawScope.drawOpenEye(x: Float, open: Float) {
@@ -479,6 +579,10 @@ private fun DrawScope.drawBackgroundProp(prop: NextyProp, breath: Float) {
         NextyProp.SPARKLES -> {
             drawSparkle(Offset(12f, 96f), 11f + breath * 3f)
             drawSparkle(Offset(190f, 62f), 8f + (1f - breath) * 3f)
+        }
+        NextyProp.ARM_CIRCLE -> {   // 동그라미 팔 바깥의 반짝임
+            drawSparkle(Offset(4f, 60f), 9f + breath * 3f)
+            drawSparkle(Offset(200f, 120f), 8f + (1f - breath) * 3f)
         }
         NextyProp.WELCOME_SPARKLES -> {
             drawSparkle(Offset(2f, 70f), 8f + breath * 3f)
