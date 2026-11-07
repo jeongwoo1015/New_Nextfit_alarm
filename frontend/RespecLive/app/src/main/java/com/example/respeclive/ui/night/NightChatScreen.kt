@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,7 +18,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -28,7 +28,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -55,6 +60,9 @@ import com.example.respeclive.ui.common.rememberHeldUserLine
 import com.example.respeclive.ui.common.rememberScreenScale
 import com.example.respeclive.ui.common.rememberSpokenPage
 import com.example.respeclive.ui.common.typeSubtitlePages
+import com.example.respeclive.ui.nexty.NextyCharacter
+import com.example.respeclive.ui.nexty.NextyFace
+import com.example.respeclive.ui.nexty.NextyMotion
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -612,7 +620,10 @@ private fun CallHeader(elapsed: Int, musicOn: Boolean, onMusicChange: (Boolean) 
     }
 }
 
-/** 상태를 보여 주는 원형 파동: AI 말하기(라임, 한 마디 단계에서는 탭하면 건너뛰기) / 듣는 중(보라) / 말하는 중(음량 반응) */
+/**
+ * 밤의 넥스티가 든 원과 상태를 보여 주는 파동. AI 말하기(강조색, 입이 움직임, 한 마디 단계에서는 탭하면 건너뛰기)
+ * / 듣는 중(보라) / 말하는 중(음량 반응)
+ */
 @Composable
 private fun VoiceOrb(size: Dp, phase: Phase, level: Float, isSaveStep: Boolean, onTap: () -> Unit) {
     val infinite = rememberInfiniteTransition(label = "orb")
@@ -665,17 +676,60 @@ private fun VoiceOrb(size: Dp, phase: Phase, level: Float, isSaveStep: Boolean, 
                     .clickable(enabled = phase == Phase.AiSpeaking, onClick = onTap),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    if (phase == Phase.Recording || phase == Phase.Listening) Icons.Filled.Mic else Icons.Filled.Bedtime,
-                    null,
-                    tint = tint,
-                    modifier = Modifier.size(size * 64 / 230)
+                // 머리 위·발 아래 여백이 있는 캔버스라 원보다 크게 그려야 원을 알맞게 채움
+                NextyCharacter(
+                    NextyMotion.IDLE,
+                    Modifier.requiredSize(size * 180 / 230),
+                    face = NextyFace.SLEEPY,
+                    night = true,
+                    speaking = phase == Phase.AiSpeaking
                 )
             }
+            SleepyNight((pulse - 1f) / 0.07f, RespecColors.AccentText, Modifier.fillMaxSize())
         }
         FitText(status, color = tint, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
+
+/** 가운데 원과 바깥 고리 사이에 그리는 별과 Zz. wave(0~1)에 맞춰 별은 반짝이고 Z는 살짝 떠오름. 위치·크기는 영역에 대한 비율 */
+@Composable
+private fun SleepyNight(wave: Float, color: Color, modifier: Modifier) {
+    Canvas(modifier) {
+        fun star(x: Float, y: Float, radius: Float, twinkle: Float) {
+            val c = Offset(size.width * x, size.height * y)
+            val r = size.width * radius * (0.8f + 0.2f * twinkle)
+            val k = r * 0.22f
+            val path = Path().apply {
+                moveTo(c.x, c.y - r)
+                quadraticTo(c.x + k, c.y - k, c.x + r, c.y)
+                quadraticTo(c.x + k, c.y + k, c.x, c.y + r)
+                quadraticTo(c.x - k, c.y + k, c.x - r, c.y)
+                quadraticTo(c.x - k, c.y - k, c.x, c.y - r)
+                close()
+            }
+            drawPath(path, color.copy(alpha = 0.55f + 0.45f * twinkle))
+        }
+        fun letterZ(x: Float, y: Float, half: Float) {
+            val c = Offset(size.width * x, size.height * (y - 0.012f * wave))
+            val h = size.width * half
+            val path = Path().apply {
+                moveTo(c.x - h, c.y - h)
+                lineTo(c.x + h, c.y - h)
+                lineTo(c.x - h, c.y + h)
+                lineTo(c.x + h, c.y + h)
+            }
+            drawPath(path, color, style = Stroke(h * 0.42f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
+
+        star(0.19f, 0.27f, 0.04f, wave)
+        star(0.14f, 0.62f, 0.022f, 1f - wave)
+        star(0.86f, 0.66f, 0.028f, wave)
+        star(0.42f, 0.11f, 0.018f, 1f - wave)
+        letterZ(0.745f, 0.235f, 0.016f)
+        letterZ(0.775f, 0.17f, 0.024f)
+    }
+}
+
 
 @Composable
 private fun AnswerArea(

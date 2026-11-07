@@ -2,7 +2,6 @@ package com.example.respeclive.ui.nexty
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -29,9 +28,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
+import kotlinx.coroutines.delay
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
+import kotlin.random.Random
 
 // 캐릭터 시안의 색
 private val BODY = Color(0xFFFFC37A)
@@ -283,12 +284,19 @@ fun NextyCharacter(
         ),
         label = "blink"
     )
-    val talk by infinite.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(190, easing = LinearEasing), RepeatMode.Reverse),
-        label = "talk"
-    )
+    // 말하는 입: 벌리는 폭과 속도를 매번 무작위로 정하고 가끔 잠깐 다묾. 말을 멈추면 부드럽게 원래 입으로
+    val mouth = remember { Animatable(0f) }
+    LaunchedEffect(speaking) {
+        if (!speaking) {
+            mouth.animateTo(0f, tween(150))
+            return@LaunchedEffect
+        }
+        while (true) {
+            val target = if (Random.nextFloat() < 0.2f) 0f else 0.2f + Random.nextFloat() * 0.8f
+            mouth.animateTo(target, tween(Random.nextInt(110, 260), easing = FastOutSlowInEasing))
+            if (Random.nextFloat() < 0.15f) delay(Random.nextLong(80, 220))
+        }
+    }
 
     Canvas(modifier) {
         val s = min(size.width / CANVAS_W, size.height / CANVAS_H)
@@ -303,7 +311,8 @@ fun NextyCharacter(
                         night = night,
                         breath = breath,
                         eyeOpen = eyeOpen,
-                        mouthOpen = if (speaking) talk else 0f
+                        // 말하는 동안은 다물어도 말하는 입 모양을 유지 (0이면 표정의 기본 입)
+                        mouthOpen = if (speaking) maxOf(mouth.value, 0.001f) else mouth.value
                     )
                 }
             }
@@ -378,7 +387,7 @@ private fun DrawScope.drawFace(face: NextyFace, eyeOpen: Float, mouthOpen: Float
     }
 
     if (mouthOpen > 0f) {
-        val h = 4f + mouthOpen * 9f
+        val h = 4f + mouthOpen * 5f
         drawOval(OUTLINE, Offset(93f, 123f), Size(14f, h))
     } else {
         when (face) {
