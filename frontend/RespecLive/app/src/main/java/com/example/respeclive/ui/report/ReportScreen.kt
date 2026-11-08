@@ -9,7 +9,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CheckBox
+import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.LocalFireDepartment
 import androidx.compose.material.icons.outlined.Schedule
@@ -20,9 +20,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -48,11 +46,14 @@ private val Flame = Color(0xFFFF8A65)
 private val AXIS_LABEL_W = 34.dp   // y축 눈금 글씨 칸
 private val AXIS_GAP = 6.dp
 
-/** 그래프 한 칸 (series 항목) */
-private class Bucket(val label: String, val wakeMin: Int?, val rate: Float?)
+/** 그래프 한 칸 (series 항목). 시각은 자정부터 지난 분, 취침은 자정을 넘기면 24시 이후로 이어 셈 */
+private class Bucket(val label: String, val wakeMin: Int?, val bedMin: Int?)
 
 private fun clockToMin(s: String?): Int? =
     s?.split(":")?.takeIf { it.size == 2 }?.let { (h, m) -> h.toIntOrNull()?.let { hh -> m.toIntOrNull()?.let { hh * 60 + it } } }
+
+/** 취침 시각: 정오 전(00:30 등)은 전날 밤에서 이어지도록 24시간을 더함 (00:30 → 24:30) */
+private fun bedClockToMin(s: String?): Int? = clockToMin(s)?.let { if (it < 12 * 60) it + 24 * 60 else it }
 
 private fun JSONObject.rate(key: String): Float? = text(key)?.toFloatOrNull()
 
@@ -62,7 +63,7 @@ private fun JSONObject.buckets(): List<Bucket> {
         Bucket(
             label = it.optString("label"),
             wakeMin = clockToMin(it.text("avg_wake_clock")),
-            rate = it.takeIf { b -> b.optInt("routine_total") > 0 }?.rate("routine_completion_rate")
+            bedMin = bedClockToMin(it.text("avg_bed_clock"))
         )
     }
 }
@@ -70,13 +71,15 @@ private fun JSONObject.buckets(): List<Bucket> {
 private fun percent(rate: Float?) = rate?.let { "${Math.round(it * 100)}%" } ?: "-"
 
 /**
- * 리포트 (GET /reports). 상단은 전체 누적 기상·루틴 성공률, 그래프 두 개는 각각 주·월·연을 고를 수 있고,
- * 아래는 현재·최장 연속 달성일.
+ * 리포트 (GET /reports). 상단은 전체 누적 기상·취침 성공률, 그래프 두 개(기상·취침 시간 추이)는 각각 주·월·연을 고를 수 있고,
+ * 아래는 현재·최장 연속 기상일.
+ * 취침 값은 서버가 같은 응답에 넣어 준다고 보고 읽음: overall.bedtime_success_rate(굿나잇콜이 켜진 날 중 밤 대화를 마친 날의 비율),
+ * totals.avg_bed_clock · series[].avg_bed_clock (밤 대화를 마친 시각의 평균 "HH:MM"). 없으면 '-'와 빈 그래프.
  */
 @Composable
 fun ReportScreen() {
     var wakePeriod by rememberSaveable { mutableStateOf("week") }
-    var routinePeriod by rememberSaveable { mutableStateOf("week") }
+    var bedPeriod by rememberSaveable { mutableStateOf("week") }
     val reports = remember { mutableStateMapOf<String, JSONObject>() }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -87,12 +90,12 @@ fun ReportScreen() {
         if (r != null) reports[period] = r else error = ApiClient.lastError ?: "리포트를 불러오지 못했어요"
     }
     LaunchedEffect(wakePeriod) { load(wakePeriod) }
-    LaunchedEffect(routinePeriod) { load(routinePeriod) }
+    LaunchedEffect(bedPeriod) { load(bedPeriod) }
 
-    val any = reports[wakePeriod] ?: reports[routinePeriod] ?: reports.values.firstOrNull()
+    val any = reports[wakePeriod] ?: reports[bedPeriod] ?: reports.values.firstOrNull()
     val overall = any?.optJSONObject("overall")
     val wake = reports[wakePeriod]
-    val routine = reports[routinePeriod]
+    val bed = reports[bedPeriod]
 
     Column(
         Modifier
@@ -107,43 +110,38 @@ fun ReportScreen() {
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
                 RateColumn(overall?.rate("wake_success_rate"), "기상 성공률", RespecColors.Lime, Modifier.weight(1f))
                 VerticalLine(Modifier.padding(vertical = 4.dp))
-                RateColumn(overall?.rate("routine_completion_rate"), "루틴 성공률", RespecColors.Mint, Modifier.weight(1f))
+                RateColumn(overall?.rate("bedtime_success_rate"), "취침 성공률", RespecColors.Purple, Modifier.weight(1f))
             }
         }
 
         Spacer(Modifier.height(16.dp))
 
-        // 기상 시간 추이
+        // 기상 시간 추이: y축 기본 05:00~08:00
         ReportCard {
             CardHeader(Icons.Outlined.Schedule, "기상 시간 추이", wakePeriod) { wakePeriod = it }
             Spacer(Modifier.height(14.dp))
             SummaryLine("평균 기상 시간", wake?.optJSONObject("totals")?.text("avg_wake_clock") ?: "--:--")
             Spacer(Modifier.height(14.dp))
-            WakeLineChart(wake?.buckets().orEmpty(), Modifier.fillMaxWidth())
+            ClockLineChart(wake?.buckets().orEmpty().map { it.label to it.wakeMin }, 5, 8, RespecColors.Lime, Modifier.fillMaxWidth())
         }
 
         Spacer(Modifier.height(16.dp))
 
-        // 루틴 수행 그래프
+        // 취침 시간 추이: y축 기본 21:00~다음 날 01:00
         ReportCard {
-            CardHeader(Icons.Outlined.CheckBox, "루틴 수행 그래프", routinePeriod) { routinePeriod = it }
+            CardHeader(Icons.Outlined.Bedtime, "취침 시간 추이", bedPeriod) { bedPeriod = it }
             Spacer(Modifier.height(14.dp))
-            val totals = routine?.optJSONObject("totals")
-            SummaryLine(
-                "루틴 완료율",
-                percent(totals?.takeIf { it.optInt("routine_total") > 0 }?.rate("routine_completion_rate")),
-                totals?.let { "(${it.optInt("routine_done")} / ${it.optInt("routine_total")})" }
-            )
+            SummaryLine("평균 취침 시간", bed?.optJSONObject("totals")?.text("avg_bed_clock") ?: "--:--")
             Spacer(Modifier.height(14.dp))
-            RoutineBarChart(routine?.buckets().orEmpty(), Modifier.fillMaxWidth())
+            ClockLineChart(bed?.buckets().orEmpty().map { it.label to it.bedMin }, 21, 25, RespecColors.Purple, Modifier.fillMaxWidth())
         }
 
         Spacer(Modifier.height(16.dp))
 
-        // 연속 달성일
+        // 연속 기상일 (서버가 기상 성공한 날로 계산)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            StreakCard(Icons.Outlined.LocalFireDepartment, Flame, "현재 연속 달성일", any?.optInt("current_streak"), Modifier.weight(1f))
-            StreakCard(Icons.Outlined.EmojiEvents, RespecColors.AccentText, "최장 연속 달성일", any?.optInt("best_streak"), Modifier.weight(1f))
+            StreakCard(Icons.Outlined.LocalFireDepartment, Flame, "현재 연속 기상", any?.optInt("current_streak"), Modifier.weight(1f))
+            StreakCard(Icons.Outlined.EmojiEvents, RespecColors.AccentText, "최장 연속 기상", any?.optInt("best_streak"), Modifier.weight(1f))
         }
 
         error?.takeIf { any == null }?.let {
@@ -173,7 +171,7 @@ private fun VerticalLine(modifier: Modifier = Modifier) {
     Box(modifier.width(1.dp).fillMaxHeight().background(RespecColors.CardBorder))
 }
 
-/** 그래프 위 요약 한 줄: "평균 기상 시간 06:45", "루틴 완료율 74% (52 / 70)" */
+/** 그래프 위 요약 한 줄: "평균 기상 시간 06:45", "평균 취침 시간 23:10" */
 @Composable
 private fun SummaryLine(label: String, value: String, detail: String? = null) {
     Row(verticalAlignment = Alignment.Bottom) {
@@ -227,14 +225,17 @@ private fun CardHeader(icon: ImageVector, title: String, period: String, onPerio
 /** 칸 수가 많은(연간) 그래프는 x축 글씨를 줄임 */
 private fun axisLabelSize(count: Int) = if (count > 7) 8.sp else 12.sp
 
-/** 평균 기상 시각 꺾은선. y축은 기본 05:00~08:00, 기록이 벗어나면 정시 단위로 넓힘 */
+/**
+ * 칸별 평균 시각 꺾은선 (buckets: x축 글씨 to 자정부터 지난 분). y축은 기본 [defaultLow, defaultHigh]시,
+ * 기록이 벗어나면 정시 단위로 넓힘. 24시 이상(자정 넘긴 취침)은 눈금에 00시·01시로 표시
+ */
 @Composable
-private fun WakeLineChart(buckets: List<Bucket>, modifier: Modifier) {
-    val values = buckets.mapNotNull { it.wakeMin }
-    val lowHour = minOf(5, (values.minOrNull() ?: 300) / 60)
-    val highHour = maxOf(8, ((values.maxOrNull() ?: 480) + 59) / 60)
+private fun ClockLineChart(buckets: List<Pair<String, Int?>>, defaultLow: Int, defaultHigh: Int, color: Color, modifier: Modifier) {
+    val values = buckets.mapNotNull { it.second }
+    val lowHour = minOf(defaultLow, (values.minOrNull() ?: (defaultLow * 60)) / 60)
+    val highHour = maxOf(defaultHigh, ((values.maxOrNull() ?: (defaultHigh * 60)) + 59) / 60)
     val hours = (highHour downTo lowHour).toList()
-    val lime = RespecColors.Lime
+    val lime = color
     val grid = RespecColors.CardBorder
 
     Column(modifier) {
@@ -242,7 +243,7 @@ private fun WakeLineChart(buckets: List<Bucket>, modifier: Modifier) {
             // y축 눈금
             Column(Modifier.fillMaxHeight().padding(end = AXIS_GAP), verticalArrangement = Arrangement.SpaceBetween) {
                 hours.forEach {
-                    Text("%02d:00".format(it), color = RespecColors.TextSub, fontSize = 10.sp, modifier = Modifier.width(AXIS_LABEL_W), textAlign = TextAlign.End)
+                    Text("%02d:00".format(it % 24), color = RespecColors.TextSub, fontSize = 10.sp, modifier = Modifier.width(AXIS_LABEL_W), textAlign = TextAlign.End)
                 }
             }
             Canvas(Modifier.weight(1f).fillMaxHeight().padding(vertical = 7.dp)) {
@@ -256,7 +257,7 @@ private fun WakeLineChart(buckets: List<Bucket>, modifier: Modifier) {
                 val inset = 10.dp.toPx()
                 val stepX = if (buckets.size > 1) (size.width - inset * 2) / (buckets.size - 1) else 0f
                 val points = buckets.mapIndexedNotNull { i, b ->
-                    b.wakeMin?.let {
+                    b.second?.let {
                         val x = if (buckets.size > 1) inset + stepX * i else size.width / 2
                         Offset(x, size.height * (highHour * 60 - it) / span)
                     }
@@ -279,7 +280,7 @@ private fun WakeLineChart(buckets: List<Bucket>, modifier: Modifier) {
                 content = {
                     buckets.forEach { b ->
                         Text(
-                            b.label,
+                            b.first,
                             color = RespecColors.TextSub,
                             fontSize = axisLabelSize(buckets.size),
                             textAlign = TextAlign.Center,
@@ -301,60 +302,6 @@ private fun WakeLineChart(buckets: List<Bucket>, modifier: Modifier) {
                         p.placeRelative((center - p.width / 2f).toInt(), 0)
                     }
                 }
-            }
-        }
-    }
-}
-
-/** 칸별 루틴 완료율 막대. 가장 높은 칸은 라임, 기록이 없는 칸은 회색 */
-@Composable
-private fun RoutineBarChart(buckets: List<Bucket>, modifier: Modifier) {
-    val best = buckets.withIndex().filter { it.value.rate != null }.maxByOrNull { it.value.rate!! }?.index
-    val mint = RespecColors.Mint
-    val lime = RespecColors.Lime
-    val empty = RespecColors.Disabled
-    val grid = RespecColors.CardBorder
-
-    Column(modifier) {
-        Row(Modifier.fillMaxWidth().height(100.dp)) {
-            Column(Modifier.fillMaxHeight().padding(end = AXIS_GAP), verticalArrangement = Arrangement.SpaceBetween) {
-                listOf("100%", "50%", "0%").forEach {
-                    Text(it, color = RespecColors.TextSub, fontSize = 10.sp, modifier = Modifier.width(AXIS_LABEL_W), textAlign = TextAlign.End)
-                }
-            }
-            Canvas(Modifier.weight(1f).fillMaxHeight().padding(vertical = 7.dp)) {
-                listOf(0f, 0.5f, 1f).forEach {
-                    val y = size.height * it
-                    drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
-                }
-                if (buckets.isEmpty()) return@Canvas
-                val slot = size.width / buckets.size
-                val barW = minOf(slot * 0.76f, 28.dp.toPx())
-                val radius = CornerRadius(minOf(barW / 4, 5.dp.toPx()))
-                buckets.forEachIndexed { i, b ->
-                    val h = size.height * (b.rate?.coerceIn(0f, 1f) ?: 0.4f)
-                    val color = when {
-                        b.rate == null -> empty
-                        i == best -> lime
-                        else -> mint
-                    }
-                    val left = slot * i + (slot - barW) / 2
-                    drawRoundRect(color, Offset(left, size.height - h), Size(barW, h), radius)
-                }
-            }
-        }
-        Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-            Spacer(Modifier.width(AXIS_LABEL_W + AXIS_GAP))
-            buckets.forEach {
-                Text(
-                    it.label,
-                    color = RespecColors.TextSub,
-                    fontSize = axisLabelSize(buckets.size),
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    softWrap = false,
-                    modifier = Modifier.weight(1f)
-                )
             }
         }
     }
