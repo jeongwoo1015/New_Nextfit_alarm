@@ -130,7 +130,7 @@ fun NightCallScreen(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             CallButton(
                 icon = { Icon(Icons.Filled.CallEnd, null, tint = Color.White, modifier = Modifier.size(30.dp)) },
-                background = Color(0xFFE5685F),
+                background = RespecColors.Danger,   // 통화 거절·종료 #E46B5C
                 label = "나중에 하기",
                 onClick = onDecline
             )

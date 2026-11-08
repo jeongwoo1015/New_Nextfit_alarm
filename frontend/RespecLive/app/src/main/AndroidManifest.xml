@@ -19,6 +19,8 @@
         android:name="android.permission.SCHEDULE_EXACT_ALARM"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- 설정의 '다른 앱 위에 표시': 다른 앱을 쓰는 중에도 알람을 바로 띄움 (선언해야 시스템 설정에서 켤 수 있음) -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- 한 마디 녹음 뒤 마무리 안내(TTS) -->
     <queries>

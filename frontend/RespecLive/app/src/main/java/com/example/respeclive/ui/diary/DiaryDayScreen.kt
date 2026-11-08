@@ -33,6 +33,7 @@ import com.example.respeclive.data.ApiClient
 import com.example.respeclive.data.JpegEncoder
 import com.example.respeclive.data.RespecApi
 import com.example.respeclive.ui.common.FitText
+import com.example.respeclive.ui.common.SubScreenHeaderTop
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -108,22 +109,22 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
         Modifier
             .fillMaxSize()
             .background(RespecColors.Background)
-            .statusBarsPadding()
+            // 상태 표시줄 여백은 Scaffold가 이미 줌. 헤더 위 여백은 SubScreenHeaderTop으로 알람 설정·설정 화면과 같게
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp)
     ) {
         // 헤더
-        Row(Modifier.padding(top = 12.dp, bottom = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(top = SubScreenHeaderTop, bottom = 20.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier.size(44.dp).clip(CircleShape).background(RespecColors.PurpleDark).clickable(onClick = onBack),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "뒤로", tint = RespecColors.Purple)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "뒤로", tint = RespecColors.AccentText)
             }
             Spacer(Modifier.width(14.dp))
             Text(
                 "${cal.get(Calendar.MONTH) + 1}월 ${cal.get(Calendar.DAY_OF_MONTH)}일 ${DAY_NAMES[cal.get(Calendar.DAY_OF_WEEK) - 1]}요일",
-                color = RespecColors.AccentText, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold
+                color = RespecColors.AccentText, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold
             )
         }
 

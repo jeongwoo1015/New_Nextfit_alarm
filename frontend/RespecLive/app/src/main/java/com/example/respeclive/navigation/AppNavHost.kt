@@ -39,6 +39,7 @@ import com.example.respeclive.ui.onboarding.OnboardingScreen
 import com.example.respeclive.ui.profile.ProfileScreen
 import com.example.respeclive.ui.report.ReportScreen
 import com.example.respeclive.ui.routine.RoutineScreen
+import com.example.respeclive.ui.settings.SettingsScreen
 import com.example.respeclive.ui.start.StartScreen
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.delay
@@ -116,7 +117,7 @@ private fun MainNav(
 
     Scaffold(
         containerColor = RespecColors.Background,
-        topBar = { if (showBars) RespecTopBar(titleFor(route)) },
+        topBar = { if (showBars) RespecTopBar(titleFor(route)) { nav.navigate("settings") { launchSingleTop = true } } },
         bottomBar = {
             if (showBars) RespecBottomBar(route) { target ->
                 if (target == "home") {
@@ -154,6 +155,7 @@ private fun MainNav(
                 DiaryDayScreen(date = entry.arguments?.getString("date").orEmpty(), onBack = { nav.popBackStack() })
             }
             composable("profile") { ProfileScreen() }
+            composable("settings") { SettingsScreen(onBack = { nav.popBackStack() }) }
 
             composable(
                 "alarmEdit/{id}",
@@ -223,7 +225,7 @@ private fun MainNav(
 }
 
 @Composable
-private fun RespecTopBar(title: String) {
+private fun RespecTopBar(title: String, onSettings: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -238,10 +240,10 @@ private fun RespecTopBar(title: String) {
                 .size(44.dp)
                 .clip(CircleShape)
                 .background(RespecColors.PurpleDark)
-                .clickable { /* TODO: 설정 화면 */ },
+                .clickable(onClick = onSettings),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Filled.Settings, contentDescription = "설정", tint = RespecColors.Purple)
+            Icon(Icons.Filled.Settings, contentDescription = "설정", tint = RespecColors.AccentText)
         }
     }
 }

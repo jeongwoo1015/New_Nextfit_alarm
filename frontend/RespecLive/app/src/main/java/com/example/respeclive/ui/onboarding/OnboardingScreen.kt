@@ -209,11 +209,11 @@ fun OnboardingScreen(onDone: () -> Unit) {
             Button(
                 onClick = { next() },
                 enabled = canNext,
-                modifier = Modifier.weight(1f).height(60.dp),
-                shape = RoundedCornerShape(30.dp),
+                modifier = Modifier.weight(1f).height(58.dp),
+                shape = RoundedCornerShape(50),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = RespecColors.Lime,
-                    contentColor = RespecColors.OnAccent,
+                    containerColor = RespecColors.Button,
+                    contentColor = RespecColors.OnButton,
                     disabledContainerColor = RespecColors.Disabled,
                     disabledContentColor = RespecColors.TextSub
                 )

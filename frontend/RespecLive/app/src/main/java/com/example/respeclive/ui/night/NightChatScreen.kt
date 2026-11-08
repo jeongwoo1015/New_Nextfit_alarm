@@ -771,11 +771,11 @@ private fun AnswerArea(
                             modifier = Modifier.weight(1f).height(52.dp),
                             shape = RoundedCornerShape(26.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = RespecColors.Lime,
-                                contentColor = RespecColors.OnAccent
+                                containerColor = RespecColors.Button,
+                                contentColor = RespecColors.OnButton
                             )
                         ) {
-                            FitText("저장하기", color = RespecColors.OnAccent, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+                            FitText("저장하기", color = RespecColors.OnButton, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
                         }
                     }
                 }

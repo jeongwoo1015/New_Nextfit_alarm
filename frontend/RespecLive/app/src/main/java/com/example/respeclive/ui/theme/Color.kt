@@ -13,64 +13,73 @@ val Purple40 = Color(0xFF6650a4)
 val PurpleGrey40 = Color(0xFF625b71)
 val Pink40 = Color(0xFF7D5260)
 
-/** 테마 하나의 색. 넥스티의 몸·햇살·수면모자 색에서 뽑음 */
+/** 테마 하나의 색. 넥스티의 몸·햇살·수면모자 색에서 뽑음 (화면 수정 명세 3-1. 색) */
 data class RespecPalette(
-    val background: Color,
+    val background: Color,          // 기본 화면 배경 (홈, 리포트, 일기, 내 정보, 설정, 온보딩)
+    val morningBackground: Color,   // 아침 화면 배경 (모닝콜 수신·통화·콘텐츠)
     val card: Color,
     val cardBorder: Color,
     val text: Color,
     val textSub: Color,
-    val accent: Color,        // 주요 강조의 채움색 (버튼, 스위치, 게이지)
+    val accent: Color,        // 포인트 색: 선택, 진행, 토글 켜짐
     val onAccent: Color,      // accent 위의 글자·아이콘
-    val accentText: Color,    // 배경 위에 쓰는 강조 글자·아이콘 (accent보다 또렷함)
+    val accentText: Color,    // 강조 글자: 라벨, 숫자 강조 (배경 위에서 또렷함)
     val purple: Color,
-    val purpleDark: Color,
+    val purpleDark: Color,    // 보조 포인트: 요일 칩, 알약 배경, 동그란 버튼 배경
     val banner: Color,
     val onBanner: Color,
+    val button: Color,        // 주요 버튼 (다음으로, 저장하기, 다음 문제 등)
+    val onButton: Color,
     val mint: Color,
     val mintDark: Color,
     val disabled: Color,
-    val danger: Color
+    val danger: Color         // 통화 거절·종료, 오류
 )
 
-/** 아침의 넥스티: 크림 배경, 몸 색 오렌지, 달 모자 남색 */
+/** 아침의 넥스티: 밝은 크림 배경, 오렌지 포인트, 진한 갈색 글자·버튼 */
 val LightPalette = RespecPalette(
-    background = Color(0xFFFFF9EF),
+    background = Color(0xFFFFFBF5),
+    morningBackground = Color(0xFFFFF4E4),
     card = Color(0xFFFFFFFF),
-    cardBorder = Color(0xFFF1E3CF),
-    text = Color(0xFF3A2E2A),
-    textSub = Color(0xFF8A7464),
-    accent = Color(0xFFF5A95B),
-    onAccent = Color(0xFF3A2E2A),
-    accentText = Color(0xFFA9591A),
+    cardBorder = Color(0xFFF0E2CF),
+    text = Color(0xFF2B2522),
+    textSub = Color(0xFF6B5E55),
+    accent = Color(0xFFF2A65A),
+    onAccent = Color(0xFF2B2522),
+    accentText = Color(0xFF9A4F12),
     purple = Color(0xFF4A5AA8),
-    purpleDark = Color(0xFFE4E7F7),
+    purpleDark = Color(0xFFFFE3C2),
     banner = Color(0xFF1F2547),
     onBanner = Color(0xFFF6EFE0),
+    button = Color(0xFF2B2522),
+    onButton = Color(0xFFFFFFFF),
     mint = Color(0xFF2E8F6C),
     mintDark = Color(0xFFDDF3E8),
     disabled = Color(0xFFF3E7D6),
-    danger = Color(0xFFD9483B)
+    danger = Color(0xFFE46B5C)
 )
 
-/** 밤의 넥스티: 남색 배경, 햇살 노랑 강조, 달빛 라벤더 */
+/** 밤의 넥스티: 남색 배경·카드, 노랑 포인트, 흰 글자 */
 val DarkPalette = RespecPalette(
-    background = Color(0xFF141A33),
-    card = Color(0xFF1F2547),
-    cardBorder = Color(0xFF323A68),
-    text = Color(0xFFF6F3EA),
-    textSub = Color(0xFFA3A9C9),
-    accent = Color(0xFFFFD45C),
+    background = Color(0xFF1F2547),
+    morningBackground = Color(0xFF1F2547),
+    card = Color(0xFF2A3160),
+    cardBorder = Color(0xFF3A4378),
+    text = Color(0xFFFFFFFF),
+    textSub = Color(0xFFC9D0FF),
+    accent = Color(0xFFFFE08A),
     onAccent = Color(0xFF1F2547),
-    accentText = Color(0xFFFFD45C),
+    accentText = Color(0xFFFFE08A),
     purple = Color(0xFFB9C2F2),
-    purpleDark = Color(0xFF333C73),
-    banner = Color(0xFF2A3160),
+    purpleDark = Color(0xFF3A4378),
+    banner = Color(0xFF3A4378),
     onBanner = Color(0xFFF6EFE0),
+    button = Color(0xFFFFE08A),
+    onButton = Color(0xFF1F2547),
     mint = Color(0xFF7FE0B8),
     mintDark = Color(0xFF1E4A45),
     disabled = Color(0xFF2A3160),
-    danger = Color(0xFFFF7B6B)
+    danger = Color(0xFFE46B5C)
 )
 
 /** 화면이 쓰는 색. 값은 지금 테마(AppTheme)를 따르고, 테마가 바뀌면 화면이 바로 다시 그려짐 */
@@ -81,6 +90,9 @@ object RespecColors {
     val Sun = Color(0xFFFFD45C)
 
     val Background get() = palette.background
+    val MorningBackground get() = palette.morningBackground
+    val Button get() = palette.button
+    val OnButton get() = palette.onButton
     val Card get() = palette.card
     val CardBorder get() = palette.cardBorder
     val Text get() = palette.text

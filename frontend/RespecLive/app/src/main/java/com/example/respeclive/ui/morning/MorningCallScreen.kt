@@ -155,7 +155,7 @@ private fun MorningIncomingScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(RespecColors.Background)
+            .background(RespecColors.MorningBackground)
             .padding(horizontal = 28.dp, vertical = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween

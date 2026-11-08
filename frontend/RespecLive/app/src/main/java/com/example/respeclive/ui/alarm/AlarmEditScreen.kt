@@ -35,6 +35,7 @@ import com.example.respeclive.data.Alarm
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.data.MORNING_CONTENTS
+import com.example.respeclive.ui.common.SubScreenHeaderTop
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -108,7 +109,7 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
     ) {
         // 헤더
         Row(
-            Modifier.padding(top = 12.dp, bottom = 20.dp),
+            Modifier.padding(top = SubScreenHeaderTop, bottom = 20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
@@ -119,7 +120,7 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
                     .clickable(onClick = onBack),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "뒤로", tint = RespecColors.Purple)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "뒤로", tint = RespecColors.AccentText)
             }
             Spacer(Modifier.width(14.dp))
             Text("알람 설정", color = RespecColors.AccentText, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
@@ -241,11 +242,11 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
             enabled = canSave,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(60.dp),
-            shape = RoundedCornerShape(30.dp),
+                .height(58.dp),
+            shape = RoundedCornerShape(50),
             colors = ButtonDefaults.buttonColors(
-                containerColor = RespecColors.Lime,
-                contentColor = RespecColors.OnAccent,
+                containerColor = RespecColors.Button,
+                contentColor = RespecColors.OnButton,
                 disabledContainerColor = RespecColors.Disabled,
                 disabledContentColor = RespecColors.TextSub
             )

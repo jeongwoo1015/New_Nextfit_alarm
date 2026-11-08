@@ -108,9 +108,9 @@ fun MorningReportScreen(sessionId: String, talkSec: Int, onOpenReport: () -> Uni
                 onClick = onHome,
                 modifier = Modifier.weight(1.4f).height(56.dp),
                 shape = RoundedCornerShape(28.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = RespecColors.Lime, contentColor = RespecColors.OnAccent)
+                colors = ButtonDefaults.buttonColors(containerColor = RespecColors.Button, contentColor = RespecColors.OnButton)
             ) {
-                FitText("홈으로", color = RespecColors.OnAccent, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+                FitText("홈으로", color = RespecColors.OnButton, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
             }
         }
         Spacer(Modifier.height(4.dp))

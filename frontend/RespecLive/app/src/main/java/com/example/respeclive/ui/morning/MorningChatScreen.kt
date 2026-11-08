@@ -535,7 +535,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     Box(
         Modifier
             .fillMaxSize()
-            .background(RespecColors.Background)
+            .background(RespecColors.MorningBackground)
             .padding(horizontal = 20.dp, vertical = 12.dp)
     ) {
         Column(Modifier.fillMaxSize()) {
@@ -634,11 +634,11 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                                 modifier = Modifier.weight(1f).height(52.dp * scale),
                                 shape = RoundedCornerShape(26.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = RespecColors.Lime,
-                                    contentColor = RespecColors.OnAccent
+                                    containerColor = RespecColors.Button,
+                                    contentColor = RespecColors.OnButton
                                 )
                             ) {
-                                FitText(doneText, color = RespecColors.OnAccent, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+                                FitText(doneText, color = RespecColors.OnButton, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
                             }
                         }
                     }
