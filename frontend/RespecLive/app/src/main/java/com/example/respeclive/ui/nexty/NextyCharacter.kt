@@ -344,6 +344,28 @@ fun NextyCharacter(
     }
 }
 
+/**
+ * 움직이지 않는 작은 넥스티 얼굴 (머리 위 햇살 꼭지 + 몸 + 기본 표정). 달력 칸처럼 여러 개를 한꺼번에 그리는 곳용이라
+ * 애니메이션이 없음. 몸(가로 38~162, 세로 35~196)이 영역에 꽉 차게 맞춤
+ */
+@Composable
+fun NextyMiniFace(modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val w = 132f
+        val h = 165f
+        val s = min(size.width / w, size.height / h)
+        translate((size.width - w * s) / 2f, (size.height - h * s) / 2f) {
+            scale(s, s, Offset.Zero) {
+                translate(-34f, -33f) {
+                    drawSunRays()
+                    drawBody()
+                    drawFace(NextyFace.NORMAL, eyeOpen = 1f, mouthOpen = 0f)
+                }
+            }
+        }
+    }
+}
+
 private fun DrawScope.drawNexty(
     pose: NextyPose,
     seated: Boolean,

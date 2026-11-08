@@ -101,6 +101,8 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
     }
     val summary = day?.optJSONObject("summary")
     val photoUrl = day?.text("photo_url")
+    // 사진이 없을 때 대신 보여 줄, 서버가 한 줄 일기에 맞춰 만든 넥스티 그림
+    val nextyImageUrl = day?.text("nexty_image_url")
 
     Column(
         Modifier
@@ -137,8 +139,8 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
                     picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 }
         ) {
-            if (photoUrl != null) {
-                PhotoBox(photoUrl, cal.get(Calendar.DAY_OF_MONTH), maxPx = 1400, modifier = Modifier.fillMaxSize())
+            if (photoUrl != null || nextyImageUrl != null) {
+                PhotoBox(photoUrl ?: nextyImageUrl!!, cal.get(Calendar.DAY_OF_MONTH), maxPx = 1400, modifier = Modifier.fillMaxSize())
             } else {
                 Column(
                     Modifier.fillMaxSize().background(RespecColors.Card),
@@ -153,7 +155,7 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
                     )
                 }
             }
-            if (!future && (photoUrl != null || uploading)) {
+            if (!future && (photoUrl != null || nextyImageUrl != null || uploading)) {
                 Box(
                     Modifier.align(Alignment.BottomEnd).padding(12.dp)
                         .clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f))
@@ -163,6 +165,7 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
                         when {
                             uploading -> "올리는 중…"
                             deleting -> "지우는 중…"
+                            photoUrl == null -> "사진 올리기"   // 넥스티 그림 위: 직접 찍은 사진으로 바꿀 수 있음
                             else -> "사진 바꾸기"
                         },
                         color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold

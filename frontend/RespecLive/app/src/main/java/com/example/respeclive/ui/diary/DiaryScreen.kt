@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import com.example.respeclive.data.ApiClient
 import com.example.respeclive.data.PhotoLoader
 import com.example.respeclive.data.RespecApi
+import com.example.respeclive.ui.nexty.NextyMiniFace
 import com.example.respeclive.ui.theme.RespecColors
 import org.json.JSONObject
 import java.util.Calendar
@@ -64,7 +65,7 @@ private data class YearMonth(val year: Int, val month: Int) {
 }
 
 /**
- * 한 줄 일기 달력 (GET /diary/calendar). 사진을 올린 날은 사진, 없는 날은 그날 루틴 성공률 링.
+ * 한 줄 일기 달력 (GET /diary/calendar). 사진을 올린 날은 사진, 없는 날은 한 줄 일기에 맞춘 넥스티 그림(없으면 넥스티 얼굴).
  * 날짜를 누르면 그날의 한 줄 일기와 리포트(onOpenDay "YYYY-MM-DD"). 달은 화살표나 옆으로 밀어서 이동.
  */
 @Composable
@@ -180,16 +181,19 @@ private fun MonthButton(text: String, enabled: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** 하루 칸: 사진 / 루틴 성공률 링 / 날짜만 */
+/**
+ * 하루 칸: 사진 / 한 줄 일기 넥스티 그림 / 작은 넥스티 얼굴 / 날짜만.
+ * 넥스티 그림은 서버가 한 줄 일기 내용에 맞춰 넥스티가 그 일을 하는 모습으로 만들어 저장한 이미지 (nexty_image_url).
+ * 직접 올린 사진이 있으면 사진이 먼저이고, 기록은 있지만 그림이 아직 없으면(만드는 중·한 줄 일기 없음) 넥스티 얼굴
+ */
 @Composable
 private fun DayCell(day: Int, info: JSONObject?, future: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(14.dp)
-    val photoUrl = info?.text("photo_url")
-    val rate = info?.takeIf { it.optInt("routine_total") > 0 }?.text("routine_completion_rate")?.toFloatOrNull()
+    val imageUrl = info?.text("photo_url") ?: info?.text("nexty_image_url")
 
-    if (photoUrl != null) {
+    if (imageUrl != null) {
         Box(Modifier.fillMaxSize().clip(shape).clickable(onClick = onClick)) {
-            PhotoBox(photoUrl, day, maxPx = 360, modifier = Modifier.fillMaxSize())
+            PhotoBox(imageUrl, day, maxPx = 360, modifier = Modifier.fillMaxSize())
             Box(
                 Modifier.padding(6.dp).clip(RoundedCornerShape(8.dp))
                     .background(Color.Black.copy(alpha = 0.35f))
@@ -216,9 +220,11 @@ private fun DayCell(day: Int, info: JSONObject?, future: Boolean, onClick: () ->
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(start = 8.dp, top = 6.dp)
         )
-        if (rate != null) {
-            Box(Modifier.fillMaxSize().padding(top = 14.dp), contentAlignment = Alignment.Center) {
-                RateRing(rate = rate, size = 34.dp, stroke = 3.dp, label = "${(rate * 100).toInt()}%", labelSize = 9.sp)
+        // 달력은 모든 날이 오므로, 아침 세션이나 밤 기록이 있는 날만
+        val hasRecord = info != null && (info.optBoolean("has_session") || info.optBoolean("has_night_record"))
+        if (hasRecord && !future) {
+            Box(Modifier.fillMaxSize().padding(top = 20.dp, bottom = 8.dp), contentAlignment = Alignment.Center) {
+                NextyMiniFace(Modifier.fillMaxWidth(0.62f).aspectRatio(0.8f))
             }
         }
     }
