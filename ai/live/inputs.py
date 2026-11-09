@@ -89,6 +89,14 @@ class BriefingInput:
 
 
 @dataclass(frozen=True)
+class FortuneInput:
+    """'오늘의 포춘' 읽기 세션의 입력. 문장은 tasks.fortune.compose_fortune이 만든 것을 서버가 그대로 넘기고, AI는 그대로 읽는다."""
+    persona: Persona = Persona()
+    fortune_text: str = ""             # 읽을 포춘 문장 (비어 있으면 읽을 것이 없다고만 말한다)
+    style: str = ""                    # COOKIE / HOROSCOPE (참고용, 지시문 동작은 같다)
+
+
+@dataclass(frozen=True)
 class CoachingInput:
     """단계를 하나씩 진행하는 세션의 입력. 기본 루틴 세션과 콘텐츠 세션이 같은 형식을 쓴다."""
     persona: Persona = Persona()

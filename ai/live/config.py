@@ -1,9 +1,10 @@
 """Live 연결 설정 조립. 서버가 이 값을 임시 토큰에 고정하고, 앱은 토큰으로 직접 연결한다."""
 from datetime import datetime, timedelta, timezone
 
-from .inputs import BriefingInput, CoachingInput, NightInput
+from .inputs import BriefingInput, CoachingInput, FortuneInput, NightInput
 from .prompts.briefing import briefing_prompt
 from .prompts.coaching import coaching_prompt
+from .prompts.fortune import fortune_prompt
 from .prompts.night import night_prompt
 from .tools import tools_for
 
@@ -18,6 +19,7 @@ START_SIGNALS = {
     "briefing": "브리핑을 시작해 주세요. 먼저 확인 질문 하나만 하고, 사용자가 대답할 때까지 멈춰서 기다려 주세요.",
     # 실험 E: 신호가 짧으면 AI가 사용자 답을 듣기 전에 1번 단계를 완료로 기록하고 2번 단계까지 안내했다
     "coaching": "코칭을 시작해 주세요. 1번 단계만 안내하고, 사용자가 대답할 때까지 멈춰서 기다려 주세요. 아직 아무것도 기록하지 마세요.",
+    "fortune": "포춘을 읽어 주세요. 소개 한 문장 뒤에 포춘 문장을 한 번만 그대로 읽고 멈춰 주세요.",
 }
 
 
@@ -26,8 +28,8 @@ def start_signal(kind: str) -> str:
 
 
 def build_setup(kind: str, inp) -> dict:
-    """kind: night / briefing / coaching. 토큰의 bidiGenerateContentSetup에 그대로 넣는 값."""
-    prompt = {"night": night_prompt, "briefing": briefing_prompt, "coaching": coaching_prompt}[kind](inp)
+    """kind: night / briefing / fortune / coaching. 토큰의 bidiGenerateContentSetup에 그대로 넣는 값."""
+    prompt = {"night": night_prompt, "briefing": briefing_prompt, "fortune": fortune_prompt, "coaching": coaching_prompt}[kind](inp)
     return {
         "model": f"models/{LIVE_MODEL}",
         "generationConfig": {

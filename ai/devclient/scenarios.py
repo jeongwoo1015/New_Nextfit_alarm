@@ -2,7 +2,7 @@
 import re
 from dataclasses import dataclass, field, replace
 
-from ..live.inputs import (BriefingInput, CalendarEvent, CoachingInput, NightInput, NightRecordView, Persona,
+from ..live.inputs import (BriefingInput, CalendarEvent, CoachingInput, FortuneInput, NightInput, NightRecordView, Persona,
                            Step, Weather)
 from ..personalization.strategy import Strategy, strategy_block
 from ..tasks.content_steps import fallback_steps
@@ -141,6 +141,24 @@ SCENARIOS = {s.name: s for s in [
              CoachingInput(persona=Persona("예준"), morning_call_type="CONTENT", steps=tuple(QUIZ)),
              ("서울이에요", "열두 달이요", "세종대왕이요", "고마워요 이만 끝낼게요"),
              expect={"verdicts": {1: "done", 2: "done", 3: "done"}, "step_names": [s.name for s in QUIZ], "answers": ["서울", "열두 달", "세종대왕"], "farewell": True}),
+    # 포춘 읽기: 서버가 만든 문장을 AI가 그대로 읽는지 본다 (사용자는 말하지 않고 시작 신호만 보낸다)
+    Scenario("fortune_cookie", "fortune",
+             FortuneInput(persona=Persona("예준", "FORMAL", "KIND"), style="COOKIE",
+                          fortune_text="용기는 떨림이 사라진 뒤가 아니라, 첫마디를 꺼낼 때 찾아옵니다."),
+             (), expect={"fortune_text": "용기는 떨림이 사라진 뒤가 아니라, 첫마디를 꺼낼 때 찾아옵니다."}),
+    Scenario("fortune_horoscope", "fortune",
+             FortuneInput(persona=Persona("예준", "FORMAL", "KIND"), style="HOROSCOPE",
+                          fortune_text="오늘의 관계운 키워드는 '여백'. 답을 서두르기보다 내 마음부터 살펴보세요."),
+             (), expect={"fortune_text": "오늘의 관계운 키워드는 '여백'. 답을 서두르기보다 내 마음부터 살펴보세요."}),
+    Scenario("fortune_casual", "fortune",
+             FortuneInput(persona=Persona("예준", "CASUAL", "FRIENDLY"), style="HOROSCOPE",
+                          fortune_text="오늘의 행운 자세는 기지개야. 어깨를 펴고 하루를 열어 봐."),
+             (), tone="CASUAL", expect={"fortune_text": "오늘의 행운 자세는 기지개야. 어깨를 펴고 하루를 열어 봐."}),
+    Scenario("fortune_replay", "fortune",
+             FortuneInput(persona=Persona("예준", "FORMAL", "KIND"), style="COOKIE",
+                          fortune_text="어제 비워둔 칸은 오늘의 가능성이 들어갈 자리입니다."),
+             ("한 번만 다시 읽어 주세요", "고마워요 이만 끝낼게요"),
+             expect={"fortune_text": "어제 비워둔 칸은 오늘의 가능성이 들어갈 자리입니다.", "replay": True, "farewell": True}),
     Scenario("coaching_resumed", "coaching", CoachingInput(persona=Persona("예준"), steps=COACH_STEPS_RESUMED, resumed=True, night=NIGHT_REC),
              ("물 한 잔 마셨어요", "스트레칭은 오늘 건너뛸게요", "오늘 할 일은 보고서 쓰기, 운동하기, 장보기예요", "고마워요 이만 끝낼게요"),
              expect={"verdicts": {4: "done", 5: "skipped", 6: "done"}, "step_names": [s.name for s in COACH_STEPS_RESUMED], "farewell": True}),

@@ -243,7 +243,9 @@ def test_scenarios_build_valid_setup(name):
     setup = build_setup(s.kind, s.inp)
     assert setup["systemInstruction"]["parts"][0]["text"]
     assert isinstance(s.inp, {"night": NightInput, "briefing": BriefingInput}.get(s.kind, object))
-    assert s.utterances                                              # 새 흐름에서는 브리핑도 사용자 답(확인 질문 답/준비됐어)이 필요하다
+    assert s.utterances or s.kind == "fortune"                       # 새 흐름에서는 브리핑도 사용자 답(확인 질문 답/준비됐어)이 필요하다. 포춘은 읽기만 해서 말이 없어도 된다
+    if s.kind == "fortune":
+        assert s.expect.get("fortune_text") and s.expect["fortune_text"] in s.inp.fortune_text         # 읽을 문장이 기대값과 같다
     if s.expect.get("farewell"):
         assert s.utterances[-1] and any(w in s.utterances[-1] for w in ("잘게", "끊을게", "끝낼게"))   # 끝내는 쪽은 항상 사용자
     if s.kind == "briefing":
@@ -443,3 +445,41 @@ def test_fixed_script_sentences_are_exempt_from_tone_check():
     said = "스트레칭 하자. 목을 천천히 좌우로 돌려요. 어깨를 크게 돌려요."          # 스크립트 문장은 그대로 읽은 것
     assert "반말 유지" not in failed(check(log("coaching", [T(said)]), s))
     assert "반말 유지" in failed(check(log("coaching", [T("스트레칭 해요. 시작해요.")]), s))      # 스크립트가 아닌 존댓말은 여전히 실패
+
+
+# ---------- 포춘 읽기 ----------
+FORTUNE = "용기는 떨림이 사라진 뒤가 아니라, 첫마디를 꺼낼 때 찾아옵니다."
+
+
+def fscn(**kw):
+    s = scn("fortune", fortune_text=FORTUNE, **kw)
+    return s
+
+
+def test_fortune_exact_reading_passes():
+    r = check(log("fortune", [T(f"오늘의 포춘이에요. {FORTUNE}")]), fscn())
+    assert not failed(r) and not failed(r, SOFT)
+    r = check(log("fortune", [T(f"오늘의 포춘이에요.{FORTUNE.replace(', ', ',')}")]), fscn())     # 받아쓰기 공백·쉼표 차이는 허용
+    assert not failed(r)
+
+
+def test_fortune_changed_or_missing_sentence_fails():
+    changed = "용기는 떨림이 사라진 뒤에 찾아옵니다."
+    assert "포춘: 문장을 한 글자도 바꾸지 않고 읽음" in failed(check(log("fortune", [T(f"오늘의 포춘이에요. {changed}")]), fscn()))
+    assert "포춘: 문장을 한 글자도 바꾸지 않고 읽음" in failed(check(log("fortune", [T("오늘의 포춘이에요.")]), fscn()))
+
+
+def test_fortune_extras_are_soft_but_repeat_question_and_calls_are_hard():
+    chatty = f"좋은 아침이에요. 오늘의 포춘이에요. {FORTUNE} 힘이 되었으면 좋겠어요. 오늘도 파이팅이에요."
+    r = check(log("fortune", [T(chatty)]), fscn())
+    assert "포춘: 소개 한 문장 외에 덧붙이지 않음" in failed(r, SOFT) and not failed(r)
+    assert "포춘: 첫 응답에서 한 번만 읽음" in failed(check(log("fortune", [T(f"{FORTUNE} {FORTUNE}")]), fscn()))
+    assert "포춘: 읽은 뒤 질문하지 않음" in failed(check(log("fortune", [T(f"{FORTUNE} 어때요?")]), fscn()))
+    assert "포춘: 읽는 중 함수 호출 없음" in failed(check(log("fortune", [T(FORTUNE, calls=[END])]), fscn()))
+
+
+def test_fortune_replay_check():
+    ok = log("fortune", [T(FORTUNE), T(FORTUNE, heard="다시 읽어 주세요"), T("네 좋은 하루 보내세요.", [END], heard="이만 끝낼게요")], "end_session")
+    assert not failed(check(ok, fscn(replay=True, farewell=True)))
+    bad = log("fortune", [T(FORTUNE), T("네 알겠어요.", heard="다시 읽어 주세요")])
+    assert "포춘: 다시 읽어 달라고 하면 그대로 한 번 더 읽음" in failed(check(bad, fscn(replay=True)))

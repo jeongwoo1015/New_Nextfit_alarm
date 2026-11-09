@@ -1,4 +1,4 @@
-# AI 파트 CONTRACTS (정의서 11/01 기준, 2026-11-02 갱신)
+# AI 파트 CONTRACTS (정의서 11/01 기준, 2026-11-09 갱신: 오늘의 포춘 추가)
 
 ## 1. AI 파트 파일별 기능
 
@@ -11,6 +11,8 @@
 | 서버 | 통화 종료 후 | `tasks.night_record.extract_night_record(원문, llm)` | RS_NIGHT_RECORD 칸 (`override_skip_coaching` 포함) |
 | 서버 | 통화 종료 후 | `tasks.routine_changes.parse_routine_changes(원문, 항목, llm)` | 항목별 `{template_item_id, duration_sec, scope}` 목록 |
 | 서버 | 콘텐츠 알람 세션 생성 | `tasks.content_steps.compose_content_steps(종류, 세부, llm, today)` | 고정 5분 단계 목록 (실패해도 기본 단계) |
+| 서버 | 아침 세션 시작(포춘 단계 전) | `tasks.fortune.compose_fortune(한마디, llm, style, tone, today, diary_text)` | 읽을 포춘 문장 1개 (`text`, `style`, `source`). 실패·한마디 없음이어도 기본 문장 |
+| 서버 | 포춘 읽기 토큰 발급 | `live.config.build_setup("fortune", FortuneInput(persona, fortune_text, style))`, `start_signal("fortune")` | 문장을 그대로 읽는 짧은 Live 설정 (사용자가 끝내겠다고 할 때만 쓰는 `end_session` 외 함수 없음) |
 | 서버 | 아침 세션 시작 | `personalization.agent.decide(...)`, 세션 끝나면 `learn(...)` | 오늘의 전략 문장(브리핑·코칭용), 전략 로그 한 행 |
 | 서버 | 배치 | `tasks.music.all_music_rows()` | AI 음악 9곡의 생성 프롬프트 |
 
@@ -21,11 +23,12 @@
 | 파일 | 기능 |
 |---|---|
 | `config.py` | Live 연결 설정 조립(`build_setup`), 시작 신호(`start_signal`), 임시 토큰 요청 본문(`token_request_body`) |
-| `inputs.py` | 서버가 넘기는 입력 형식: `Persona`, `Weather`(지역 이름 포함), `NightInput`, `BriefingInput`, `CoachingInput`, `Step` |
-| `tools.py` | AI가 부르는 함수 선언: `end_session`, `start_routine`, `report_step_result`, `adjust_step_time`. `tools_for`가 세션 종류에 따라 목록을 정함 |
+| `inputs.py` | 서버가 넘기는 입력 형식: `Persona`, `Weather`(지역 이름 포함), `NightInput`, `BriefingInput`, `FortuneInput`, `CoachingInput`, `Step` |
+| `tools.py` | AI가 부르는 함수 선언: `end_session`, `start_routine`, `report_step_result`, `adjust_step_time`. `tools_for`가 세션 종류(밤·브리핑·포춘·코칭)에 따라 목록을 정함 |
 | `version.py` | `PROMPT_VERSION`. 프롬프트를 바꿀 때마다 올리고 전략 로그에 함께 기록 |
 | `prompts/night.py` | 밤 대화 프롬프트: 일정으로 시작, 하루 요약, 내일 목표·특이사항, 하루 한정 조정, 루틴 항목 시간 변경 |
 | `prompts/briefing.py` | 아침 브리핑 프롬프트: 확인 질문 1개 → 시각·날씨(지역)·일정·어젯밤 이어받기 → 다음 세션 준비 확인 |
+| `prompts/fortune.py` | 포춘 읽기 프롬프트: 서버가 만든 포춘 문장을 소개 한 문장 뒤에 한 글자도 바꾸지 않고 한 번만 읽고 멈춘다(함수 호출 없음) |
 | `prompts/coaching.py` | 코칭 프롬프트: 단계를 하나씩 안내·판정, 루틴 세션은 오늘 시간 변경(`adjust_step_time`) 규칙 포함 |
 | `prompts/common.py` | 세 프롬프트가 함께 쓰는 조각: 안전 규칙, 음성 규칙, 어조, 일정·날씨·어젯밤 기록 블록 |
 
@@ -35,6 +38,7 @@
 |---|---|
 | `night_record.py` | 밤 대화 원문 → RS_NIGHT_RECORD 칸. 하루 한정 변경은 `override_wake_time`, `override_skip_coaching` |
 | `routine_changes.py` | 밤 대화 원문 → 루틴 항목별 빼기(0초)·시간 변경(30초 단위)·되돌리기(null)와 범위(`TOMORROW`/`ALWAYS`) |
+| `fortune.py` | 밤에 남긴 한마디 → 오늘의 포춘 문장 1개. 스타일 2종(`COOKIE` 포춘쿠키 / `HOROSCOPE` 오늘의 운세), 말투(존댓말·반말), 예언·숫자·질문 금지 검증, 위기 표현이면 담담한 문장, 실패·한마디 없음이면 기본 문장 |
 | `content_steps.py` | 콘텐츠 알람(명상·운동·외국어·퀴즈)의 고정 5분 단계 구성. AI 호출이 실패해도 기본 단계를 돌려줌 |
 | `music.py` | AI 음악 9곡(재기상 5, 수면 4)의 생성 프롬프트와 DB 시드 행 |
 | `llm.py` | Gemini 텍스트 호출(`GeminiText`): 과부하 시 다른 모델로 넘어가기, 총 대기시간 상한, JSON 응답 정리 |
@@ -114,6 +118,7 @@ AI 쪽 코드 + 단위 테스트 + (프롬프트가 바뀐 곳은) 실제 Gemini
 | B10 | AI 음악 **mp3 9개가 없음** | 프롬프트만 준비됐다. 파일 생성은 AI 담당 몫이다. |
 | B11 | **실제 사람 목소리·실제 앱 연결** 시험을 안 함 | 합성 음성과 고정 대사로만 시험했다. AI가 함수 호출을 가끔 빼먹는다(`start_routine` 누락 1회). |
 | B12 | 개인화 **효과 검증 안 됨** | `sim.py`는 가상 사용자라 효과의 근거가 아니다. 스누즈 횟수는 읽기만 하고 통계·규칙에는 쓰지 않는다. |
+| B13 | **오늘의 포춘**: 입력·저장·읽기 세션 연결이 팀 결정 전 | AI 쪽(문장 생성, 읽기 프롬프트)은 완료. 4장 B13의 요청 4가지가 필요하다. 한마디 받아쓴 글이 아직 서버에 없어 한 줄 일기(`diary_text`)로 대신할 수 있다. |
 
 ## 4. 부족한 사항을 이어서 개발하는 방법 (협업)
 
@@ -170,6 +175,18 @@ AI 쪽 코드 + 단위 테스트 + (프롬프트가 바뀐 곳은) 실제 Gemini
 - **서버가 할 일:** 사용자 테스트 기간에 `rs_strategy_log`와 보상(`REWARD`)을 쌓는다.
 - **AI가 할 일:** 모드 `ab`로 규칙과 Bandit을 비교하는 분석을 만든다. 스누즈 통계는 데이터가 쌓인 뒤 필요하면 반영한다.
 
+### B13. 오늘의 포춘 (새 아이디어 11/06)
+- **AI가 한 일:** `tasks.fortune.compose_fortune`(두 스타일), 읽기 세션(`build_setup("fortune", …)`). 실제 모델로 예시 입력 8개를 두 스타일로 만들어 확인했고, 읽기 세션은 12번 중 12번 문장을 한 글자도 바꾸지 않고 읽었다(다시 읽어 달라는 요청 포함).
+- **앱이 할 일:** 밤의 '내일의 한 마디'를 기기에서 받아쓴 글(`VoiceTranscriber`)을 목소리 업로드와 함께 서버에 보낸다. 포춘 단계에서 포춘 읽기 Live를 열고, **AI 음성이 끝나면(turnComplete) 앱이 다음 단계(콘텐츠)로 넘어간다.** 이 세션에서 AI는 함수를 부르지 않는다(말하면서 함수를 부르는 방식이 불안정해서).
+- **서버가 할 일(요청 4가지):**
+  1. 한마디 받아쓴 글을 저장할 칸과, 그것을 받는 방법(목소리 업로드 요청에 함께 보내거나 별도 필드).
+  2. 아침 세션을 만들 때 `compose_fortune(한마디, llm, style, tone, today, diary_text=한 줄 일기)`를 부르고 결과 문장을 세션에 저장해 앱에 내려준다. 한마디가 없는 날은 한 줄 일기로 대신한다(함수가 처리).
+  3. 포춘 읽기 토큰 엔드포인트(브리핑 토큰과 같은 형태): `build_setup("fortune", FortuneInput(persona, fortune_text, style))`와 `start_signal("fortune")`.
+  4. 스타일 정책. 기본은 날짜에 따라 두 스타일을 번갈아 쓴다(`style=None`). 고정하거나 사용자 설정으로 고르게 하려면 정해 주면 `style`만 넘기면 된다.
+- **팀이 정할 것:** 한마디를 건너뛴 날의 포춘(일기로 대신하는 현재 방식 / 건너뛰기), 포춘을 읽는 동안 앱 화면(문장 자막 표시 여부), 스타일 고정 여부.
+- **참고:** 입력에 자해·자살 표현이 있으면 포춘 대신 담담한 문장(`source="safe"`)을 돌려준다. 위기 대응 자체는 밤·아침 대화의 안전 규칙이 맡는다. 짧은 시간에 호출이 몰리면 모델이 429를 돌려줄 수 있고, 그때도 기본 문장(`source="fallback"`)이 나온다.
+- **끝난 기준:** 앱에서 한마디를 말한 다음 날 아침, 포춘 단계에서 AI가 문장을 읽고 콘텐츠로 넘어간다.
+
 ## 5. 서버 어댑터(`backend/clients/ai_gateway.py`) 수정 목록
 
 옛 이름을 새 이름으로 바꾸면 된다. 아래 외의 부분은 그대로 동작한다.
@@ -207,3 +224,4 @@ AI 쪽 코드 + 단위 테스트 + (프롬프트가 바뀐 곳은) 실제 Gemini
 2. **`start_routine`:** 기존과 같다. 코칭을 안 하는 날(`coaching_skipped`)에는 함수 목록에 없다.
 3. **`adjust_step_time(step_order, seconds)`:** 루틴 코칭 Live에서 AI가 부른다. 앱은 `PATCH …/steps/{n}/duration`으로 서버에 전달하고 AI에는 `{"result":"ok"}`를 돌려준다. 콘텐츠 코칭에는 이 함수가 없다. 거절 시 응답 형식은 B7에서 정한다.
 4. **`report_step_result`, `end_session`:** 기존과 같다.
+5. **오늘의 포춘:** 아침 순서는 브리핑 → 전날 녹음 듣기 → 포춘 → 콘텐츠다. 포춘 단계에서 앱이 포춘 읽기 Live(함수 호출 없음)를 열고, AI 음성이 끝나면 다음 단계로 넘어간다. 자세한 요청은 4장 B13.

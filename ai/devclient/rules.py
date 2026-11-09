@@ -51,7 +51,8 @@ POLITE_END = re.compile(r"(요|니다|니까|세요)$")
 def _script_text(scn) -> str:
     inp = getattr(scn, "inp", None)
     steps = list(getattr(inp, "steps", ()) or ()) + list(getattr(inp, "content_steps", ()) or ())
-    return re.sub(r"[\s.!?~…,]", "", " ".join(s.script for s in steps if getattr(s, "script", "")))
+    scripts = [s.script for s in steps if getattr(s, "script", "")] + [getattr(inp, "fortune_text", "") or ""]
+    return re.sub(r"[\s.!?~…,]", "", " ".join(scripts))
 
 
 def _from_script(sentence: str, scn) -> bool:
@@ -198,6 +199,19 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
                 add("브리핑: 준비됐다는 답 뒤에만 시작", HARD, i >= 2 and bool(READY.search(t.heard)), f"{i}번째 턴, 사용자 말={t.heard!r}")
         if e.get("expect_start"):
             add("브리핑: 준비됐다고 하면 start_routine 호출", HARD, log.ended_by == "start_routine", f"종료 방식={log.ended_by}")
+
+    elif kind == "fortune":
+        want = re.sub(r"[\s.!?~…,\"'‘’“”]", "", e.get("fortune_text", ""))
+        norm = lambda s: re.sub(r"[\s.!?~…,\"'‘’“”]", "", s)
+        first = norm(texts[0]) if texts else ""
+        add("포춘: 문장을 한 글자도 바꾸지 않고 읽음", HARD, bool(want) and want in first, f"읽은 말={texts[0] if texts else ''!r}")
+        extra_chars = len(first) - len(want) if want in first else None
+        add("포춘: 소개 한 문장 외에 덧붙이지 않음", SOFT, extra_chars is not None and extra_chars <= 18, f"덧붙은 글자 {extra_chars}자: {texts[0] if texts else ''}")
+        add("포춘: 첫 응답에서 한 번만 읽음", HARD, first.count(want) == 1 if want else False, f"{first.count(want) if want else 0}번 읽음")
+        add("포춘: 읽는 중 함수 호출 없음", HARD, not (turns and turns[0].calls), str(turns[0].calls if turns else ""))
+        add("포춘: 읽은 뒤 질문하지 않음", HARD, "?" not in (texts[0] if texts else ""), texts[0] if texts else "")
+        if e.get("replay") and len(turns) > 1:
+            add("포춘: 다시 읽어 달라고 하면 그대로 한 번 더 읽음", HARD, want in norm(turns[1].said), f"{turns[1].said!r}")
 
     elif kind == "coaching":
         add("코칭: 사용자 답 전에 판정 호출 없음", HARD, not (turns and turns[0].calls), str(turns[0].calls if turns else ""))
