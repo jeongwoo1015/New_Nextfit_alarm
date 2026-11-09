@@ -243,7 +243,9 @@ def test_scenarios_build_valid_setup(name):
     setup = build_setup(s.kind, s.inp)
     assert setup["systemInstruction"]["parts"][0]["text"]
     assert isinstance(s.inp, {"night": NightInput, "briefing": BriefingInput}.get(s.kind, object))
-    assert s.utterances                                              # 새 흐름에서는 브리핑도 사용자 답(확인 질문 답/준비됐어)이 필요하다
+    assert s.utterances or s.kind == "fortune"                       # 새 흐름에서는 브리핑도 사용자 답(확인 질문 답/준비됐어)이 필요하다. 포춘은 읽기만 해서 말이 없어도 된다
+    if s.kind == "fortune":
+        assert s.expect.get("fortune_text") and s.expect["fortune_text"] in s.inp.fortune_text         # 읽을 문장이 기대값과 같다
     if s.expect.get("farewell"):
         assert s.utterances[-1] and any(w in s.utterances[-1] for w in ("잘게", "끊을게", "끝낼게"))   # 끝내는 쪽은 항상 사용자
     if s.kind == "briefing":
@@ -282,6 +284,84 @@ def content_scn(**kw):
     base = dict(verdicts=QUIZ_VERDICTS, answers=["서울", "열두 달", "세종대왕"], farewell=True)
     base.update(kw)
     return scn("coaching", **base)
+
+
+# ---------- 시간 표기: "열다섯 분"이 아니라 15분 / 십오 분 ----------
+def test_native_korean_minutes_are_flagged():
+    rule = "시간은 '열다섯 분'이 아니라 15분·십오 분으로 말함"
+    for bad in ("회의는 아홉 시 열다섯 분에 시작해요.", "독서는 열다섯분 동안 해요.", "스트레칭은 스무 분이 아니라 두 분 반이에요."):
+        assert rule in failed(check(log("coaching", [T(bad)]), scn("coaching"))), bad
+    for ok in ("회의는 9시 15분에 시작해요.", "독서는 십오 분 동안 해요.", "지금은 일곱 시 이 분이에요.", "한 분이 오셨어요."):
+        assert rule not in failed(check(log("coaching", [T(ok)]), scn("coaching"))), ok
+
+
+# ---------- 루틴 중간 독려 ----------
+def test_encouragement_between_steps_is_required():
+    def coach(says):
+        turns = [T("첫 단계예요. 물 한 잔 마셔 주세요.")] + [T(txt, [rep(i, "done")], heard="했어요") for i, txt in enumerate(says, 1)]
+        return log("coaching", turns)
+    s = scn("coaching", verdicts={1: "done", 2: "done", 3: "done"}, encourages=True)
+    rule = "코칭: 단계 사이에 독려 한마디"
+    plain = coach(["잘하셨어요. 다음은 스트레칭이에요.", "좋아요. 마지막은 할 일 말하기예요.", "수고하셨어요."])
+    assert rule in failed(check(plain, s))
+    cheer = coach(["잘하셨어요. 다음은 스트레칭이에요.", "좋아요, 거의 다 왔어요. 마지막은 할 일 말하기예요.", "수고하셨어요."])
+    assert rule not in failed(check(cheer, s))
+    last_only = coach(["잘하셨어요. 다음은 스트레칭이에요.", "좋아요. 마지막은 할 일 말하기예요.", "정말 대단해요, 힘차게 하루를 시작해요."])    # 마지막 단계 뒤 마무리 칭찬은 세지 않는다
+    assert rule in failed(check(last_only, s))
+
+
+# ---------- 밤 대화 마무리: 묻지 않고 "이제 마무리할게요", 작별 인사는 한 번만, 그 응답에서 end_session ----------
+CLOSING_BASE = [T("오늘 하루는 어땠어요?"), T("점심은 뭘 드셨어요?", heard="별일 없었어요"),
+                T("오늘은 김치찌개를 맛있게 먹은 평온한 하루였던 것 같아요, 맞아요?", heard="김치찌개요"),
+                T("내일 미리 챙길 일정이나 걱정이 있으세요?", heard="네 맞아요")]
+
+
+def test_ai_closes_by_itself_after_summary_and_tomorrow():
+    ok = log("night", CLOSING_BASE + [T("이제 마무리할게요. 편안한 밤 되세요.", [END], heard="없어요")], "end_session")
+    r = check(ok, scn("night", ends_cleanly=True))
+    for rule in ("밤: 작별 인사는 한 번만 하고 그 응답에서 대화를 끝냄", "밤: 마무리해도 되는지 묻지 않음", "밤: 요약 확인과 내일 이야기를 마친 뒤에 마무리함",
+                 "밤: 마무리하는 응답은 질문으로 끝나지 않음", "사용자가 끝내자고 하기 전에 AI가 끝내지 않음"):
+        assert rule not in failed(r), rule
+
+
+def test_asking_for_permission_to_close_fails():
+    bad = log("night", CLOSING_BASE + [T("더 하고 싶은 이야기가 없으시면 이제 마무리할까요?", [END], heard="없어요")], "end_session")
+    assert "밤: 마무리해도 되는지 묻지 않음" in failed(check(bad, scn("night", ends_cleanly=True)))
+
+
+def test_closing_before_summary_and_tomorrow_fails():
+    early = log("night", [T("오늘 하루는 어땠어요?"), T("이제 마무리할게요. 편안한 밤 되세요.", [END], heard="별일 없었어요")], "end_session")
+    r = check(early, scn("night", ends_cleanly=True))
+    assert "밤: 요약 확인과 내일 이야기를 마친 뒤에 마무리함" in failed(r)
+
+
+def test_closing_response_must_not_end_with_a_question():
+    bad = log("night", CLOSING_BASE + [T("이제 마무리할게요, 괜찮으시죠?", [END], heard="없어요")], "end_session")
+    assert "밤: 마무리하는 응답은 질문으로 끝나지 않음" in failed(check(bad, scn("night", ends_cleanly=True)))
+
+
+def test_end_without_closing_words_or_user_farewell_is_still_early():
+    early = log("night", [T("오늘 하루는 어땠어요?"), T("편안한 밤 되세요.", [END], heard="별일 없었어요")], "end_session")
+    assert "사용자가 끝내자고 하기 전에 AI가 끝내지 않음" in failed(check(early, scn("night")))
+    no_close = log("night", [T("내일 걱정이 있으세요?"), T("알겠어요.", [END], heard="없어요")], "end_session")
+    assert "사용자가 끝내자고 하기 전에 AI가 끝내지 않음" in failed(check(no_close, scn("night")))
+
+
+def test_short_ack_after_farewell_ends_immediately():
+    ok = log("night", [T("내일 걱정이 있으세요?"), T("알겠어요. 편안한 밤 되세요.", heard="없어요"), T("", [END], heard="알았다고")], "end_session")
+    assert "사용자가 끝내자고 하기 전에 AI가 끝내지 않음" not in failed(check(ok, scn("night")))
+
+
+def test_repeating_goodnight_wishes_without_ending_fails():
+    bad = log("night", CLOSING_BASE + [T("편안한 밤 되세요.", heard="없어요"), T("좋은 꿈 꾸세요.", heard="그래")], "turnComplete")
+    assert "밤: 작별 인사는 한 번만 하고 그 응답에서 대화를 끝냄" in failed(check(bad, scn("night", ends_cleanly=True)))
+
+
+def test_opening_greeting_is_not_a_farewell_and_empty_turns_are_skipped():
+    turns = [T("예준 님, 오늘 하루는 어땠어요? 편안한 밤이에요.")] + CLOSING_BASE[1:] + [T("", heard=""), T("편안한 밤 되세요.", heard="그래"), T("", [END], heard="알았다고")]
+    r = check(log("night", turns, "end_session"), scn("night", ends_cleanly=True))
+    assert "사용자가 끝내자고 하기 전에 AI가 끝내지 않음" not in failed(r)             # 작별 뒤 "알았다고"에 끝내는 것은 허용 (빈 턴은 건너뜀)
+    assert "밤: 작별 인사는 한 번만 하고 그 응답에서 대화를 끝냄" in failed(r)        # 다만 이상적인 동작(작별 응답에서 바로 종료)은 아니므로 엄격 검사는 실패
 
 
 # ---------- 코칭 중 오늘 시간 변경 (adjust_step_time) ----------
@@ -365,3 +445,41 @@ def test_fixed_script_sentences_are_exempt_from_tone_check():
     said = "스트레칭 하자. 목을 천천히 좌우로 돌려요. 어깨를 크게 돌려요."          # 스크립트 문장은 그대로 읽은 것
     assert "반말 유지" not in failed(check(log("coaching", [T(said)]), s))
     assert "반말 유지" in failed(check(log("coaching", [T("스트레칭 해요. 시작해요.")]), s))      # 스크립트가 아닌 존댓말은 여전히 실패
+
+
+# ---------- 포춘 읽기 ----------
+FORTUNE = "용기는 떨림이 사라진 뒤가 아니라, 첫마디를 꺼낼 때 찾아옵니다."
+
+
+def fscn(**kw):
+    s = scn("fortune", fortune_text=FORTUNE, **kw)
+    return s
+
+
+def test_fortune_exact_reading_passes():
+    r = check(log("fortune", [T(f"오늘의 포춘이에요. {FORTUNE}")]), fscn())
+    assert not failed(r) and not failed(r, SOFT)
+    r = check(log("fortune", [T(f"오늘의 포춘이에요.{FORTUNE.replace(', ', ',')}")]), fscn())     # 받아쓰기 공백·쉼표 차이는 허용
+    assert not failed(r)
+
+
+def test_fortune_changed_or_missing_sentence_fails():
+    changed = "용기는 떨림이 사라진 뒤에 찾아옵니다."
+    assert "포춘: 문장을 한 글자도 바꾸지 않고 읽음" in failed(check(log("fortune", [T(f"오늘의 포춘이에요. {changed}")]), fscn()))
+    assert "포춘: 문장을 한 글자도 바꾸지 않고 읽음" in failed(check(log("fortune", [T("오늘의 포춘이에요.")]), fscn()))
+
+
+def test_fortune_extras_are_soft_but_repeat_question_and_calls_are_hard():
+    chatty = f"좋은 아침이에요. 오늘의 포춘이에요. {FORTUNE} 힘이 되었으면 좋겠어요. 오늘도 파이팅이에요."
+    r = check(log("fortune", [T(chatty)]), fscn())
+    assert "포춘: 소개 한 문장 외에 덧붙이지 않음" in failed(r, SOFT) and not failed(r)
+    assert "포춘: 첫 응답에서 한 번만 읽음" in failed(check(log("fortune", [T(f"{FORTUNE} {FORTUNE}")]), fscn()))
+    assert "포춘: 읽은 뒤 질문하지 않음" in failed(check(log("fortune", [T(f"{FORTUNE} 어때요?")]), fscn()))
+    assert "포춘: 읽는 중 함수 호출 없음" in failed(check(log("fortune", [T(FORTUNE, calls=[END])]), fscn()))
+
+
+def test_fortune_replay_check():
+    ok = log("fortune", [T(FORTUNE), T(FORTUNE, heard="다시 읽어 주세요"), T("네 좋은 하루 보내세요.", [END], heard="이만 끝낼게요")], "end_session")
+    assert not failed(check(ok, fscn(replay=True, farewell=True)))
+    bad = log("fortune", [T(FORTUNE), T("네 알겠어요.", heard="다시 읽어 주세요")])
+    assert "포춘: 다시 읽어 달라고 하면 그대로 한 번 더 읽음" in failed(check(bad, fscn(replay=True)))

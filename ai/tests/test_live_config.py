@@ -192,7 +192,7 @@ def test_night_flow_new_design():
     assert "내일의 핵심 목표 한 가지" in p and "내일 특이사항" in p and "하루 요약 뒤에 위 4번처럼 묻는다" in p   # 내일 목표·특이사항을 다시 묻되 하루 이야기 뒤에
     assert "오늘은 내일 …" in p and "어색한 표현은 쓰지 않는다" in p                                          # 사용자가 지적한 어색한 문장 금지
     assert "오늘 하루를 한두 문장으로 요약해 맞는지 묻는다" in p and "한 줄 일기의 바탕" in p   # 요약을 사용자가 확인 → 일기
-    assert "내일 이야기까지 마쳐도 대화를 스스로 마무리하지 않는다" in p
+    assert "하루 요약이나 내일 이야기를 마치기 전에는 스스로 대화를 끝내지 않는다" in p
     assert "제안한 뒤에는 반드시 사용자의 대답을 기다린다" in p and "변경을 정했다고 말하지 않는다" in p   # 가짜 동의 방지
     assert "사용자가 맞다고 해야 확정이다" in p
     assert "조정은 두 경우에만 다룬다" in p and "많이 피곤해 보이면" in p and "직접 알람 시각 변경이나 코칭" in p
@@ -240,6 +240,21 @@ def test_tools_follow_the_session_plan():
     assert [d["name"] for d in build_setup("briefing", BriefingInput(content_name="퀴즈"))["tools"][0]["functionDeclarations"]] == ["start_routine", "end_session"]
 
 
+def test_time_words_rule_is_in_every_conversation():
+    rule = '"7시 15분", "15분", "30초"처럼 말하고, 분과 초를 "열다섯 분", "서른 초"처럼 우리말 수로 풀어 말하지 않는다'
+    for p in (night_prompt(NightInput()), briefing_prompt(BriefingInput()), coaching_prompt(CoachingInput(steps=STEPS)),
+              coaching_prompt(CoachingInput(morning_call_type="CONTENT", steps=STEPS))):
+        assert rule in p
+
+
+def test_routine_coaching_encourages_between_steps_but_content_does_not():
+    routine = coaching_prompt(CoachingInput(steps=STEPS))
+    assert "중간 독려(루틴 단계 사이):" in routine and "벌써 절반이에요." in routine and "독려 한마디를 담는다" in routine
+    assert "전체 두 문장을 넘기지 않는다" in routine and "부담 없는 격려만 한다" in routine and "독려를 덧붙이지 않는다" in routine
+    content = coaching_prompt(CoachingInput(morning_call_type="CONTENT", steps=STEPS))
+    assert "중간 독려" not in content                                     # 퀴즈·콘텐츠에는 적용하지 않는다
+
+
 def test_adjust_step_time_declaration_and_rules():
     decl = next(d for d in tools_for("coaching")[0]["functionDeclarations"] if d["name"] == "adjust_step_time")
     assert decl["parameters"]["required"] == ["step_order", "seconds"] and set(decl["parameters"]["properties"]) == {"step_order", "seconds"}
@@ -278,11 +293,33 @@ def test_weather_location_is_included_only_with_weather_values():
     assert "[오늘 날씨]\n- 맑음" in no_place and "- 지역" not in no_place
 
 
+def test_night_closes_by_itself_without_asking_and_ends_on_short_answers():
+    p = night_prompt(NightInput())
+    assert "마무리(공통 규칙의 종료 조건보다 이 규칙이 우선한다)" in p and "마무리해도 되는지 묻지 말고 마무리한다고 알린다" in p
+    assert "이제 마무리할게요. 오늘 하루도 수고하셨어요, 편안한 밤 되세요." in p and "같은 응답에서 end_session을 호출한다" in p
+    assert "마무리한다는 말과 질문을 함께 하지 않는다" in p and "마무리하는 응답은 예외" in p
+    assert "하루 요약이나 내일 이야기를 마치기 전에는 스스로 대화를 끝내지 않는다" in p       # 요약·내일 이야기 전에는 끝내지 않음
+    assert "마무리할까요" not in p                                                      # 허락을 묻는 문장은 없다 (사용자 지시: 끝낼 때 의견을 묻지 않는다)
+    assert "덕담이나 인사를 더 붙이지 않는다" in p and "곧바로 end_session을 호출한다" in p
+    casual = night_prompt(NightInput(persona=Persona(tone="CASUAL")))
+    assert "이제 마무리할게. 오늘 하루도 수고했어, 잘 자." in casual and "마무리할게요" not in casual
+
+
+def test_night_asks_small_concrete_things_on_quiet_days():
+    p = night_prompt(NightInput())
+    assert "작은 일 묻기(사용자가" in p and "아주 작고 구체적인 일 하나를 골라 묻는다" in p
+    assert "작은 일은 최대 두 번만 묻는다" in p and "막연한 질문은 하지 않는다" in p and "지어내거나" in p
+    assert "요약 확인 전에는 내일 이야기를 묻지 않는다" in p and "작은 일 한두 가지여도 된다" in p
+    assert "점심은 뭘 드셨어요?" in p
+    casual = night_prompt(NightInput(persona=Persona(tone="CASUAL")))
+    assert "점심은 뭐 먹었어?" in casual and "점심은 뭘 드셨어요?" not in casual and "하루였구나." in casual
+
+
 def test_night_examples_follow_the_tone_setting():
     formal = night_prompt(NightInput(persona=Persona(tone="FORMAL"), tomorrow_wake_time="07:00", routine_items=("독서",)))
     casual = night_prompt(NightInput(persona=Persona(tone="CASUAL"), tomorrow_wake_time="07:00", routine_items=("독서",)))
     assert "맞죠?" in formal and "잘 마무리하셨어요?" in formal and "맞지?" not in formal
     assert "맞지?" in casual and "잘 마무리했어?" in casual and "독서는 내일 하루만 빠져." in casual
-    for polite in ("맞죠?", "잘 마무리하셨어요?", "맞아요?", "쉬어 갈까요?", "빠져요.", "줄여 둘게요", "바꿔 둘게요"):                         # 반말 설정의 지시문에 존댓말 예시가 남아 있으면 말투가 섞인다
+    for polite in ("맞죠?", "잘 마무리하셨어요?", "맞아요?", "쉬어 갈까요?", "빠져요.", "줄여 둘게요", "바꿔 둘게요", "드셨어요?", "하루였군요.", "마무리할게요"):                         # 반말 설정의 지시문에 존댓말 예시가 남아 있으면 말투가 섞인다
         assert polite not in casual
     assert night_prompt(NightInput(persona=Persona(tone="???"))).count("잘 마무리하셨어요?") == 1             # 모르는 어조는 존댓말 예시

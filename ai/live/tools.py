@@ -43,12 +43,13 @@ ADJUST_STEP_TIME = {
 _BY_KIND = {
     "night": [END_SESSION],
     "briefing": [START_ROUTINE, END_SESSION],
+    "fortune": [END_SESSION],        # 읽고 멈추는 세션이라 사용자가 끝내겠다고 할 때만 쓴다. 앱이 음성이 끝나면 다음 단계로 넘어간다
     "coaching": [REPORT_STEP_RESULT, ADJUST_STEP_TIME, END_SESSION],
 }
 
 
 def tools_for(kind: str, inp=None) -> list[dict]:
-    """kind: night / briefing / coaching → Live setup의 tools 값.
+    """kind: night / briefing / fortune / coaching → Live setup의 tools 값.
 
     입력에 따라 다르다: 브리핑은 코칭을 하는 날에만 start_routine을 넣는다(코칭 안 하는 날은 브리핑만 한다).
     adjust_step_time은 루틴 세션에만 넣는다(콘텐츠는 고정 시간).

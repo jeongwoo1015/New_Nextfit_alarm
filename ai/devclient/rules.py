@@ -9,6 +9,21 @@ HARD, SOFT = "HARD", "SOFT"
 END_INTENT = re.compile(r"잘게|잘 ?자|이만|끊을게|그만|끝낼게|끝내|안녕|종료|들어갈게|가볼게")     # 사용자가 대화를 끝내겠다는 말
 READY = re.compile(r"준비|시작|응|네|좋아|그래|오케이|ㅇㅋ")                                      # 루틴을 시작할 준비가 됐다는 말
 ALARM_WORDS = re.compile(r"알람")
+NATIVE_UNIT = re.compile(r"(열|스무|스물|서른|마흔|쉰)(한|두|세|네|다섯|여섯|일곱|여덟|아홉)?\s?(분|초)")     # "열다섯 분"처럼 우리말 수로 분·초를 말함 (15분 / 십오 분이어야 한다)
+ENCOURAGE = re.compile(r"조금만|거의 다|힘내|화이팅|파이팅|벌써|절반|반이나|잘하고 (있|계)|잘 하고 (있|계)|계속 이렇게|이대로|멋져|훌륭|대단|힘차게")   # 단계 사이 독려 한마디
+ACCEPT = re.compile(r"응|네|그래|없어|알겠|알았|좋아|그렇게|오케이|ㅇㅋ")                 # 마무리를 받아들이는 짧은 대답
+WRAP_Q = re.compile(r"마무리할까|마칠까|이만 할까")                                      # 마무리해도 되는지 묻는 말 (밤 대화는 묻지 않고 알린다)
+CLOSE = re.compile(r"마무리할게")                                                       # AI가 "이제 마무리할게요"라고 알리는 말
+FAREWELL = re.compile(r"편안한 밤|좋은 꿈|푹 (쉬|주무|자)|안녕히|잘 자|좋은 밤")             # AI의 작별 인사
+
+
+def _may_end(turns, i) -> bool:
+    """end_session을 불러도 되는 턴인가: 사용자가 끝내겠다고 했거나, AI의 마무리 확인 질문·작별 인사 뒤에 짧게 받아들였을 때."""
+    heard = turns[i].heard
+    if END_INTENT.search(heard) or CLOSE.search(turns[i].said):      # AI가 "이제 마무리할게요"라고 알리며 끝내는 것은 허용(밤 대화)
+        return True
+    prev = next((t.said for t in reversed(turns[:i]) if t.said.strip()), "")      # 바로 앞 AI 말(빈 턴은 건너뜀)
+    return bool(ACCEPT.search(heard)) and bool(WRAP_Q.search(prev) or FAREWELL.search(prev))
 
 
 @dataclass
@@ -36,7 +51,8 @@ POLITE_END = re.compile(r"(요|니다|니까|세요)$")
 def _script_text(scn) -> str:
     inp = getattr(scn, "inp", None)
     steps = list(getattr(inp, "steps", ()) or ()) + list(getattr(inp, "content_steps", ()) or ())
-    return re.sub(r"[\s.!?~…,]", "", " ".join(s.script for s in steps if getattr(s, "script", "")))
+    scripts = [s.script for s in steps if getattr(s, "script", "")] + [getattr(inp, "fortune_text", "") or ""]
+    return re.sub(r"[\s.!?~…,]", "", " ".join(scripts))
 
 
 def _from_script(sentence: str, scn) -> bool:
@@ -71,6 +87,8 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
                  or (c["name"] == "adjust_step_time" and not (isinstance(c["args"].get("step_order"), int) and isinstance(c["args"].get("seconds"), int)
                                                               and c["args"]["seconds"] >= 0 and c["args"]["seconds"] % 30 == 0))]
     add("함수 호출 형식", HARD, not bad_calls, str(bad_calls))
+    native = [m.group(0) for t in turns for m in [NATIVE_UNIT.search(t.said)] if m]
+    add("시간은 '열다섯 분'이 아니라 15분·십오 분으로 말함", HARD, not native, f"우리말 수로 말함: {native[:3]}")
     sents = [s for t in texts for s in sentences(t) if not _from_script(s, scn)]       # 고정 스크립트는 그대로 읽는 것이 규칙이라 어조 검사에서 뺀다
     if scn.tone == "CASUAL":
         bad = [s for s in sents if POLITE_END.search(_ending(s))]
@@ -82,7 +100,7 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
     add("첫 소리 3초 이내", SOFT, fa is not None and fa <= 3.0, f"{fa}")
 
     # 대화는 사용자가 끝낸다: 사용자가 끝내겠다는 말을 하지 않았는데 AI가 end_session을 부르면 실패
-    early = [i for i, t in enumerate(turns) if "end_session" in _names(t) and not END_INTENT.search(t.heard)]
+    early = [i for i, t in enumerate(turns) if "end_session" in _names(t) and not _may_end(turns, i)]
     add("사용자가 끝내자고 하기 전에 AI가 끝내지 않음", HARD, not early, f"{early}번째 턴에서 종료 호출")
     if e.get("farewell"):
         add("사용자 작별 뒤 end_session 호출", HARD, log.ended_by == "end_session", f"종료 방식={log.ended_by}")
@@ -96,6 +114,35 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
         asked_tomorrow = [s for t in texts for s in sentences(t) if "?" in s and "내일" in s and re.search(r"일정|챙겨|목표|해내|걱정|특별한", s)]
         if e.get("asks_tomorrow"):
             add("밤: 내일 목표·특이사항을 물어봄", SOFT, bool(asked_tomorrow), "내일 이야기를 묻는 질문이 없음")
+        # 일정이 없고 별일 없다고 하는 날: 작고 구체적인 일(식사·산책·만난 사람 등)을 물어 일기 재료를 얻는다.
+        # '기억에 남는 순간이 있나요?' 같은 막연한 질문은 세지 않고, 요약 확인 질문("…맞아요?")도 세지 않는다
+        small = re.compile(r"먹|식사|점심|저녁|간식|커피|산책|걷|만나|연락|통화")
+        confirm = re.compile(r"맞(아요|죠|지|나요|을까요)[^.?]{0,12}\?|그렇죠\?|(요약|정리)(해 (볼까요|봐도 될까요|볼게요)|하면 (될까요|맞을까요))")
+        small_q = [i for i, t in enumerate(turns) if i >= 1 and ("?" in t.said or "궁금해요" in t.said or "알려" in t.said) and small.search(t.said) and not confirm.search(t.said)]
+        if e.get("asks_small"):
+            add("밤: 별일 없는 날 작고 구체적인 일을 물어봄", HARD, bool(small_q), "식사·산책·사람처럼 구체적인 질문이 없음")
+            add("밤: 작은 일 질문은 3번 이하", SOFT, len(small_q) <= 3, f"{len(small_q)}번 {small_q}")
+        if e.get("asks_summary"):      # 하루 요약 확인이 일기의 바탕이라 내일 이야기보다 먼저 와야 한다
+            first_sum = next((i for i, t in enumerate(turns) if confirm.search(t.said)), None)
+            first_tom = next((i for i, t in enumerate(turns) if re.search(r"내일", t.said) and "?" in t.said and re.search(r"일정|챙겨|목표|해내|걱정|특별한|하고 싶|계획", t.said)), None)
+            add("밤: 하루 요약을 확인한 뒤에 내일 이야기를 물음", HARD, first_sum is not None and (first_tom is None or first_sum < first_tom),
+                f"요약 확인 턴={first_sum}, 내일 질문 턴={first_tom}")
+        if e.get("ends_cleanly"):      # 마무리는 묻지 않고 알린 뒤 같은 응답에서 끝내고, 작별 인사는 한 번만 한다 (덕담을 되풀이하며 대화가 안 끝나는 문제)
+            ft = [i for i, t in enumerate(turns) if i >= 1 and FAREWELL.search(t.said)]   # 첫 마디의 "편안한 밤이에요" 같은 인사는 작별이 아니다
+            add("밤: 작별 인사는 한 번만 하고 그 응답에서 대화를 끝냄", HARD,
+                log.ended_by == "end_session" and len(ft) <= 1 and all("end_session" in _names(turns[i]) for i in ft), f"작별 인사 턴={ft}, 종료={log.ended_by}")
+            asked = [i for i, t in enumerate(turns) if WRAP_Q.search(t.said)]
+            add("밤: 마무리해도 되는지 묻지 않음", HARD, not asked, f"{asked}번째 턴에서 마무리를 물음")
+            end_i = next((i for i, t in enumerate(turns) if "end_session" in _names(t)), None)
+            if end_i is not None and not END_INTENT.search(turns[end_i].heard):      # AI가 스스로 마무리한 경우: 요약 확인과 내일 이야기가 끝난 뒤여야 한다
+                s_i = next((i for i, t in enumerate(turns) if confirm.search(t.said)), None)
+                t_i = next((i for i, t in enumerate(turns) if re.search(r"내일", t.said) and "?" in t.said and re.search(r"일정|챙겨|목표|해내|걱정|특별한|하고 싶|계획", t.said)), None)
+                add("밤: 요약 확인과 내일 이야기를 마친 뒤에 마무리함", HARD, s_i is not None and t_i is not None and end_i > s_i and end_i > t_i,
+                    f"요약 확인 턴={s_i}, 내일 질문 턴={t_i}, 종료 턴={end_i}")
+                add("밤: 마무리하는 응답은 질문으로 끝나지 않음", HARD, not turns[end_i].said.strip().endswith("?"), turns[end_i].said)
+        if "small_stop_from" in e:    # 말하기 싫다고 한 뒤에는 작은 일을 더 묻지 않는다
+            late = [i for i in small_q if i >= e["small_stop_from"]]
+            add("밤: 말하기 싫다고 한 뒤에는 작은 일을 더 묻지 않음", HARD, not late, f"{late}번째 턴")
         for i, t in enumerate(turns[1:], 1):
             farewell = "end_session" in _names(t) or bool(END_INTENT.search(t.heard))
             relaxed = bool(re.search(r"하루|알람|코칭", t.said))       # 하루 요약 확인, 내일 아침 조정 제안·확인은 3문장까지
@@ -153,6 +200,19 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
         if e.get("expect_start"):
             add("브리핑: 준비됐다고 하면 start_routine 호출", HARD, log.ended_by == "start_routine", f"종료 방식={log.ended_by}")
 
+    elif kind == "fortune":
+        want = re.sub(r"[\s.!?~…,\"'‘’“”]", "", e.get("fortune_text", ""))
+        norm = lambda s: re.sub(r"[\s.!?~…,\"'‘’“”]", "", s)
+        first = norm(texts[0]) if texts else ""
+        add("포춘: 문장을 한 글자도 바꾸지 않고 읽음", HARD, bool(want) and want in first, f"읽은 말={texts[0] if texts else ''!r}")
+        extra_chars = len(first) - len(want) if want in first else None
+        add("포춘: 소개 한 문장 외에 덧붙이지 않음", SOFT, extra_chars is not None and extra_chars <= 18, f"덧붙은 글자 {extra_chars}자: {texts[0] if texts else ''}")
+        add("포춘: 첫 응답에서 한 번만 읽음", HARD, first.count(want) == 1 if want else False, f"{first.count(want) if want else 0}번 읽음")
+        add("포춘: 읽는 중 함수 호출 없음", HARD, not (turns and turns[0].calls), str(turns[0].calls if turns else ""))
+        add("포춘: 읽은 뒤 질문하지 않음", HARD, "?" not in (texts[0] if texts else ""), texts[0] if texts else "")
+        if e.get("replay") and len(turns) > 1:
+            add("포춘: 다시 읽어 달라고 하면 그대로 한 번 더 읽음", HARD, want in norm(turns[1].said), f"{turns[1].said!r}")
+
     elif kind == "coaching":
         add("코칭: 사용자 답 전에 판정 호출 없음", HARD, not (turns and turns[0].calls), str(turns[0].calls if turns else ""))
         orders = sorted(e.get("verdicts", {}))           # 재연결이면 남은 단계부터라 단계 번호가 1부터가 아닐 수 있다
@@ -180,6 +240,12 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
                 continue
             mentioned = [nm for nm in names if nm in t.said]
             add(f"코칭: {i}번째 안내가 단계 하나만", SOFT, len(mentioned) <= 1, f"{mentioned}")
+        if e.get("encourages"):        # 단계를 마칠 때마다 짧은 반응에 그치지 않고, 중간중간 독려 한마디(조금만 더, 거의 다 왔어요 등)를 넣는다
+            last = max(want) if want else None
+            moves = [t for i, t in enumerate(turns) if i >= 1 and any(c["name"] == "report_step_result" and c["args"].get("step_order") != last for c in t.calls)]
+            cheered = [t for t in moves if ENCOURAGE.search(t.said)]
+            need = max(1, (len(moves) + 1) // 2)
+            add("코칭: 단계 사이에 독려 한마디", HARD, len(cheered) >= need, f"단계 전환 {len(moves)}번 중 독려 {len(cheered)}번 (필요 {need}번)")
         answers = e.get("answers", [])
         for i, t in enumerate(turns):
             leaked = [a for a in answers[i:] if a in t.said]

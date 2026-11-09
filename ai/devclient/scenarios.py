@@ -1,7 +1,8 @@
 """가상 사용자 시나리오. 사용자 발화는 고정 스크립트라 AI의 말에 따라 바뀌지 않는다."""
+import re
 from dataclasses import dataclass, field, replace
 
-from ..live.inputs import (BriefingInput, CalendarEvent, CoachingInput, NightInput, NightRecordView, Persona,
+from ..live.inputs import (BriefingInput, CalendarEvent, CoachingInput, FortuneInput, NightInput, NightRecordView, Persona,
                            Step, Weather)
 from ..personalization.strategy import Strategy, strategy_block
 from ..tasks.content_steps import fallback_steps
@@ -40,6 +41,10 @@ QUIZ = fallback_steps("QUIZ", "GENERAL")
 COACH_STEPS = (Step(1, "물 한 잔", 60, "QA"), Step(2, "스트레칭", 120, "PLAY", "1. 목을 천천히 좌우로 돌려요.\n2. 어깨를 크게 돌려요."),
                Step(3, "오늘 할 일 3개 말하기", 120, "SPEECH"))
 
+COACH_STEPS_MINUTES = (Step(1, "독서", 900, "PLAY"), Step(2, "스트레칭", 150, "PLAY", "1. 목을 천천히 좌우로 돌려요.\n2. 어깨를 크게 돌려요."), Step(3, "물 한 잔", 60, "QA"),
+                       Step(4, "오늘 할 일 3개 말하기", 120, "SPEECH"))       # 15분, 2분 30초처럼 분 단위 시간이 많은 루틴
+EVENTS_MINUTES = (CalendarEvent("주간 회의", "09:15", "10:45"), CalendarEvent("치과", "18:45", "19:30"))                 # 15분·45분처럼 분이 있는 일정
+
 COACH_STEPS_RESUMED = tuple(Step(s.order + 3, s.name, s.planned_sec, s.response_type, s.script) for s in COACH_STEPS)   # 재연결: 앞 3단계를 끝내고 남은 단계 (번호가 4부터)
 
 SCENARIOS = {s.name: s for s in [
@@ -71,6 +76,25 @@ SCENARIOS = {s.name: s for s in [
     Scenario("night_routine_always", "night", _night(events_today=EVENTS, routine_items=ROUTINE_NAMES, routine_item_secs=ROUTINE_SECS),
              ("오늘은 괜찮았어요", "앞으로 스트레칭은 계속 3분으로 해 주세요", "네 맞아요", "이제 잘게요"), routine_items=ROUTINE_ITEMS,
              expect={"routine_changes": [("id-stretch", 180, "ALWAYS")], "farewell": True, "extract": {"override_wake_time": None}}),
+    Scenario("night_quiet_day", "night", _night(),      # 일정이 없고 별일 없다고 하는 날: 작은 일을 물어 일기 재료를 얻는다
+             ("별일 없었어요", "점심에 김치찌개 먹은 거 정도요", "맛있었어요", "네 맞아요", "이제 잘게요"),
+             expect={"farewell": True, "diary": True, "asks_small": True, "asks_summary": True,
+                     "extract": {"diary_text": lambda v: bool(v) and "김치찌개" in v}}),
+    Scenario("night_quiet_day_vague", "night", _night(),      # 끝까지 막연하게만 답하는 날: AI가 구체적인 질문을 해서 일기 재료를 끌어내는가
+             ("별일 없었어요", "그냥 평범했어요", "딱히 없어요", "네 맞아요", "이제 잘게요"),
+             expect={"farewell": True, "diary": True, "asks_small": True, "asks_summary": True}),
+    Scenario("night_wrap_up", "night", _night(),      # 이야기를 다 마친 뒤 "없어요", "그래", "알았다고"처럼 짧게만 답하는 날: 덕담을 되풀이하지 않고 끝나는가
+             ("별일 없었어요", "점심에 김치찌개 먹은 거 정도요", "맛있었어요", "네 맞아요", "없어요", "없어요", "응 그래요", "알았다고"),
+             expect={"ends_cleanly": True, "asks_summary": True}),
+    Scenario("night_quiet_day_declines", "night", _night(),      # 말하기 싫어하면 더 캐묻지 않고 지어내지도 않는다
+             ("별일 없었어요", "정말 없어요 그냥 피곤해요", "네 맞아요", "이제 잘게요"),
+             expect={"farewell": True, "asks_summary": True, "small_stop_from": 2,
+                     "extract": {"diary_text": lambda v: not v or not re.search(r"김치|점심|산책|친구|회의|발표", v)}}),
+    Scenario("briefing_times", "briefing",    # 시각·일정 시각의 분을 "열다섯 분"이 아니라 숫자로 말하는가
+             BriefingInput(persona=Persona("예준", "FORMAL", "KIND"), morning_call_type="ROUTINE", program_name="현실 모닝루틴",
+                           now_hhmm="07:15", events_today=EVENTS_MINUTES, weather=WEATHER, night=None),
+             ("네 잘 잤어요", "네 준비됐어요"),
+             expect={"event_words": ["회의", "치과"], "expect_start": True}),
     Scenario("briefing_full", "briefing",
              BriefingInput(persona=Persona("예준", "FORMAL", "KIND"), morning_call_type="ROUTINE", program_name="현실 모닝루틴",
                            now_hhmm="07:02", events_today=EVENTS, weather=WEATHER, night=NIGHT_REC),
@@ -98,6 +122,9 @@ SCENARIOS = {s.name: s for s in [
     Scenario("coaching_routine", "coaching", CoachingInput(persona=Persona("예준"), steps=COACH_STEPS, night=NIGHT_REC),
              ("물 한 잔 마셨어요", "스트레칭은 오늘 건너뛸게요", "오늘 할 일은 보고서 쓰기, 운동하기, 장보기예요", "고마워요 이만 끝낼게요"),
              expect={"verdicts": {1: "done", 2: "skipped", 3: "done"}, "step_names": [s.name for s in COACH_STEPS], "farewell": True}),
+    Scenario("coaching_minutes", "coaching", CoachingInput(persona=Persona("예준"), steps=COACH_STEPS_MINUTES, night=NIGHT_REC),
+             ("독서 했어요", "스트레칭 했어요", "물 한 잔 마셨어요", "오늘 할 일은 보고서 쓰기, 운동하기, 장보기예요", "고마워요 이만 끝낼게요"),
+             expect={"verdicts": {1: "done", 2: "done", 3: "done", 4: "done"}, "step_names": [s.name for s in COACH_STEPS_MINUTES], "encourages": True, "farewell": True}),
     Scenario("coaching_time_change", "coaching", CoachingInput(persona=Persona("예준"), steps=COACH_STEPS, night=NIGHT_REC),
              ("물 한 잔 마셨어요", "스트레칭은 오늘 1분만 할게요", "스트레칭 했어요", "오늘 할 일은 보고서 쓰기, 운동하기, 장보기예요", "고마워요 이만 끝낼게요"),
              expect={"verdicts": {1: "done", 2: "done", 3: "done"}, "adjust": {2: 60}, "no_verdict_turns": (2,),
@@ -114,6 +141,24 @@ SCENARIOS = {s.name: s for s in [
              CoachingInput(persona=Persona("예준"), morning_call_type="CONTENT", steps=tuple(QUIZ)),
              ("서울이에요", "열두 달이요", "세종대왕이요", "고마워요 이만 끝낼게요"),
              expect={"verdicts": {1: "done", 2: "done", 3: "done"}, "step_names": [s.name for s in QUIZ], "answers": ["서울", "열두 달", "세종대왕"], "farewell": True}),
+    # 포춘 읽기: 서버가 만든 문장을 AI가 그대로 읽는지 본다 (사용자는 말하지 않고 시작 신호만 보낸다)
+    Scenario("fortune_cookie", "fortune",
+             FortuneInput(persona=Persona("예준", "FORMAL", "KIND"), style="COOKIE",
+                          fortune_text="용기는 떨림이 사라진 뒤가 아니라, 첫마디를 꺼낼 때 찾아옵니다."),
+             (), expect={"fortune_text": "용기는 떨림이 사라진 뒤가 아니라, 첫마디를 꺼낼 때 찾아옵니다."}),
+    Scenario("fortune_horoscope", "fortune",
+             FortuneInput(persona=Persona("예준", "FORMAL", "KIND"), style="HOROSCOPE",
+                          fortune_text="오늘의 관계운 키워드는 '여백'. 답을 서두르기보다 내 마음부터 살펴보세요."),
+             (), expect={"fortune_text": "오늘의 관계운 키워드는 '여백'. 답을 서두르기보다 내 마음부터 살펴보세요."}),
+    Scenario("fortune_casual", "fortune",
+             FortuneInput(persona=Persona("예준", "CASUAL", "FRIENDLY"), style="HOROSCOPE",
+                          fortune_text="오늘의 행운 자세는 기지개야. 어깨를 펴고 하루를 열어 봐."),
+             (), tone="CASUAL", expect={"fortune_text": "오늘의 행운 자세는 기지개야. 어깨를 펴고 하루를 열어 봐."}),
+    Scenario("fortune_replay", "fortune",
+             FortuneInput(persona=Persona("예준", "FORMAL", "KIND"), style="COOKIE",
+                          fortune_text="어제 비워둔 칸은 오늘의 가능성이 들어갈 자리입니다."),
+             ("한 번만 다시 읽어 주세요", "고마워요 이만 끝낼게요"),
+             expect={"fortune_text": "어제 비워둔 칸은 오늘의 가능성이 들어갈 자리입니다.", "replay": True, "farewell": True}),
     Scenario("coaching_resumed", "coaching", CoachingInput(persona=Persona("예준"), steps=COACH_STEPS_RESUMED, resumed=True, night=NIGHT_REC),
              ("물 한 잔 마셨어요", "스트레칭은 오늘 건너뛸게요", "오늘 할 일은 보고서 쓰기, 운동하기, 장보기예요", "고마워요 이만 끝낼게요"),
              expect={"verdicts": {4: "done", 5: "skipped", 6: "done"}, "step_names": [s.name for s in COACH_STEPS_RESUMED], "farewell": True}),
