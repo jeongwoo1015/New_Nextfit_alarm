@@ -139,7 +139,18 @@ def test_night(repos, uid, other, alarm):
     assert repos.nights.save_night_extract(other, nid, {"tomorrow_goal": "x"}, None) is None
     assert repos.nights.set_voice_path(uid, nid) == f"{uid}/{rec.record_date.isoformat()}.m4a"
 
-    db = repos.users.db                                                              # 30일 정리: 만료일을 과거로
+    db = repos.users.db
+    voice_text = lambda: db.table("rs_night_record").select("voice_text").eq("night_record_id", nid).execute().data[0]["voice_text"]
+    repos.nights.set_voice_path(uid, nid, " 내일 발표 떨지 말고 잘하자! ")                 # 받아쓴 한마디는 음성과 함께
+    assert voice_text() == "내일 발표 떨지 말고 잘하자!"
+    repos.nights.save_night_extract(uid, nid, {"voice_text": "x", "tomorrow_goal": "발표"}, alarm.alarm_id)
+    assert voice_text() == "내일 발표 떨지 말고 잘하자!"                                 # 다시 추출해도 그대로
+    repos.nights.set_voice_path(uid, nid, "")                                        # 다시 녹음했는데 글이 없으면 비운다
+    assert voice_text() is None
+    with pytest.raises(Exception, match="rs_night_voice_text"):                      # 음성 없이 글만은 안 됨
+        db.table("rs_night_record").update({"voice_audio_path": None, "voice_text": "x"}).eq("night_record_id", nid).execute()
+
+    # 30일 정리: 만료일을 과거로
     db.table("rs_night_raw").update({"expires_at": "2026-01-01T00:00:00+09:00", "audio_path": f"{uid}/x.m4a"}) \
       .eq("night_record_id", nid).execute()
     assert f"{uid}/x.m4a" in repos.nights.purge_expired_raw(now_kst())
@@ -216,6 +227,16 @@ def test_session_and_steps(repos, uid, other, alarm, monkeypatch):
                                                            "wake_checked_at": checked})
     assert (s2.planned_total_sec, s2.wake_success, s2.rewake_count, s2.snooze_count) == (300, True, 2, 2)
     assert abs((s2.wake_checked_at - checked).total_seconds()) < 1
+
+    fortune = {"fortune_text": "떨리는 건 그만큼 준비했다는 뜻이에요.", "fortune_style": "COOKIE", "fortune_source": "ai"}
+    repos.sessions.update_session(uid, s.session_id, fortune)                        # 오늘의 포춘: 다시 연결해도 같은 문장
+    row = repos.users.db.table("rs_morning_session").select("fortune_text, fortune_style, fortune_source") \
+        .eq("session_id", s.session_id).execute().data[0]
+    assert row == fortune
+    with pytest.raises(ValidationFailed):                                            # 문장만 있고 스타일이 없으면 안 됨
+        repos.sessions.update_session(uid, s.session_id, {"fortune_style": None})
+    with pytest.raises(ValidationFailed):
+        repos.sessions.update_session(uid, s.session_id, {"fortune_style": "TAROT"})
 
     rec = repos.sessions.recent_records(uid, today - timedelta(days=7), today + timedelta(days=1))
     assert len(rec.sessions) == 1 and len(rec.steps) == 2

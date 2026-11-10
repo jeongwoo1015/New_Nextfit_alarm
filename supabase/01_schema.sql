@@ -303,11 +303,19 @@ create table if not exists rs_morning_session (
   wake_checked_at    timestamptz,                       -- 브리핑 전 확인 멘트를 모두 마친 시각 = 기상 성공 판정 시점
   wake_success       boolean not null default false,
   session_end_at     timestamptz,
+  fortune_text       varchar(200),                      -- 오늘의 포춘 문장 (어젯밤 한마디 기반, 없으면 한 줄 일기)
+  fortune_style      varchar(10) check (fortune_style in ('COOKIE', 'HOROSCOPE')),
+  fortune_source     varchar(10) check (fortune_source in ('ai', 'fallback', 'safe')),
   unique (alarm_id, session_date),
   constraint rs_session_type_fields check (
     (morning_call_type = 'ROUTINE' and template_id is not null and content_type is null)
     or
     (morning_call_type = 'CONTENT' and content_type is not null and template_id is null)
+  ),
+  constraint rs_session_fortune check (
+    (fortune_text is null and fortune_style is null and fortune_source is null)
+    or
+    (fortune_text is not null and fortune_style is not null and fortune_source is not null)
   )
 );
 create index if not exists idx_session_user_date on rs_morning_session (user_id, session_date desc);
@@ -403,7 +411,8 @@ create table if not exists rs_night_record (
   encouragement           text,
   insight                 text,
   voice_audio_path        varchar(500),
-  override_alarm_id       uuid references rs_alarm(alarm_id) on delete set null,
+  voice_text              varchar(500),   -- 내일의 한마디를 기기에서 받아쓴 글 (음성과 함께 저장)
+  override_alarm_id      uuid references rs_alarm(alarm_id) on delete set null,
   override_wake_time      time,
   override_skip_coaching  boolean not null default false,   -- 내일 하루 코칭(루틴 또는 콘텐츠) 안 하기
   diary_text              text,
@@ -419,6 +428,7 @@ create table if not exists rs_night_record (
     voice_audio_path is null
     or voice_audio_path = user_id::text || '/' || to_char(record_date, 'YYYY-MM-DD') || '.m4a'
   ),
+  constraint rs_night_voice_text check (voice_text is null or voice_audio_path is not null),
   -- 하루 한정 변경이 있으면 대상 알람도 필요
   constraint rs_night_override_alarm check (
     (override_wake_time is null and not override_skip_coaching) or override_alarm_id is not null

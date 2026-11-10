@@ -271,7 +271,7 @@ class SupabaseAlarmRepository(_Base):
 
 # ---------- 4. 밤 기록 ----------
 _NIGHT_FIELDS = _columns(NightRecord, ("night_record_id", "user_id", "record_date", "apply_date", "voice_audio_path",
-                                       "override_alarm_id", "extract_status", "created_at", "updated_at"))
+                                       "voice_text", "override_alarm_id", "extract_status", "created_at", "updated_at"))
 
 
 class SupabaseNightRepository(_Base):
@@ -325,12 +325,14 @@ class SupabaseNightRepository(_Base):
         q = self._select("rs_night_record").eq("user_id", user_id).eq("record_date", record_date.isoformat())
         return _model(NightRecord, _first(self._run(q)))
 
-    def set_voice_path(self, user_id, night_record_id):
+    def set_voice_path(self, user_id, night_record_id, voice_text=None):
+        """음성 경로와 받아쓴 글을 함께 저장한다. 다시 녹음하면 이전 글은 새 값(없으면 NULL)으로 바뀐다."""
         rec = self._own(user_id, night_record_id)
         if not rec:
             raise NotFound("밤 기록을 찾을 수 없어요")
         path = f"{user_id}/{rec.record_date.isoformat()}.m4a"
-        self._run(self.db.table("rs_night_record").update({"voice_audio_path": path})
+        text = (voice_text or "").strip() or None
+        self._run(self.db.table("rs_night_record").update({"voice_audio_path": path, "voice_text": text})
                   .eq("night_record_id", night_record_id).eq("user_id", user_id))
         return path
 
@@ -363,7 +365,8 @@ class SupabaseNightRepository(_Base):
 
 
 # ---------- 5. 모닝 세션·단계 ----------
-_SESSION_CHANGES = {"alarm_rang_at", "first_response_at", "planned_total_sec", "wake_checked_at", "wake_success", "session_end_at"}
+_SESSION_CHANGES = {"alarm_rang_at", "first_response_at", "planned_total_sec", "wake_checked_at", "wake_success", "session_end_at",
+                    "fortune_text", "fortune_style", "fortune_source"}
 
 
 class SupabaseSessionRepository(_Base):
