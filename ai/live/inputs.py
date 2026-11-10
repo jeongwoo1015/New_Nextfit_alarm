@@ -105,3 +105,22 @@ class CoachingInput:
     resumed: bool = False              # True면 전체 안내를 이미 했으므로 생략
     night: NightRecordView | None = None
     strategy_block: str = ""           # 개인화 Agent가 만든 [오늘의 전략] 문장(AgentDecision.coaching_block). 비어 있으면 프롬프트가 달라지지 않는다
+    content_type: str = ""             # CONTENT 세션의 콘텐츠 종류(EXERCISE/QUIZ/LANGUAGE 등, 알람의 content_type). 비어 있으면 단계 내용으로 추정한다
+    content_option: str = ""           # 콘텐츠 세부(알람의 content_option 또는 compose_content_steps 결과의 option)
+
+
+def content_kind(inp) -> str:
+    """콘텐츠 세션이 어떤 콘텐츠인지: STRETCH / ENGLISH / WORDCHAIN / QUIZ, 알 수 없으면 "".
+    서버가 content_type·content_option을 넘기면 그 값을 쓰고, 비어 있으면 단계 문장의 형식('정답:', '질문:' 등)으로 추정한다."""
+    if getattr(inp, "morning_call_type", "ROUTINE") != "CONTENT":
+        return ""
+    scripts = [(s.script or "") for s in inp.steps]
+    if inp.content_option == "WORDCHAIN" or any(sc.startswith("게임: 끝말잇기") for sc in scripts):
+        return "WORDCHAIN"
+    if inp.content_type == "QUIZ" or any("정답:" in sc for sc in scripts):
+        return "QUIZ"
+    if (inp.content_type == "LANGUAGE" and inp.content_option in ("", "ENGLISH")) or any(sc.startswith("질문:") and "예시:" in sc for sc in scripts):
+        return "ENGLISH"
+    if inp.content_type == "EXERCISE" or (not inp.content_type and inp.steps and all(st.response_type == "PLAY" for st in inp.steps)):
+        return "STRETCH"           # 종류를 안 넘겨도 모든 단계가 따라 하기(PLAY)면 스트레칭으로 본다(명상은 content_type=MEDITATION으로 구분)
+    return ""

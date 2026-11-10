@@ -253,7 +253,7 @@ def test_scenarios_build_valid_setup(name):
     if s.kind == "coaching":
         removed = {k for k, v in s.expect.get("adjust", {}).items() if v == 0}                          # 오늘 뺀 단계는 판정하지 않는다
         assert set(s.expect["verdicts"]) == {st.order for st in s.inp.steps} - removed
-        assert len(s.utterances) == len(s.expect["verdicts"]) + len(s.expect.get("no_verdict_turns", ())) + 1   # 판정 턴 + 시간 변경 턴 + 작별 인사
+        assert len(s.utterances) == len(s.expect["verdicts"]) + len(s.expect.get("no_verdict_turns", ())) + s.expect.get("extra_turns", 0) + 1   # 판정 턴 + 시간 변경 턴 + (게임처럼 한 단계 안의 추가 대화) + 작별 인사
 
 
 def test_new_scenarios_exist():
@@ -483,3 +483,25 @@ def test_fortune_replay_check():
     assert not failed(check(ok, fscn(replay=True, farewell=True)))
     bad = log("fortune", [T(FORTUNE), T("네 알겠어요.", heard="다시 읽어 주세요")])
     assert "포춘: 다시 읽어 달라고 하면 그대로 한 번 더 읽음" in failed(check(bad, fscn(replay=True)))
+
+
+def test_morning_sessions_reject_night_greetings():
+    from ai.devclient.rules import NIGHT_GREETING
+    bad = log("coaching", [T("퀴즈를 모두 풀었네요. 안녕히 주무세요.")])
+    assert "아침 대화에 밤 인사 없음" in failed(check(bad, scn("coaching")))
+    ok = log("coaching", [T("퀴즈를 모두 풀었네요. 좋은 하루 보내세요.")])
+    assert "아침 대화에 밤 인사 없음" not in failed(check(ok, scn("coaching")))
+    assert "아침 대화에 밤 인사 없음" not in {r.rule for r in check(log("night", [T("편안한 밤 되세요.")]), scn("night"))}     # 밤 대화는 해당 없음
+    assert all(NIGHT_GREETING.search(x) for x in ("잘 자요", "편안한 밤 되세요", "좋은 꿈 꾸세요"))
+
+
+def test_wordchain_pass_tolerances():
+    s = Scenario("w", "coaching", None, expect={"verdicts": {1: "done"}, "verdict_any_of": {1: ("skipped",)}, "pass_ends": True, "report_turn": {1: 2}})
+    skipped = log("coaching", [T("앞 단어의 마지막 글자로 시작해요. 첫 단어는 사과예요."), T("일기"), T("알겠어요.", [rep(1, "skipped")], heard="패스할게요")])
+    assert "코칭: 판정이 기대와 같음" not in failed(check(skipped, s))
+    ended = log("coaching", [T("앞 단어의 마지막 글자로 시작해요. 첫 단어는 사과예요."), T("일기"),
+                             T("함께해 주셔서 감사해요.", [rep(1, "done"), END], heard="음 패스할게요")], "end_session")
+    assert "사용자가 끝내자고 하기 전에 AI가 끝내지 않음" not in failed(check(ended, s))
+    strict = Scenario("w", "coaching", None, expect={"verdicts": {1: "done"}, "report_turn": {1: 2}})
+    assert "사용자가 끝내자고 하기 전에 AI가 끝내지 않음" in failed(check(ended, strict))            # 허용은 끝말잇기 시나리오에만 적용된다
+    assert "코칭: 판정이 기대와 같음" in failed(check(skipped, strict))
