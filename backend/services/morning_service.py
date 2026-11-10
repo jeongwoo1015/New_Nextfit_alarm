@@ -23,7 +23,13 @@ from backend.repositories.registry import Repositories
 
 log = logging.getLogger(__name__)
 
-CONTENT_NAMES = {"MEDITATION": "명상", "EXERCISE": "운동", "LANGUAGE": "외국어", "QUIZ": "퀴즈"}
+CONTENT_NAMES = {"MEDITATION": "명상", "EXERCISE": "스트레칭", "LANGUAGE": "영어 따라 읽기", "QUIZ": "퀴즈 게임"}   # B14 이름
+OPTION_NAMES = {"PERSON": "인물 퀴즈", "GENERAL": "상식 퀴즈", "WORDCHAIN": "끝말잇기", "JAPANESE": "일본어", "CHINESE": "중국어"}
+
+
+def content_name(content_type: str | None, content_option: str | None) -> str:
+    """브리핑에서 말할 오늘 콘텐츠 이름. 세부가 정해져 있으면 세부 이름(끝말잇기 등), 아니면 종류 이름."""
+    return OPTION_NAMES.get(content_option or "") or CONTENT_NAMES.get(content_type or "", "")
 BANDIT_KEY = "global"           # AI CONTRACTS 6-4: 여러 사용자를 합쳐야 경향이 보여 전체 합산 상태를 쓴다
 RECENT_DAYS = 7
 
@@ -142,7 +148,7 @@ class MorningService:
             program = t.template_name if t else ""
         weather = self.weather.today(location.lat, location.lon, location.name) if location else None
         ctx = BriefingContext(persona, to_kst(self.clock()).strftime("%H:%M"), tuple(events_today), night_view(night),
-                              program, CONTENT_NAMES.get(s.content_type or "", ""), s.coaching_skipped, briefing_block,
+                              program, content_name(s.content_type, s.content_option), s.coaching_skipped, briefing_block,
                               weather)
         return self.ai.issue_briefing_token(ctx)
 
@@ -206,9 +212,13 @@ class MorningService:
             plans = routine_steps(self._routine_items(user_id, s))
         else:
             duration = content_duration_sec(self.r.presets.get_app_config())
-            plans = content_steps(self.ai.compose_content_steps(s.content_type, s.content_option, duration, s.session_date))
+            plan = self.ai.compose_content_steps(s.content_type, s.content_option, duration, s.session_date)
+            plans = content_steps(plan.steps)
         steps = self.r.sessions.create_steps(user_id, session_id, plans)
-        self.r.sessions.update_session(user_id, session_id, {"planned_total_sec": planned_total_sec(plans)})
+        changes = {"planned_total_sec": planned_total_sec(plans)}
+        if s.morning_call_type == "CONTENT" and plan.option and plan.option != s.content_option:
+            changes["content_option"] = plan.option   # 오늘 실제로 한 세부 (세부 없는 퀴즈 알람이면 AI가 정한 값). 재연결·앱 표시용
+        self.r.sessions.update_session(user_id, session_id, changes)
         return steps
 
     def _routine_items(self, user_id: str, s: MorningSession):
@@ -237,8 +247,10 @@ class MorningService:
             raise Conflict("모든 단계를 마쳤어요", "ALL_STEPS_CHECKED")
         night = self.r.nights.get_night_for_morning(user_id, s.session_date)
         _, coaching_block = self._strategy(user_id, s, night)
+        s = self._session(user_id, session_id)            # 단계를 만들며 정해진 세부(content_option)를 다시 읽는다
         ctx = CoachingContext(self._persona(user_id), s.morning_call_type, tuple(self._coach_steps(s, pending)),
-                              resumed=len(pending) < len(steps), night=night_view(night), strategy_block=coaching_block)
+                              resumed=len(pending) < len(steps), night=night_view(night), strategy_block=coaching_block,
+                              content_type=s.content_type or "", content_option=s.content_option or "")
         return self.ai.issue_coaching_token(ctx), steps
 
     def _coach_steps(self, s: MorningSession, steps: list[SessionStep]) -> list[CoachStep]:

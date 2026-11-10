@@ -40,7 +40,7 @@
 | `POST /morning/sessions/{id}/wake-check` | 브리핑 | 확인 멘트(2~3개)를 모두 마침 — 브리핑 Live의 `wake_check_done`을 앱이 전달. 이때 기상 성공 판정 |
 | `POST /morning/sessions/{id}/briefing-token` | 브리핑 | 오늘 일정·현재 위치(선택, 날씨용)를 보내면 브리핑 Live 토큰. 그날 처음이면 개인화 전략을 정해 로그 |
 | `POST /morning/sessions/{id}/fortune-token` | 포춘 | 오늘의 포춘(어젯밤 한마디, 없으면 한 줄 일기)을 AI가 그대로 읽는 Live 토큰 + `fortune_text`·`fortune_style`·`fortune_source`. 문장이 아직 없으면 이때 만든다(재연결도 같은 문장). AI 음성이 끝나면 앱이 다음 단계로 |
-| `POST /morning/sessions/{id}/coaching-token` | 루틴·콘텐츠 | `start_routine` 뒤(재연결도) 호출. 처음이면 단계를 PENDING으로 만들고 남은 단계만 토큰에 |
+| `POST /morning/sessions/{id}/coaching-token` | 루틴·콘텐츠 | `start_routine` 뒤(재연결도) 호출. 처음이면 단계를 PENDING으로 만들고 남은 단계만 토큰에. 콘텐츠는 종류·세부를 AI에 넘기고, 세부 없는 퀴즈 알람은 AI가 정한 오늘 세부를 세션 `content_option`에 남긴다(B14) |
 | `POST /morning/sessions/{id}/steps/{n}/verdict` | 코칭 | Live `report_step_result` 전달 |
 | `PATCH /morning/sessions/{id}/steps/{n}` | 체크리스트 | 직접 체크·건너뛰기·해제 |
 | `PATCH /morning/sessions/{id}/steps/{n}/duration` | 코칭 | 오늘 진행 중 변경("오늘 스트레칭 좀 적게", Live 함수를 앱이 전달). PENDING만, 30초 단위, 오늘 합계 ≤ 상한, 0초 = 오늘만 빼기 |

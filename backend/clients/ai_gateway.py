@@ -107,6 +107,8 @@ class CoachingContext:
     resumed: bool = False                   # 재연결이면 전체 안내 생략
     night: NightView | None = None
     strategy_block: str = ""
+    content_type: str = ""                  # CONTENT 세션: 콘텐츠 종류·오늘 쓴 세부 (CONTRACTS B14, 비어 있으면 AI가 단계로 추정)
+    content_option: str = ""
 
 
 @dataclass(frozen=True)
@@ -115,6 +117,13 @@ class ContentStep:
     planned_sec: int | None
     response_type: str
     script: str
+
+
+@dataclass(frozen=True)
+class ContentPlan:
+    """콘텐츠 단계 구성 결과. option = 오늘 실제로 쓴 세부 (세부를 고르지 않은 퀴즈 알람이면 AI가 날짜별로 정한 값)."""
+    steps: list[ContentStep]
+    option: str = ""
 
 
 @dataclass(frozen=True)
@@ -189,7 +198,7 @@ class AIGateway(Protocol):
     def issue_briefing_token(self, ctx: BriefingContext) -> LiveToken: ...
     def issue_coaching_token(self, ctx: CoachingContext) -> LiveToken: ...
     def compose_content_steps(self, content_type: str, content_option: str | None, duration_sec: int,
-                              today: date) -> list[ContentStep]: ...      # 실패해도 AI 쪽 기본 단계를 돌려준다
+                              today: date) -> ContentPlan: ...            # 실패해도 AI 쪽 기본 단계를 돌려준다
     def decide_strategy(self, user_id: str, records: RecentRecords, today: date, condition: str | None,
                         speech_style: str | None, mode: str, bandit_state: dict | None) -> StrategyDecision: ...
     def strategy_blocks(self, strategy: dict | None) -> tuple[str, str]: ...   # 재연결: 로그의 strategy → (브리핑, 코칭) 문장
@@ -301,15 +310,18 @@ class RealAIGateway:
         inp = ai.CoachingInput(
             persona=self._persona(ai, ctx.persona), morning_call_type=ctx.morning_call_type,
             steps=tuple(ai.Step(s.order, s.name, s.planned_sec, s.response_type, s.script) for s in ctx.steps),
-            resumed=ctx.resumed, night=self._night(ai, ctx.night), strategy_block=ctx.strategy_block)
+            resumed=ctx.resumed, night=self._night(ai, ctx.night), strategy_block=ctx.strategy_block,
+            content_type=ctx.content_type, content_option=ctx.content_option)
         return self._issue("coaching", build_setup("coaching", inp))
 
-    def compose_content_steps(self, content_type: str, content_option: str | None, duration_sec: int, today: date) -> list[ContentStep]:
-        """AI는 항상 5분(300초)으로 구성하므로, 서버 설정(CONTENT_DURATION_SEC)이 다르면 비율대로 늘이거나 줄인다."""
+    def compose_content_steps(self, content_type: str, content_option: str | None, duration_sec: int, today: date) -> ContentPlan:
+        """AI는 항상 5분(300초)으로 구성하므로, 서버 설정(CONTENT_DURATION_SEC)이 다르면 비율대로 늘이거나 줄인다.
+        스트레칭·인물/상식 퀴즈·끝말잇기는 AI 없이 정해 둔 단계, 영어는 AI 구성(B14)."""
         from ai.tasks.content_steps import compose_content_steps
         res = compose_content_steps(content_type, content_option, self.llm, today=today)
         secs = fit_seconds([s.planned_sec for s in res.steps], duration_sec)
-        return [ContentStep(s.name, sec, s.response_type, s.script) for s, sec in zip(res.steps, secs)]
+        return ContentPlan([ContentStep(s.name, sec, s.response_type, s.script) for s, sec in zip(res.steps, secs)],
+                           getattr(res, "option", "") or content_option or "")
 
     def decide_strategy(self, user_id, records, today, condition, speech_style, mode, bandit_state) -> StrategyDecision:
         from ai.personalization.agent import decide
