@@ -256,6 +256,9 @@ def test_content_step_detail(repos, uid):
     s = repos.sessions.get_or_create_session(snap)
     steps = repos.sessions.create_steps(uid, s.session_id, [StepPlan(1, "퀴즈 1번", None, 60, step_detail={"q": "1+1?", "a": "2"})])
     assert steps[0].step_detail == {"q": "1+1?", "a": "2"}
+    s2 = repos.sessions.update_session(uid, s.session_id, {"content_option": "WORDCHAIN"})   # AI가 정한 그날 세부
+    assert s2.content_option == "WORDCHAIN"
+    assert repos.alarms.get_alarm(uid, a.alarm_id).content_option == "HISTORY"              # 알람 설정은 그대로
     repos.alarms.delete_alarm(uid, a.alarm_id)
 
 
