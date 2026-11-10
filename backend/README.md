@@ -44,7 +44,7 @@
 | `PATCH /morning/sessions/{id}/steps/{n}/duration` | 코칭 | 오늘 진행 중 변경("오늘 스트레칭 좀 적게", Live 함수를 앱이 전달). PENDING만, 30초 단위, 오늘 합계 ≤ 상한, 0초 = 오늘만 빼기 |
 | `POST /morning/sessions/{id}/end` | 종료 | `end_session` 또는 통화 종료. 기상 성공 기록 |
 | `GET /morning/sessions/{id}` · `GET /morning/sessions/today` | 루틴 화면 | 세션, 단계, 진행 개수(`finished` = "완료!") |
-| `GET /reports?period=week\|month\|year&date=` | 리포트 | 상단 `overall` = 전체 기간 누적(기상 성공률·루틴 성공률), `totals`·`series` = 선택한 기간(평균 기상 시각, 루틴 완료 52/70, 그래프 칸 주: 월~일 / 월: 1주~5주 / 연: 1~12월), 현재·최장 연속 달성일 |
+| `GET /reports?period=week\|month\|year&date=` | 리포트 | 상단 `overall` = 전체 기간 누적(기상 성공률·루틴 성공률·취침 성공률 `bedtime_success_rate`), `totals`·`series` = 선택한 기간(평균 기상 시각, 루틴 완료 52/70, 그래프 칸 주: 월~일 / 월: 1주~5주 / 연: 1~12월), 현재·최장 연속 달성일. 취침(11/06): 성공률 = 밤 대화를 마친 날 ÷ 기록 기간(첫 기록일~어제, 오늘 밤을 마쳤으면 오늘까지), `avg_bed_clock` = 밤 기록이 처음 저장된 시각의 평균(자정 넘김 이어서) |
 | `GET /diary/calendar?month=YYYY-MM` | 한 줄 일기 | 날짜별 사진 URL 또는 루틴 성공률, 세션·밤 기록 여부 |
 | `GET /diary/{date}` | 일기 상세 | 그날 밤 기록(한 줄 일기)·아침 세션과 단계·사진·하루 요약. 세션은 알람이 먼저 울린 순 |
 | `PUT /diary/{date}/photo` | 일기 사진 | jpg를 본문 그대로(`Content-Type: image/jpeg`, 10MB 이하, 미래 날짜 불가). 다시 올리면 덮어씀 |

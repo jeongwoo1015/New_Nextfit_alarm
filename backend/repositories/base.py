@@ -80,7 +80,7 @@ class NightRepository(Protocol):
     def list_failed_extracts(self, limit: int) -> list[tuple[str, str]]: ...         # [(user_id, night_record_id)]
     def get_night_for_morning(self, user_id: str, apply_date: date) -> NightRecord | None: ...
     def get_night_by_date(self, user_id: str, record_date: date) -> NightRecord | None: ...
-    def set_voice_path(self, user_id: str, night_record_id: str) -> str: ...         # {user_id}/{record_date}.m4a
+    def set_voice_path(self, user_id: str, night_record_id: str, voice_text: str | None = None) -> str: ...  # {user_id}/{record_date}.m4a, 받아쓴 글도 함께 교체(없으면 NULL)
     def purge_expired_raw(self, now: datetime) -> list[str]: ...                     # 비운 원본 음성 경로 (파일은 Storage에서 먼저 지움)
 
 
@@ -88,7 +88,7 @@ class SessionRepository(Protocol):
     """5. 모닝 세션·단계 — rs_morning_session, rs_session_step"""
     def get_or_create_session(self, snapshot: SessionSnapshot) -> MorningSession: ...   # 같은 알람·날짜가 있으면 그것(재연결)
     def get_session(self, user_id: str, session_id: str) -> MorningSession | None: ...
-    def update_session(self, user_id: str, session_id: str, changes: dict) -> MorningSession | None: ...  # alarm_rang_at, first_response_at, planned_total_sec, wake_checked_at, wake_success, session_end_at
+    def update_session(self, user_id: str, session_id: str, changes: dict) -> MorningSession | None: ...  # alarm_rang_at, first_response_at, planned_total_sec, wake_checked_at, wake_success, session_end_at, fortune_*
     def add_rewake(self, user_id: str, session_id: str) -> int: ...                  # rewake_count + 1 (원자적으로), 바뀐 횟수
     def add_snooze(self, user_id: str, session_id: str) -> int: ...                  # snooze_count + 1 (원자적으로), 바뀐 횟수
     def create_steps(self, user_id: str, session_id: str, plans: list[StepPlan]) -> list[SessionStep]: ...  # 이미 있으면 만들지 않고 기존 단계

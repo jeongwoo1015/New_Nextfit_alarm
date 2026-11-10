@@ -11,6 +11,12 @@ from backend.domain.routine_rules import build_routine
 
 from .seed import seed_templates
 
+_NIGHT_PROTECTED = {"night_record_id", "user_id", "record_date", "apply_date", "voice_audio_path", "voice_text",
+                    "override_alarm_id", "extract_status", "created_at", "updated_at"}   # supabase.py _NIGHT_FIELDS에서 빼는 칸
+VOICE_TEXT_MAX = 500
+FORTUNE_STYLES = ("COOKIE", "HOROSCOPE")
+FORTUNE_SOURCES = ("ai", "fallback", "safe")
+
 _SETTING_FIELDS = {f.name for f in fields(UserSetting)} - {"user_id", "updated_at"}
 
 
@@ -171,6 +177,7 @@ class MemoryNightRepository:
             raise ValidationFailed("하루 한정 변경에는 대상 알람이 필요해요")   # CHECK rs_night_override_alarm
         if rec.override_alarm_id != override_alarm_id:        # 트리거 rs_night_alarm_changed
             self.night_items.pop(night_record_id, None)
+        fields = {k: v for k, v in fields.items() if k not in _NIGHT_PROTECTED}   # 받아쓴 글·음성 경로는 추출로 덮어쓰지 않는다
         rec = replace(rec, **{**fields, "tomorrow_notes": tuple(fields.get("tomorrow_notes") or ())},
                       override_alarm_id=override_alarm_id, extract_status="DONE", updated_at=self.clock())
         self.records[night_record_id] = rec
@@ -227,10 +234,13 @@ class MemoryNightRepository:
     def get_night_by_date(self, user_id, record_date):
         return next((r for r in self.records.values() if r.user_id == user_id and r.record_date == record_date), None)
 
-    def set_voice_path(self, user_id, night_record_id):
+    def set_voice_path(self, user_id, night_record_id, voice_text=None):
         rec = self._own(user_id, night_record_id)
         path = f"{user_id}/{rec.record_date.isoformat()}.m4a"
-        self.records[night_record_id] = replace(rec, voice_audio_path=path)
+        text = (voice_text or "").strip() or None             # 다시 녹음하면 새 값(없으면 NULL)으로 교체
+        if text and len(text) > VOICE_TEXT_MAX:
+            raise ValidationFailed(f"받아쓴 글은 {VOICE_TEXT_MAX}자 이하여야 해요")   # varchar(500)
+        self.records[night_record_id] = replace(rec, voice_audio_path=path, voice_text=text)
         return path
 
     def purge_expired_raw(self, now):
@@ -269,8 +279,14 @@ class MemorySessionRepository:
         s = self._own(user_id, session_id)
         if not s:
             return None
-        self.sessions[session_id] = replace(s, **changes)
-        return self.sessions[session_id]
+        updated = replace(s, **changes)
+        fortune = (updated.fortune_text, updated.fortune_style, updated.fortune_source)
+        if any(v is not None for v in fortune) and None in fortune:
+            raise ValidationFailed("포춘 문장·스타일·출처는 함께 저장해야 해요")   # CHECK rs_session_fortune
+        if updated.fortune_style not in (None, *FORTUNE_STYLES) or updated.fortune_source not in (None, *FORTUNE_SOURCES):
+            raise ValidationFailed("포춘 스타일·출처 값이 올바르지 않아요")
+        self.sessions[session_id] = updated
+        return updated
 
     def add_snooze(self, user_id, session_id):
         s = self._own(user_id, session_id)

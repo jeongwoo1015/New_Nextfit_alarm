@@ -230,6 +230,7 @@ class NightRecordOut(Out):
     override_wake_time: HHMM | None = None
     override_skip_coaching: bool = False
     voice_url: str | None = None        # 서명된 임시 URL
+    voice_text: str | None = None       # 내일의 한마디를 기기에서 받아쓴 글 (음성이 있을 때만)
 
 
 # ---------- 아침 흐름 ----------
@@ -274,6 +275,9 @@ class SessionOut(Out):
     wake_checked_at: datetime | None    # 확인 멘트를 마친 시각 (이때 기상 성공을 정함)
     wake_success: bool
     session_end_at: datetime | None
+    fortune_text: str | None = None     # 오늘의 포춘 문장 (아직 만들지 않았으면 null)
+    fortune_style: str | None = None    # COOKIE 포춘쿠키 / HOROSCOPE 오늘의 운세
+    fortune_source: str | None = None   # ai / fallback 기본 문장 / safe 위기 표현이 있어 담담한 문장
 
 
 class SessionViewOut(BaseModel):
@@ -326,6 +330,10 @@ class TotalsOut(Out):
     routine_done: int
     routine_total: int
     routine_completion_rate: float | None
+    bed_days: int = 0                    # 밤 대화를 마친 날 수
+    bed_record_days: int = 0             # 취침 성공률 분모: 기록 기간(첫 기록일~어제, 오늘 밤 대화를 마쳤으면 오늘까지) 중 이 범위의 날 수
+    bedtime_success_rate: float | None = None   # bed_days / bed_record_days (0~1), 분모가 0이면 null
+    avg_bed_clock: str | None = None     # 평균 취침 시각 "HH:MM" (밤 대화를 마친 시각 기준)
 
 
 class BucketOut(TotalsOut):
