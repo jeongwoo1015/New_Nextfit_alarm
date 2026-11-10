@@ -28,6 +28,11 @@ CLOSING_NEXT = ("마무리: 브리핑 마지막에 {next}시작할 준비가 됐
                 "질문을 한 응답은 거기서 끝내고 멈춘다. 같은 응답에서 start_routine을 호출하지 않는다. "
                 "사용자가 다음 말에서 준비됐다고 분명히 답하면 한마디로 짧게 반응한 뒤 그 턴에서 start_routine을 호출한다. "
                 "아직이라고 하면 재촉하지 말고 준비되면 말해 달라고 한 뒤 기다린다. 루틴이나 콘텐츠의 진행은 이 대화에서 하지 않는다(다음 세션에서 한다).")
+# 콘텐츠 알람: 브리핑 다음은 콘텐츠가 아니라 '어젯밤 한마디 → 오늘의 포춘 → 콘텐츠' 순서다. 마무리 질문이 이어질 순서를 알려 앞뒤가 이어지게 한다
+CLOSING_FLOW = ("마무리: 브리핑 마지막에 이어질 순서({flow})를 알리면서 시작할 준비가 됐는지 묻는 질문 한 문장을 한다(예: \"{example}\"). "
+                "순서에 없는 것은 말하지 않고, 콘텐츠 방법은 설명하지 않는다. 질문을 한 응답은 거기서 끝내고 멈춘다. 같은 응답에서 start_routine을 호출하지 않는다. "
+                "사용자가 다음 말에서 준비됐다고 분명히 답하면 한마디로 짧게 반응한 뒤 그 턴에서 start_routine을 호출한다. "
+                "아직이라고 하면 재촉하지 말고 준비되면 말해 달라고 한 뒤 기다린다. 한마디·포춘·콘텐츠의 진행은 이 대화에서 하지 않는다(다음 단계에서 한다).")
 CLOSING_NONE = ("마무리: 오늘은 코칭을 하지 않는 날이므로 루틴이나 콘텐츠를 시작하자는 말도, 시작할 준비가 됐는지 묻는 질문도 하지 않는다. "
                 "브리핑의 마지막 문장은 하루를 응원하는 평서문으로 끝내고, 사용자가 끝내겠다고 말할 때까지 대화를 이어 간다(start_routine은 호출하지 않는다).")
 
@@ -44,8 +49,12 @@ def briefing_prompt(inp: BriefingInput) -> str:
     content = clean(inp.content_name, 40)
     if inp.coaching_skipped:
         closing = CLOSING_NONE
-    elif content:      # 콘텐츠 알람이면 콘텐츠 세션이 이어진다
-        closing = CLOSING_NEXT.format(next=f"오늘의 콘텐츠({content}) ", example=f"이제 {content} 시간을 시작할 준비가 됐어요?")
+    elif content:      # 콘텐츠 알람이면 (어젯밤 한마디 →) 포춘 → 콘텐츠가 이어진다
+        if inp.one_liner_follows:
+            flow, example = f"어젯밤 한마디 → 오늘의 포춘 → {content}", f"먼저 어젯밤 남긴 한마디와 오늘의 포춘을 듣고 {content} 시간으로 넘어갈 건데, 준비됐어요?"
+        else:
+            flow, example = f"오늘의 포춘 → {content}", f"먼저 오늘의 포춘을 듣고 {content} 시간으로 넘어갈 건데, 준비됐어요?"
+        closing = CLOSING_FLOW.format(flow=flow, example=example)
     else:
         closing = CLOSING_NEXT.format(next=routine, example="이제 아침 루틴을 시작할 준비가 됐어요?")
     now = f"[현재 시각]\n- {inp.now_hhmm}" if inp.now_hhmm else ""
