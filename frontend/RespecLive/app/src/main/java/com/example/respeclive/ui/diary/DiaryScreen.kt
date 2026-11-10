@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -34,7 +35,6 @@ import androidx.compose.ui.unit.sp
 import com.example.respeclive.data.ApiClient
 import com.example.respeclive.data.PhotoLoader
 import com.example.respeclive.data.RespecApi
-import com.example.respeclive.ui.nexty.NextyMiniFace
 import com.example.respeclive.ui.theme.RespecColors
 import org.json.JSONObject
 import java.util.Calendar
@@ -65,7 +65,7 @@ private data class YearMonth(val year: Int, val month: Int) {
 }
 
 /**
- * 한 줄 일기 달력 (GET /diary/calendar). 사진을 올린 날은 사진, 없는 날은 한 줄 일기에 맞춘 넥스티 그림(없으면 넥스티 얼굴).
+ * 한 줄 일기 달력 (GET /diary/calendar). 사진을 올린 날은 사진, 없는 날은 그날 감정의 넥스티(기쁨·평온·피곤·걱정·속상).
  * 날짜를 누르면 그날의 한 줄 일기와 리포트(onOpenDay "YYYY-MM-DD"). 달은 화살표나 옆으로 밀어서 이동.
  */
 @Composable
@@ -182,18 +182,18 @@ private fun MonthButton(text: String, enabled: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * 하루 칸: 사진 / 한 줄 일기 넥스티 그림 / 작은 넥스티 얼굴 / 날짜만.
- * 넥스티 그림은 서버가 한 줄 일기 내용에 맞춰 넥스티가 그 일을 하는 모습으로 만들어 저장한 이미지 (nexty_image_url).
- * 직접 올린 사진이 있으면 사진이 먼저이고, 기록은 있지만 그림이 아직 없으면(만드는 중·한 줄 일기 없음) 넥스티 얼굴
+ * 하루 칸: 사진 / 그날 감정의 넥스티(NextyMood) / 날짜만.
+ * 직접 올린 사진이 있으면 사진, 없으면 기록이 있는 날에 감정 배경색 칸 + 감정 넥스티
  */
 @Composable
 private fun DayCell(day: Int, info: JSONObject?, future: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(14.dp)
-    val imageUrl = info?.text("photo_url") ?: info?.text("nexty_image_url")
+    val photoUrl = info?.text("photo_url")
+    val mood = NextyMood.of(info)?.takeIf { !future }
 
-    if (imageUrl != null) {
+    if (photoUrl != null) {
         Box(Modifier.fillMaxSize().clip(shape).clickable(onClick = onClick)) {
-            PhotoBox(imageUrl, day, maxPx = 360, modifier = Modifier.fillMaxSize())
+            PhotoBox(photoUrl, day, maxPx = 360, modifier = Modifier.fillMaxSize())
             Box(
                 Modifier.padding(6.dp).clip(RoundedCornerShape(8.dp))
                     .background(Color.Black.copy(alpha = 0.35f))
@@ -201,6 +201,32 @@ private fun DayCell(day: Int, info: JSONObject?, future: Boolean, onClick: () ->
             ) {
                 Text("$day", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
+        }
+        return
+    }
+
+    if (mood != null) {
+        // 감정 칸: 배경색으로 채우고 넥스티는 아래쪽에 (위 왼쪽 날짜, 위 오른쪽 소품이 겹치지 않게)
+        Box(
+            Modifier
+                .fillMaxSize()
+                .clip(shape)
+                .background(mood.background)
+                .clickable(onClick = onClick)
+        ) {
+            Image(
+                painterResource(mood.drawable),
+                contentDescription = mood.label,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter)
+            )
+            Text(
+                "$day",
+                color = MOOD_DAY_TEXT,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 8.dp, top = 6.dp)
+            )
         }
         return
     }
@@ -220,15 +246,11 @@ private fun DayCell(day: Int, info: JSONObject?, future: Boolean, onClick: () ->
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(start = 8.dp, top = 6.dp)
         )
-        // 달력은 모든 날이 오므로, 아침 세션이나 밤 기록이 있는 날만
-        val hasRecord = info != null && (info.optBoolean("has_session") || info.optBoolean("has_night_record"))
-        if (hasRecord && !future) {
-            Box(Modifier.fillMaxSize().padding(top = 20.dp, bottom = 8.dp), contentAlignment = Alignment.Center) {
-                NextyMiniFace(Modifier.fillMaxWidth(0.62f).aspectRatio(0.8f))
-            }
-        }
     }
 }
+
+/** 감정 칸의 날짜 글자: 칸 배경이 테마와 상관없이 밝은 색이라 늘 진한 갈색 */
+private val MOOD_DAY_TEXT = Color(0xFF3A2E2A)
 
 /** 서버 사진(서명 URL). 받는 동안이나 받지 못하면 날짜에 따라 정한 그라데이션 */
 @Composable
