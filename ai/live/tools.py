@@ -1,5 +1,9 @@
 """Live 대화에서 AI가 부르는 함수 선언. 판정 값은 정의서 RS_SESSION_STEP.AI_VERDICT와 같다."""
 
+from copy import deepcopy
+
+from .inputs import content_kind
+
 VERDICTS = ("done", "not_done", "skipped", "ambiguous", "other")
 
 END_SESSION = {
@@ -26,6 +30,14 @@ REPORT_STEP_RESULT = {
         "required": ["step_order", "verdict"],
     },
 }
+
+# 퀴즈 콘텐츠 전용: 앱이 AI의 말을 추측하지 않고 이 값으로 정답 여부(넥스티 O/X)를 알 수 있게 한다
+REPORT_STEP_RESULT_QUIZ = deepcopy(REPORT_STEP_RESULT)
+REPORT_STEP_RESULT_QUIZ["description"] = ("퀴즈 문제 하나에 대한 사용자의 답을 기록한다. 사용자가 답하거나 모르겠다고 말한 응답에서 한 번 호출한다. "
+                                          "답을 말했으면 verdict는 done이고, answer_correct에 맞고 틀림을 함께 넣는다.")
+REPORT_STEP_RESULT_QUIZ["parameters"]["properties"]["answer_correct"] = {
+    "type": "BOOLEAN", "description": "사용자의 답이 [고정 스크립트]의 정답 줄과 같은 뜻이면 true, 틀렸거나 모르겠다고 했으면 false"}
+REPORT_STEP_RESULT_QUIZ["parameters"]["required"] = ["step_order", "verdict", "answer_correct"]
 
 ADJUST_STEP_TIME = {
     "name": "adjust_step_time",
@@ -58,5 +70,6 @@ def tools_for(kind: str, inp=None) -> list[dict]:
         follows = not getattr(inp, "coaching_skipped", False)
         return [{"functionDeclarations": ([START_ROUTINE] if follows else []) + [END_SESSION]}]
     if kind == "coaching" and getattr(inp, "morning_call_type", "ROUTINE") == "CONTENT":
-        return [{"functionDeclarations": [REPORT_STEP_RESULT, END_SESSION]}]
+        report = REPORT_STEP_RESULT_QUIZ if content_kind(inp) == "QUIZ" else REPORT_STEP_RESULT
+        return [{"functionDeclarations": [report, END_SESSION]}]
     return [{"functionDeclarations": list(_BY_KIND[kind])}]

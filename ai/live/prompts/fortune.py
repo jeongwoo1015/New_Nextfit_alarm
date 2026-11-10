@@ -2,7 +2,7 @@
 
 읽은 뒤에는 멈추고 함수를 부르지 않는다(말하면서 함수를 부르는 방식은 불안정했다). 앱이 음성이 끝나면 다음 단계로 넘어간다."""
 from ..inputs import FortuneInput
-from .common import SAFETY_RULES, VOICE_RULES, clean, join_blocks, persona_block
+from .common import MORNING_RULE, SAFETY_RULES, VOICE_RULES, clean, join_blocks, persona_block
 
 FORTUNE_RULES = """당신은 사용자가 아침에 '오늘의 포춘'을 듣게 해 주는 친근한 아침 파트너입니다. 사용자는 막 일어난 상태입니다.
 
@@ -20,7 +20,7 @@ INTRO = {"FORMAL": "오늘의 포춘이에요.", "CASUAL": "오늘의 포춘이�
 def fortune_prompt(inp: FortuneInput) -> str:
     text = clean(inp.fortune_text, 160)
     return join_blocks(
-        FORTUNE_RULES.format(intro=INTRO.get(inp.persona.tone, INTRO["FORMAL"])), SAFETY_RULES, VOICE_RULES,
+        FORTUNE_RULES.format(intro=INTRO.get(inp.persona.tone, INTRO["FORMAL"])), MORNING_RULE, SAFETY_RULES, VOICE_RULES,
         persona_block(inp.persona),
         "[오늘의 포춘 문장]\n" + (text or "없음 (포춘을 가져오지 못했다)"),
     )

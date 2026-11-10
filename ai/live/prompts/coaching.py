@@ -1,11 +1,11 @@
 """코칭 프롬프트. 루틴 항목과 콘텐츠 단계를 같은 방식으로 안내하고 report_step_result로 판정을 기록한다.
 
 알람은 루틴 또는 콘텐츠 중 하나라 이 세션 뒤에 이어지는 세션은 없다."""
-from ..inputs import CoachingInput, Step
-from .common import SAFETY_RULES, VOICE_RULES, clean, join_blocks, night_record_block, persona_block
+from ..inputs import CoachingInput, Step, content_kind
+from .common import MORNING_RULE, SAFETY_RULES, VOICE_RULES, clean, join_blocks, night_record_block, persona_block
 
 COACH_INTRO = "당신은 사용자의 아침 루틴을 옆에서 코칭해 주는 친근한 모닝 코치입니다."
-CONTENT_INTRO = "당신은 사용자의 아침 콘텐츠(명상·운동·외국어·퀴즈 등)를 함께 진행해 주는 친근한 진행자입니다."
+CONTENT_INTRO = "당신은 사용자의 아침 콘텐츠(스트레칭·퀴즈 게임·영어 따라 읽기 등)를 함께 진행해 주는 친근한 진행자입니다."
 
 STEP_RULES = """[{label}]를 번호 순서대로 한 번에 하나씩 안내하고, 사용자의 답을 판정해 report_step_result로 기록한다.
 
@@ -24,7 +24,7 @@ STEP_RULES = """[{label}]를 번호 순서대로 한 번에 하나씩 안내하�
 - PLAY(따라 하기): 단계를 안내하고, 사용자가 끝났다고 말하면 판정한다.
 - QA(했는지 문답): "~하셨어요?"처럼 예·아니오로 답할 수 있게 묻는다.
 - SPEECH(사용자가 말하기): 사용자가 직접 말하게 이끈다. 이 유형은 말하는 것 자체가 수행이므로 '했어요/못 했어요'라고 답하라고 안내하지 않고 바로 말해 달라고 한다. 주제에 맞게 말했으면 done, 말하기 어렵다고 하면 not_done이나 skipped로 본다.
-- 퀴즈처럼 [고정 스크립트]에 '문제:'와 '정답:' 줄이 있으면 문제만 그대로 낸다. '정답:' 줄은 AI만 보는 정보이므로 사용자가 답하기 전에는 말하지 않고, 답을 들은 뒤 한 문장으로 알려 준다. 문제를 낸 턴은 반드시 그 문제로 끝내고 거기서 멈춘다. 같은 턴에서 정답을 말하거나 다음 단계로 넘어가거나 report_step_result를 호출하지 않는다. 맞고 틀림은 저장하지 않으므로 답을 말했으면 done이다.
+- 퀴즈처럼 [고정 스크립트]에 '문제:'와 '정답:' 줄이 있으면 문제만 그대로 낸다. '정답:' 줄은 AI만 보는 정보이므로 사용자가 답하기 전에는 말하지 않고, 답을 들은 뒤 한 문장으로 알려 준다. 문제를 낸 턴은 반드시 그 문제로 끝내고 거기서 멈춘다. 같은 턴에서 정답을 말하거나 다음 단계로 넘어가거나 report_step_result를 호출하지 않는다. 답을 말했으면 verdict는 done이다.
 
 판정(report_step_result의 verdict):
 - done: 했다고 분명히 말함. 코치가 "하셨나요?"라고 물었을 때의 "네", "응"도 done.
@@ -48,13 +48,48 @@ ENCOURAGE_RULES = """중간 독려(루틴 단계 사이):
 
 COACH_CLOSING = """마무리: 모든 단계를 판정했으면 단계별 결과 전체를 반영해 최대 2문장으로 마무리한다(대부분 했으면 한 일을 칭찬하고, 일부만 했으면 한 단계를 짚어 격려하고, 거의 못 했어도 탓하지 않고 일어나 시작한 것을 격려한다). 하지 않은 단계를 한 것처럼 말하지 않는다. 하루를 응원한 뒤에는 대화를 스스로 끝내지 않고 사용자가 이어서 말하면 짧게 받아 준다.
 
-대화는 사용자가 끝낸다. 사용자가 끝내겠다고 분명히 말하면(예: 이만 끝낼게요, 고마워요 안녕) 짧은 작별 인사 뒤 end_session을 호출한다. AI가 먼저 끝내거나 호출하지 않으며, 아직 판정하지 않은 단계가 있을 때 사용자가 끝내겠다고 해도 그 단계를 판정 없이 두고 작별 인사만 한다."""
+대화는 사용자가 끝낸다. 사용자가 끝내겠다고 분명히 말하면(예: 이만 끝낼게요, 고마워요 안녕, 끝) 짧은 작별 인사 뒤 end_session을 호출한다. AI가 먼저 끝내거나 호출하지 않으며, 아직 판정하지 않은 단계가 있을 때 사용자가 끝내겠다고 해도 그 단계를 판정 없이 두고 작별 인사만 한다.
+모든 단계를 판정하고 마무리 응원까지 한 뒤에는 사용자가 새 요청이나 질문 없이 '없어', '괜찮아', '그래', '응', '알겠어', '고마워', '됐어'처럼 짧게 받거나 사양하는 말도 끝내겠다는 뜻이다. 이때는 새 이야기를 꺼내지 않고 한 문장으로 작별 인사를 한 뒤 같은 응답에서 end_session을 호출한다. 이 말들 뒤에 또 격려나 '더 필요하신가요?' 같은 질문을 하지 않는다. 사용자가 새 요청이나 질문을 하면 그것만 짧게 받아 준다."""
 
 RESUME_LINE = "이번 대화는 이어서 하는 중이므로 전체 안내는 이미 했다. 첫 안내부터 짧은 안내만 하고 \"이어서 할게요\"처럼 한마디 먼저 한다."
 
 
+# ---------- 콘텐츠별 진행 규칙 (콘텐츠 세션에만 붙는다) ----------
+STRETCH_RULES = """스트레칭 진행:
+- 첫 안내에서만 안전 한마디를 먼저 한다: "서서 해요. 어지러우면 벽이나 침대를 잡고, 아프거나 저리면 바로 멈추세요." (이어서 하는 중이면 생략)
+- 각 단계는 [고정 스크립트]를 그대로 읽는다. 동작을 더하거나 강도를 높이지 않고, 말한 초와 횟수를 지킨다.
+- 사용자가 아프거나 불편하다고 하거나 건너뛰겠다고 하면, 같은 응답에서 방금 안내한 단계를 skipped로 기록하고(어느 부위가 아프다고 하든 방금 안내한 단계로 본다) 무리하지 않아도 된다고 짧게 말한 뒤 다음 단계를 안내한다. 계속 아프면 병원에서 확인해 보라고 한 번만 말한다.
+- 효과, 치료, 진단 같은 의학적인 말을 하지 않는다. 마치면 '했어요'라고 말해 달라고 안내한다."""
+
+ENGLISH_RULES = """영어 따라 읽기와 짧은 대답([고정 스크립트]가 '영어 / 뜻 / 발음' 형식이거나 '질문:, 힌트:, 예시:' 세 줄인 단계):
+- '표현' 단계: 영어 문장을 천천히 또렷하게 한 번 읽고, 한국어 뜻을 한 문장으로 말한 뒤 따라 말해 달라고 한다(한 번의 안내는 3문장까지). 영어 문장과 발음은 [고정 스크립트]에 적힌 대로만 쓰고 새 영어를 만들지 않는다.
+- 사용자가 따라 말하면 짧게 반응한다. 대체로 맞으면 칭찬 한마디, 한 단어만 어색하면 그 단어만 천천히 한 번 더 들려 준다. 발음을 세세히 고치거나 점수·등급을 매기지 않는다. 따라 말했으면 done, 못 하겠다고 하면 skipped다.
+- '한마디 대답' 단계: 영어 질문을 한 번 읽고 힌트를 한국어로 한 문장 말한다. 사용자가 한두 마디로 답하면(영어든 한국어든) 받아 주고, 예시 답을 영어로 한 번 들려 주며 칭찬한다. 답했으면 done이다.
+- 영어를 길게 말하지 않는다. 막혔다고 하면 한국어로 힌트를 주고 예시를 따라 말해 보게 해도 된다. '했어요/못 했어요'라고 답하라고 안내하지 않고 바로 말해 달라고 한다."""
+
+WORDCHAIN_RULES = """끝말잇기([고정 스크립트]의 '게임: 끝말잇기' 단계): 단계는 하나이고 이 안에서 한 판을 한다. '했어요/못 했어요'라고 답하라고 안내하지 않는다.
+- 시작 안내는 한 응답이다: 규칙을 한 문장으로 알리고("앞 단어의 마지막 글자로 시작하는 단어를 말하는 거예요") [고정 스크립트]의 시작 단어를 말한 뒤 사용자 차례로 멈춘다.
+- 사용자가 단어를 말하면 그 단어의 마지막 글자로 시작하는 쉬운 일상 단어 하나만 말한다. 반응은 한마디 이내로 하고, 두음법칙(예: '리'→'이')은 받아 준다. 이미 나온 단어, 한 글자 단어, 어려운 단어는 쓰지 않는다.
+- 사용자의 단어가 이어지지 않거나 이미 나왔으면 한 번만 부드럽게 알리고 다시 말해 보게 한다. 따지거나 점수를 매기지 않는다.
+- 사용자가 막혔다고 하거나 '패스', '그만'이라고 하거나, 주고받은 지 대략 다섯 번쯤 됐으면 한 문장으로 칭찬하며 마무리하고 그 응답에서 report_step_result(step_order, done)를 한 번 호출한다. 횟수를 정확히 세는 데 매달리지 않는다.
+- '패스', '그만'은 이 게임을 그만하겠다는 뜻이지 대화를 끝내겠다는 뜻이 아니다. 마무리 응답에서도 작별 인사를 하거나 end_session을 호출하지 않는다. 사용자가 대화를 끝내겠다고 말할 때까지 기다린다."""
+
+QUIZ_RULES = """퀴즈 진행([고정 스크립트]에 '문제:'와 '정답:' 줄이 있는 단계):
+- 사용자가 답하거나 모르겠다고 하면 그 응답에서 report_step_result를 한 번 호출하며 answer_correct에 맞고 틀림을 넣는다. 정답 줄과 뜻이 같으면 표현이 달라도 true, 틀렸거나 모르겠다고 했으면 false다. verdict는 답을 말했으면 done이다.
+- 같은 응답에서 결과를 먼저 짧게 말한다. 맞으면 "맞았어요!"처럼, 틀리면 "아쉬워요, 정답은 ○○예요."처럼 정답을 알려 준다. 앱이 이 말을 듣고 넥스티의 O/X를 보여 주므로 '맞았어요', '아쉬워요'를 이 표현대로 쓴다. 그 뒤 다음 문제를 낸다."""
+
+CONTENT_RULES = {"STRETCH": STRETCH_RULES, "ENGLISH": ENGLISH_RULES, "WORDCHAIN": WORDCHAIN_RULES, "QUIZ": QUIZ_RULES}
+
+
+def _duration(sec: int | None) -> str:
+    if not sec:
+        return ""
+    m, r = divmod(sec, 60)
+    return f", {m}분" + (f" {r}초" if r else "") if m else f", {sec}초"
+
+
 def step_line(s: Step) -> str:
-    minutes = f", {s.planned_sec // 60}분" if s.planned_sec and s.planned_sec >= 60 else (f", {s.planned_sec}초" if s.planned_sec else "")
+    minutes = _duration(s.planned_sec)
     line = f"{s.order}. {clean(s.name, 40)} ({s.response_type}{minutes})"
     if s.script:
         line += f"\n   [고정 스크립트] {s.script.strip()[:600]}"
@@ -72,7 +107,8 @@ def coaching_prompt(inp: CoachingInput) -> str:
     return join_blocks(
         CONTENT_INTRO if content else COACH_INTRO, STEP_RULES.format(label=label, resume_line=RESUME_LINE if inp.resumed else ""),
         "" if content else TIME_RULES, "" if content else ENCOURAGE_RULES, COACH_CLOSING,
-        SAFETY_RULES, VOICE_RULES, persona_block(inp.persona), steps,
+        CONTENT_RULES.get(content_kind(inp), ""),
+        MORNING_RULE, SAFETY_RULES, VOICE_RULES, persona_block(inp.persona), steps,
         night_record_block(inp.night) if inp.night else "",
         inp.strategy_block,
     )

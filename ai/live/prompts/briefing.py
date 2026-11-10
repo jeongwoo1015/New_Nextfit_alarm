@@ -2,7 +2,7 @@
 다음 세션을 시작할 준비가 됐는지 물어 답에 따라 넘어간다. 알람은 루틴 또는 콘텐츠 중 하나라 다음 세션도 하나뿐이며, 그 진행은 별도 세션(단계 세션)에서 한다."""
 from ...personalization.strategy import SHORT_BRIEFING_MARK
 from ..inputs import BriefingInput
-from .common import (SAFETY_RULES, VOICE_RULES, clean, events_block, join_blocks, night_record_block,
+from .common import (MORNING_RULE, SAFETY_RULES, VOICE_RULES, clean, events_block, join_blocks, night_record_block,
                      persona_block, weather_block)
 
 BRIEFING_RULES = """당신은 사용자의 아침 루틴 시작 전에 브리핑을 해 주는 친근한 아침 파트너입니다. 알람이 울린 직후라 사용자는 막 일어나는 중입니다.
@@ -50,7 +50,7 @@ def briefing_prompt(inp: BriefingInput) -> str:
         closing = CLOSING_NEXT.format(next=routine, example="이제 아침 루틴을 시작할 준비가 됐어요?")
     now = f"[현재 시각]\n- {inp.now_hhmm}" if inp.now_hhmm else ""
     return join_blocks(
-        BRIEFING_RULES.format(closing_item=closing, length_rule=LENGTH_SHORT if SHORT_BRIEFING_MARK in inp.strategy_block else LENGTH_NORMAL), END_RULE, SAFETY_RULES, VOICE_RULES,
+        BRIEFING_RULES.format(closing_item=closing, length_rule=LENGTH_SHORT if SHORT_BRIEFING_MARK in inp.strategy_block else LENGTH_NORMAL), END_RULE, MORNING_RULE, SAFETY_RULES, VOICE_RULES,
         persona_block(inp.persona), now,
         events_block("오늘 일정", inp.events_today, "없음 (등록된 일정이 없거나 가져오지 못했다)"),
         weather_block(inp.weather) or "[오늘 날씨]\n없음 (날씨를 가져오지 못했다)",

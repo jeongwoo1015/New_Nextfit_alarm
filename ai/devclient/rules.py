@@ -14,6 +14,7 @@ ENCOURAGE = re.compile(r"조금만|거의 다|힘내|화이팅|파이팅|벌써|
 ACCEPT = re.compile(r"응|네|그래|없어|알겠|알았|좋아|그렇게|오케이|ㅇㅋ")                 # 마무리를 받아들이는 짧은 대답
 WRAP_Q = re.compile(r"마무리할까|마칠까|이만 할까")                                      # 마무리해도 되는지 묻는 말 (밤 대화는 묻지 않고 알린다)
 CLOSE = re.compile(r"마무리할게")                                                       # AI가 "이제 마무리할게요"라고 알리는 말
+NIGHT_GREETING = re.compile(r"안녕히 주무|잘 ?자요|잘 ?자[.!]|편안한 밤|좋은 꿈|푹 주무")                # 아침 대화에서 나오면 안 되는 밤 인사
 FAREWELL = re.compile(r"편안한 밤|좋은 꿈|푹 (쉬|주무|자)|안녕히|잘 자|좋은 밤")             # AI의 작별 인사
 
 
@@ -83,7 +84,8 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
     add("영어 덧붙임 없음", HARD, not eng, eng.group(0) if eng else "")
     known = ("end_session", "report_step_result", "start_routine", "adjust_step_time")
     bad_calls = [c for c in log.calls() if c["name"] not in known
-                 or (c["name"] == "report_step_result" and (c["args"].get("verdict") not in VERDICTS or not isinstance(c["args"].get("step_order"), int)))
+                 or (c["name"] == "report_step_result" and (c["args"].get("verdict") not in VERDICTS or not isinstance(c["args"].get("step_order"), int)
+                                                             or ("answer_correct" in c["args"] and not isinstance(c["args"]["answer_correct"], bool))))
                  or (c["name"] == "adjust_step_time" and not (isinstance(c["args"].get("step_order"), int) and isinstance(c["args"].get("seconds"), int)
                                                               and c["args"]["seconds"] >= 0 and c["args"]["seconds"] % 30 == 0))]
     add("함수 호출 형식", HARD, not bad_calls, str(bad_calls))
@@ -96,11 +98,16 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
     else:
         bad = [s for s in sents if len(_ending(s)) > 2 and CASUAL_END.search(_ending(s)) and not POLITE_END.search(_ending(s))]
         add("존댓말 유지", HARD, not bad, "; ".join(bad[:2]))
+    if scn.kind != "night":
+        bad_night = [t.said for t in turns if NIGHT_GREETING.search(t.said)]
+        add("아침 대화에 밤 인사 없음", HARD, not bad_night, "; ".join(bad_night[:2]))
     fa = turns[0].first_audio if turns else None
     add("첫 소리 3초 이내", SOFT, fa is not None and fa <= 3.0, f"{fa}")
 
     # 대화는 사용자가 끝낸다: 사용자가 끝내겠다는 말을 하지 않았는데 AI가 end_session을 부르면 실패
-    early = [i for i, t in enumerate(turns) if "end_session" in _names(t) and not _may_end(turns, i)]
+    pass_ends = scn.expect.get("pass_ends")       # 끝말잇기: 마지막 단계에서 '패스'하면 마무리하며 끝내도 된다(남은 단계가 없다)
+    early = [i for i, t in enumerate(turns) if "end_session" in _names(t) and not _may_end(turns, i)
+             and not (pass_ends and re.search(r"패스|그만", t.heard))]
     add("사용자가 끝내자고 하기 전에 AI가 끝내지 않음", HARD, not early, f"{early}번째 턴에서 종료 호출")
     if e.get("farewell"):
         add("사용자 작별 뒤 end_session 호출", HARD, log.ended_by == "end_session", f"종료 방식={log.ended_by}")
@@ -219,6 +226,7 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
         skip_turns = set(e.get("no_verdict_turns", ()))   # 시간 변경만 한 턴(그 턴에는 판정할 단계가 없다)
         slots = [i for i in range(1, len(turns)) if i not in skip_turns]
         turn_of = {o: slots[j] for j, o in enumerate(orders) if j < len(slots)}       # 단계 번호 → 그 단계의 답을 듣는 턴
+        turn_of.update(e.get("report_turn", {}))          # 한 단계 안에서 여러 번 주고받는 게임(끝말잇기)은 판정이 마지막 응답에 온다
         wrong_turn = [(i, c["args"].get("step_order")) for i, t in enumerate(turns) for c in t.calls
                       if c["name"] == "report_step_result" and i >= 1 and orders and turn_of.get(c["args"].get("step_order")) != i]
         add("코칭: 한 턴에 방금 답한 단계만 판정", HARD, not wrong_turn, f"(턴, 판정한 단계)={wrong_turn}")
@@ -226,7 +234,9 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
         for c in log.calls("report_step_result"):
             last_verdict[c["args"].get("step_order")] = c["args"].get("verdict")
         want = e.get("verdicts", {})
-        add("코칭: 판정이 기대와 같음", HARD, last_verdict == want, f"실제={last_verdict} 기대={want}")
+        alt = e.get("verdict_any_of", {})               # 끝말잇기: 한두 번 주고받고 '패스'한 경우 done과 skipped 모두 합리적이다
+        ok_verdict = set(last_verdict) == set(want) and all(last_verdict[k] == want[k] or last_verdict[k] in alt.get(k, ()) for k in want)
+        add("코칭: 판정이 기대와 같음", HARD, ok_verdict, f"실제={last_verdict} 기대={want}{' 또는 ' + str(alt) if alt else ''}")
         got_adj = {c["args"].get("step_order"): c["args"].get("seconds") for c in log.calls("adjust_step_time")}
         add("코칭: 시간 변경 호출이 기대와 같음", HARD, got_adj == e.get("adjust", {}), f"실제={got_adj} 기대={e.get('adjust', {})}")
         both = [(i, o) for i, t in enumerate(turns) for o in {c["args"].get("step_order") for c in t.calls if c["name"] == "adjust_step_time"}
@@ -246,6 +256,25 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
             cheered = [t for t in moves if ENCOURAGE.search(t.said)]
             need = max(1, (len(moves) + 1) // 2)
             add("코칭: 단계 사이에 독려 한마디", HARD, len(cheered) >= need, f"단계 전환 {len(moves)}번 중 독려 {len(cheered)}번 (필요 {need}번)")
+        if e.get("answer_correct") is not None:      # 퀴즈: 모든 판정에 정답 여부를 넣고, 사용자가 일부러 틀린 답도 틀렸다고 기록해야 한다
+            reps = log.calls("report_step_result")
+            add("퀴즈: 모든 판정에 answer_correct를 넣음", HARD, all(isinstance(c["args"].get("answer_correct"), bool) for c in reps), str([c["args"] for c in reps]))
+            got_ac = {}
+            for c in reps:
+                got_ac[c["args"].get("step_order")] = c["args"].get("answer_correct")
+            add("퀴즈: 맞고 틀림이 기대와 같음", HARD, got_ac == e["answer_correct"], f"실제={got_ac} 기대={e['answer_correct']}")
+            for step, word in (e.get("reactions") or {}).items():
+                tt = turns[turn_of[step]].said if turn_of.get(step) is not None and turn_of[step] < len(turns) else ""
+                add(f"퀴즈: {step}번 답에 '{word}…'로 반응(앱이 O/X로 읽는 표현)", SOFT, word in tt, tt)
+        if e.get("safety_first"):                    # 스트레칭: 첫 안내에서 안전 한마디(멈추기·어지러우면 잡기)
+            first = turns[0].said if turns else ""
+            add("스트레칭: 첫 안내에 안전 한마디", SOFT, "멈추" in first and bool(re.search(r"어지러|벽|침대", first)), first)
+        if e.get("pain_note"):                       # 아프다고 하면 무리하지 않게 받아 주고 효과·진단을 말하지 않는다
+            tt = turns[e["pain_note"]].said if len(turns) > e["pain_note"] else ""
+            add("스트레칭: 아프다고 하면 무리하지 않게 받아 줌", HARD, bool(re.search(r"괜찮|무리|쉬|건너|멈추|넘어", tt)) and not re.search(r"치료|진단|효과|디스크", tt), tt)
+        if e.get("start_word"):                      # 끝말잇기: 시작 단어로 시작하고, 한 번에 단어 하나씩 주고받는다
+            add("끝말잇기: 시작 단어로 시작", HARD, e["start_word"] in (texts[0] if texts else ""), texts[0] if texts else "")
+            add("끝말잇기: 첫 안내는 사용자 차례에서 멈춤(질문 이어서 하지 않음)", SOFT, len(sentences(texts[0])) <= 3 if texts else False, texts[0] if texts else "")
         answers = e.get("answers", [])
         for i, t in enumerate(turns):
             leaked = [a for a in answers[i:] if a in t.said]
