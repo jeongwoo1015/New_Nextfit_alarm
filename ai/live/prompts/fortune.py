@@ -2,7 +2,7 @@
 
 읽은 뒤에는 멈추고 함수를 부르지 않는다(말하면서 함수를 부르는 방식은 불안정했다). 앱이 음성이 끝나면 다음 단계로 넘어간다."""
 from ..inputs import FortuneInput
-from .common import MORNING_RULE, SAFETY_RULES, VOICE_RULES, clean, join_blocks, persona_block
+from .common import MORNING_FLOW, MORNING_RULE, SAFETY_RULES, VOICE_RULES, clean, join_blocks, persona_block
 
 FORTUNE_RULES = """당신은 사용자가 아침에 '오늘의 포춘'을 듣게 해 주는 친근한 아침 파트너입니다. 사용자는 막 일어난 상태입니다.
 
@@ -14,13 +14,23 @@ FORTUNE_RULES = """당신은 사용자가 아침에 '오늘의 포춘'을 듣게
 읽은 뒤 사용자가 말하면: 한 문장으로 짧게 받아 주고 새로운 이야기를 시작하지 않는다. 포춘을 다시 읽어 달라고 하면 한 번 더 그대로 읽는다.
 [오늘의 포춘 문장]이 '없음'이면 문장을 지어내지 않고 "오늘은 포춘을 준비하지 못했어요"라는 뜻을 어조에 맞춰 한 문장으로만 말한다."""
 
-INTRO = {"FORMAL": "오늘의 포춘이에요.", "CASUAL": "오늘의 포춘이야."}
+# 소개 문장: 포춘을 만든 재료가 있으면 그것을 밝혀 앞 단계(어젯밤 한마디 듣기)와 이어지게 한다
+INTRO = {
+    "FORMAL": {"": "오늘의 포춘이에요.", "ONE_LINER": "어젯밤 남긴 한마디로 만든 오늘의 포춘이에요.", "DIARY": "어젯밤 이야기로 만든 오늘의 포춘이에요."},
+    "CASUAL": {"": "오늘의 포춘이야.", "ONE_LINER": "어젯밤 남긴 한마디로 만든 오늘의 포춘이야.", "DIARY": "어젯밤 이야기로 만든 오늘의 포춘이야."},
+}
+BASED_ON = {"ONE_LINER": "ONE_LINER", "ONE-LINER": "ONE_LINER", "VOICE": "ONE_LINER", "DIARY": "DIARY"}      # compose_fortune의 used_input("voice"=받아쓴 한마디 / "diary" / "none")도 그대로 받는다
+
+
+def intro_sentence(inp: FortuneInput) -> str:
+    by_tone = INTRO.get(inp.persona.tone, INTRO["FORMAL"])
+    return by_tone[BASED_ON.get((inp.based_on or "").strip().upper(), "")]
 
 
 def fortune_prompt(inp: FortuneInput) -> str:
     text = clean(inp.fortune_text, 160)
     return join_blocks(
-        FORTUNE_RULES.format(intro=INTRO.get(inp.persona.tone, INTRO["FORMAL"])), MORNING_RULE, SAFETY_RULES, VOICE_RULES,
+        FORTUNE_RULES.format(intro=intro_sentence(inp)), MORNING_FLOW, MORNING_RULE, SAFETY_RULES, VOICE_RULES,
         persona_block(inp.persona),
         "[오늘의 포춘 문장]\n" + (text or "없음 (포춘을 가져오지 못했다)"),
     )
