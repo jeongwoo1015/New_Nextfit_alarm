@@ -33,18 +33,20 @@
 | `POST /night/transcript` | 굿나잇콜 종료 | 받아쓰기 저장(202, `extract_status: PENDING`), 추출은 백그라운드 |
 | `GET /night/records/{id}` · `GET /night/records?record_date=` | 밤 기록·일기 | 추출 결과, 하루 한정 변경, 목소리 서명 URL |
 | `PUT /night/records/{id}/voice` | 굿나잇콜 | 목소리 m4a를 본문 그대로(`Content-Type: audio/mp4`, 10MB 이하) |
-| `POST /morning/sessions` | 알람 울림 | `{alarm_id}` → 오늘 세션 만들기(하루 한정 변경 반영) 또는 기존 세션(재연결) |
+| `PATCH /night/records/{id}/voice-text` | 굿나잇콜 | 목소리 업로드 뒤 기기에서 받아쓴 '내일의 한마디' `{text}`(500자 이하, 빈 글 = 비우기). 목소리를 다시 올리면 비워지므로 다시 보낸다. 목소리가 없으면 409 `VOICE_NOT_UPLOADED` |
+| `POST /morning/sessions` | 알람 울림 | `{alarm_id}` → 오늘 세션 만들기(하루 한정 변경 반영) 또는 기존 세션(재연결). 응답 뒤 백그라운드에서 오늘의 포춘 문장을 만들어 세션에 저장 |
 | `POST /morning/sessions/{id}/rewake` · `/response` | 모닝콜 | 8초 무응답 재기상(AI 음악) 횟수 +1 / 첫 음성 응답 시각(= 기상 성공 시각) |
 | `POST /morning/sessions/{id}/snooze` | 모닝콜 | "5분 뒤 다시 울리기" 횟수 +1 (제한 없음). 다시 울리면 `POST /morning/sessions`로 같은 세션 |
 | `POST /morning/sessions/{id}/wake-check` | 브리핑 | 확인 멘트(2~3개)를 모두 마침 — 브리핑 Live의 `wake_check_done`을 앱이 전달. 이때 기상 성공 판정 |
 | `POST /morning/sessions/{id}/briefing-token` | 브리핑 | 오늘 일정·현재 위치(선택, 날씨용)를 보내면 브리핑 Live 토큰. 그날 처음이면 개인화 전략을 정해 로그 |
-| `POST /morning/sessions/{id}/coaching-token` | 루틴·콘텐츠 | `start_routine` 뒤(재연결도) 호출. 처음이면 단계를 PENDING으로 만들고 남은 단계만 토큰에 |
+| `POST /morning/sessions/{id}/fortune-token` | 포춘 | 오늘의 포춘(어젯밤 한마디, 없으면 한 줄 일기)을 AI가 그대로 읽는 Live 토큰 + `fortune_text`·`fortune_style`·`fortune_source`. 문장이 아직 없으면 이때 만든다(재연결도 같은 문장). AI 음성이 끝나면 앱이 다음 단계로 |
+| `POST /morning/sessions/{id}/coaching-token` | 루틴·콘텐츠 | `start_routine` 뒤(재연결도) 호출. 처음이면 단계를 PENDING으로 만들고 남은 단계만 토큰에. 콘텐츠는 종류·세부를 AI에 넘기고, 세부 없는 퀴즈 알람은 AI가 정한 오늘 세부를 세션 `content_option`에 남긴다(B14) |
 | `POST /morning/sessions/{id}/steps/{n}/verdict` | 코칭 | Live `report_step_result` 전달 |
 | `PATCH /morning/sessions/{id}/steps/{n}` | 체크리스트 | 직접 체크·건너뛰기·해제 |
 | `PATCH /morning/sessions/{id}/steps/{n}/duration` | 코칭 | 오늘 진행 중 변경("오늘 스트레칭 좀 적게", Live 함수를 앱이 전달). PENDING만, 30초 단위, 오늘 합계 ≤ 상한, 0초 = 오늘만 빼기 |
 | `POST /morning/sessions/{id}/end` | 종료 | `end_session` 또는 통화 종료. 기상 성공 기록 |
 | `GET /morning/sessions/{id}` · `GET /morning/sessions/today` | 루틴 화면 | 세션, 단계, 진행 개수(`finished` = "완료!") |
-| `GET /reports?period=week\|month\|year&date=` | 리포트 | 상단 `overall` = 전체 기간 누적(기상 성공률·루틴 성공률), `totals`·`series` = 선택한 기간(평균 기상 시각, 루틴 완료 52/70, 그래프 칸 주: 월~일 / 월: 1주~5주 / 연: 1~12월), 현재·최장 연속 달성일 |
+| `GET /reports?period=week\|month\|year&date=` | 리포트 | 상단 `overall` = 전체 기간 누적(기상 성공률·루틴 성공률·취침 성공률 `bedtime_success_rate`), `totals`·`series` = 선택한 기간(평균 기상 시각, 루틴 완료 52/70, 그래프 칸 주: 월~일 / 월: 1주~5주 / 연: 1~12월), 현재·최장 연속 달성일. 취침(11/06): 성공률 = 밤 대화를 마친 날 ÷ 기록 기간(첫 기록일~어제, 오늘 밤을 마쳤으면 오늘까지), `avg_bed_clock` = 밤 기록이 처음 저장된 시각의 평균(자정 넘김 이어서) |
 | `GET /diary/calendar?month=YYYY-MM` | 한 줄 일기 | 날짜별 사진 URL 또는 루틴 성공률, 세션·밤 기록 여부 |
 | `GET /diary/{date}` | 일기 상세 | 그날 밤 기록(한 줄 일기)·아침 세션과 단계·사진·하루 요약. 세션은 알람이 먼저 울린 순 |
 | `PUT /diary/{date}/photo` | 일기 사진 | jpg를 본문 그대로(`Content-Type: image/jpeg`, 10MB 이하, 미래 날짜 불가). 다시 올리면 덮어씀 |

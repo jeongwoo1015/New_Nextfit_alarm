@@ -137,7 +137,7 @@ def test_content_steps_fit_fixed_duration():
     answer = {"steps": [{"name": f"퀴즈 {n}번", "seconds": 200, "response_type": "SPEECH",
                          "script": f"문제: 문제 {n}\n정답: 정답 {n}"} for n in range(1, 4)]}
     gw, _ = gateway(FakeLLM(answer))
-    steps = gw.compose_content_steps("QUIZ", "HISTORY", 480, date(2026, 11, 6))
+    steps = gw.compose_content_steps("QUIZ", "HISTORY", 480, date(2026, 11, 6)).steps
     assert sum(s.planned_sec for s in steps) == 480 and steps[0].response_type == "SPEECH" and "정답:" in steps[0].script
 
 
@@ -147,7 +147,9 @@ def test_content_steps_fall_back_when_llm_fails():
             from ai.tasks.llm import LLMError
             raise LLMError("503")
     gw, _ = gateway(Broken())
-    steps = gw.compose_content_steps("EXERCISE", "STRETCH", 600, date(2026, 11, 6))
+    plan = gw.compose_content_steps("EXERCISE", "STRETCH", 600, date(2026, 11, 6))
+    steps = plan.steps
+    assert plan.option == "STRETCH"
     assert steps and sum(s.planned_sec for s in steps) == 600
 
 

@@ -1,11 +1,13 @@
 """가상 사용자 시나리오. 사용자 발화는 고정 스크립트라 AI의 말에 따라 바뀌지 않는다."""
 import re
 from dataclasses import dataclass, field, replace
+from datetime import date
 
-from ..live.inputs import (BriefingInput, CalendarEvent, CoachingInput, NightInput, NightRecordView, Persona,
+from ..live.inputs import (BriefingInput, CalendarEvent, CoachingInput, FortuneInput, NightInput, NightRecordView, Persona,
                            Step, Weather)
 from ..personalization.strategy import Strategy, strategy_block
-from ..tasks.content_steps import fallback_steps
+from ..tasks.content_steps import english_fallback, fallback_steps, wordchain_steps
+from ..tasks.stretch_sets import stretch_steps
 from ..tasks.routine_changes import RoutineItem
 
 EVENTS = (CalendarEvent("주간 회의", "09:30", "10:30"), CalendarEvent("발표 리허설", "15:00", "16:00"),
@@ -37,7 +39,15 @@ def _night(**kw):
 ROUTINE_NAMES = tuple(i.name for i in ROUTINE_ITEMS)
 ROUTINE_SECS = tuple(i.duration_sec for i in ROUTINE_ITEMS)
 
-QUIZ = fallback_steps("QUIZ", "GENERAL")
+QUIZ = fallback_steps("QUIZ", "HISTORY")             # 옛 방식의 기본 문제(서울·열두 달·세종대왕): 오래된 시나리오와 정답 누출 검사용
+CDAY = date(2026, 11, 9)                      # 콘텐츠 시나리오의 고정 날짜(세트·문제가 항상 같게)
+STRETCH = stretch_steps(CDAY)
+PERSON_QUIZ = fallback_steps("QUIZ", "PERSON", CDAY)
+PERSON_ANSWERS = [x.script.split("정답:")[1].strip() for x in PERSON_QUIZ]
+ENGLISH = english_fallback(CDAY)
+WORDCHAIN = wordchain_steps(CDAY)
+WORDCHAIN_REPLY = {"기차": "차표", "사과": "과일", "바다": "다리", "나무": "무지개", "커피": "피아노", "여행": "행복", "하늘": "늘보", "오리": "리본"}   # 시작 단어 → 사용자가 이을 단어
+WC_START = WORDCHAIN[0].script.split("시작 단어:")[1].strip()
 COACH_STEPS = (Step(1, "물 한 잔", 60, "QA"), Step(2, "스트레칭", 120, "PLAY", "1. 목을 천천히 좌우로 돌려요.\n2. 어깨를 크게 돌려요."),
                Step(3, "오늘 할 일 3개 말하기", 120, "SPEECH"))
 
@@ -141,6 +151,48 @@ SCENARIOS = {s.name: s for s in [
              CoachingInput(persona=Persona("예준"), morning_call_type="CONTENT", steps=tuple(QUIZ)),
              ("서울이에요", "열두 달이요", "세종대왕이요", "고마워요 이만 끝낼게요"),
              expect={"verdicts": {1: "done", 2: "done", 3: "done"}, "step_names": [s.name for s in QUIZ], "answers": ["서울", "열두 달", "세종대왕"], "farewell": True}),
+    # 포춘 읽기: 서버가 만든 문장을 AI가 그대로 읽는지 본다 (사용자는 말하지 않고 시작 신호만 보낸다)
+    Scenario("fortune_cookie", "fortune",
+             FortuneInput(persona=Persona("예준", "FORMAL", "KIND"), style="COOKIE",
+                          fortune_text="용기는 떨림이 사라진 뒤가 아니라, 첫마디를 꺼낼 때 찾아옵니다."),
+             (), expect={"fortune_text": "용기는 떨림이 사라진 뒤가 아니라, 첫마디를 꺼낼 때 찾아옵니다."}),
+    Scenario("fortune_horoscope", "fortune",
+             FortuneInput(persona=Persona("예준", "FORMAL", "KIND"), style="HOROSCOPE",
+                          fortune_text="오늘의 관계운 키워드는 '여백'. 답을 서두르기보다 내 마음부터 살펴보세요."),
+             (), expect={"fortune_text": "오늘의 관계운 키워드는 '여백'. 답을 서두르기보다 내 마음부터 살펴보세요."}),
+    Scenario("fortune_casual", "fortune",
+             FortuneInput(persona=Persona("예준", "CASUAL", "FRIENDLY"), style="HOROSCOPE",
+                          fortune_text="오늘의 행운 자세는 기지개야. 어깨를 펴고 하루를 열어 봐."),
+             (), tone="CASUAL", expect={"fortune_text": "오늘의 행운 자세는 기지개야. 어깨를 펴고 하루를 열어 봐."}),
+    Scenario("fortune_replay", "fortune",
+             FortuneInput(persona=Persona("예준", "FORMAL", "KIND"), style="COOKIE",
+                          fortune_text="어제 비워둔 칸은 오늘의 가능성이 들어갈 자리입니다."),
+             ("한 번만 다시 읽어 주세요", "고마워요 이만 끝낼게요"),
+             expect={"fortune_text": "어제 비워둔 칸은 오늘의 가능성이 들어갈 자리입니다.", "replay": True, "farewell": True}),
+    # ----- 콘텐츠 3종 -----
+    Scenario("content_stretch", "coaching",
+             CoachingInput(persona=Persona("예준"), morning_call_type="CONTENT", content_type="EXERCISE", content_option="STRETCH", steps=tuple(STRETCH)),
+             ("했어요", "했어요", "했어요", "했어요", "했어요", "고마워요 이만 끝낼게요"),
+             expect={"verdicts": {i: "done" for i in range(1, 6)}, "step_names": [x.name for x in STRETCH], "safety_first": True, "farewell": True}),
+    Scenario("content_stretch_pain", "coaching",
+             CoachingInput(persona=Persona("예준"), morning_call_type="CONTENT", content_type="EXERCISE", content_option="STRETCH", steps=tuple(STRETCH)),
+             ("했어요", "아파서 이건 건너뛸게요", "했어요", "했어요", "했어요", "고마워요 이만 끝낼게요"),
+             expect={"verdicts": {1: "done", 2: "skipped", 3: "done", 4: "done", 5: "done"}, "step_names": [x.name for x in STRETCH],
+                     "safety_first": True, "pain_note": 2, "farewell": True}),
+    Scenario("content_quiz_person", "coaching",
+             CoachingInput(persona=Persona("예준"), morning_call_type="CONTENT", content_type="QUIZ", content_option="PERSON", steps=tuple(PERSON_QUIZ)),
+             (f"{PERSON_ANSWERS[0]}이요", "음 홍길동이요", f"{PERSON_ANSWERS[2]}이요", "고마워요 이만 끝낼게요"),
+             expect={"verdicts": {1: "done", 2: "done", 3: "done"}, "answer_correct": {1: True, 2: False, 3: True}, "reactions": {1: "맞", 2: "아쉬"},
+                     "step_names": [x.name for x in PERSON_QUIZ], "answers": PERSON_ANSWERS, "farewell": True}),
+    Scenario("content_english", "coaching",
+             CoachingInput(persona=Persona("예준"), morning_call_type="CONTENT", content_type="LANGUAGE", content_option="ENGLISH", steps=tuple(ENGLISH)),
+             tuple([x.script.split(" / ")[0] for x in ENGLISH[:3]] + [ENGLISH[3].script.split("예시:")[1].strip(), "고마워요 이만 끝낼게요"]),
+             expect={"verdicts": {1: "done", 2: "done", 3: "done", 4: "done"}, "step_names": [x.name for x in ENGLISH], "allow_english": True, "farewell": True}),
+    Scenario("content_wordchain", "coaching",
+             CoachingInput(persona=Persona("예준"), morning_call_type="CONTENT", content_type="QUIZ", content_option="WORDCHAIN", steps=tuple(WORDCHAIN)),
+             (WORDCHAIN_REPLY[WC_START], "음 모르겠어요 패스할게요", "고마워요 이만 끝낼게요"),
+             expect={"verdicts": {1: "done"}, "verdict_any_of": {1: ("skipped",)}, "pass_ends": True, "report_turn": {1: 2}, "extra_turns": 1,
+                     "step_names": ["끝말잇기"], "start_word": WC_START, "farewell": True}),
     Scenario("coaching_resumed", "coaching", CoachingInput(persona=Persona("예준"), steps=COACH_STEPS_RESUMED, resumed=True, night=NIGHT_REC),
              ("물 한 잔 마셨어요", "스트레칭은 오늘 건너뛸게요", "오늘 할 일은 보고서 쓰기, 운동하기, 장보기예요", "고마워요 이만 끝낼게요"),
              expect={"verdicts": {4: "done", 5: "skipped", 6: "done"}, "step_names": [s.name for s in COACH_STEPS_RESUMED], "farewell": True}),

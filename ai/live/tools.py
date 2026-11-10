@@ -1,5 +1,9 @@
 """Live 대화에서 AI가 부르는 함수 선언. 판정 값은 정의서 RS_SESSION_STEP.AI_VERDICT와 같다."""
 
+from copy import deepcopy
+
+from .inputs import content_kind
+
 VERDICTS = ("done", "not_done", "skipped", "ambiguous", "other")
 
 END_SESSION = {
@@ -27,6 +31,14 @@ REPORT_STEP_RESULT = {
     },
 }
 
+# 퀴즈 콘텐츠 전용: 앱이 AI의 말을 추측하지 않고 이 값으로 정답 여부(넥스티 O/X)를 알 수 있게 한다
+REPORT_STEP_RESULT_QUIZ = deepcopy(REPORT_STEP_RESULT)
+REPORT_STEP_RESULT_QUIZ["description"] = ("퀴즈 문제 하나에 대한 사용자의 답을 기록한다. 사용자가 답하거나 모르겠다고 말한 응답에서 한 번 호출한다. "
+                                          "답을 말했으면 verdict는 done이고, answer_correct에 맞고 틀림을 함께 넣는다.")
+REPORT_STEP_RESULT_QUIZ["parameters"]["properties"]["answer_correct"] = {
+    "type": "BOOLEAN", "description": "사용자의 답이 [고정 스크립트]의 정답 줄과 같은 뜻이면 true, 틀렸거나 모르겠다고 했으면 false"}
+REPORT_STEP_RESULT_QUIZ["parameters"]["required"] = ["step_order", "verdict", "answer_correct"]
+
 ADJUST_STEP_TIME = {
     "name": "adjust_step_time",
     "description": "사용자가 아직 하지 않은 단계를 오늘만 줄이거나 빼 달라고 했을 때 호출한다. seconds는 오늘 그 단계의 새 시간(초)이며 30초 단위이고, 0이면 오늘만 그 단계를 뺀다. 시간을 말하지 않았으면 먼저 사용자에게 묻고, 같은 단계의 판정(report_step_result)과 함께 부르지 않는다.",
@@ -43,12 +55,13 @@ ADJUST_STEP_TIME = {
 _BY_KIND = {
     "night": [END_SESSION],
     "briefing": [START_ROUTINE, END_SESSION],
+    "fortune": [END_SESSION],        # 읽고 멈추는 세션이라 사용자가 끝내겠다고 할 때만 쓴다. 앱이 음성이 끝나면 다음 단계로 넘어간다
     "coaching": [REPORT_STEP_RESULT, ADJUST_STEP_TIME, END_SESSION],
 }
 
 
 def tools_for(kind: str, inp=None) -> list[dict]:
-    """kind: night / briefing / coaching → Live setup의 tools 값.
+    """kind: night / briefing / fortune / coaching → Live setup의 tools 값.
 
     입력에 따라 다르다: 브리핑은 코칭을 하는 날에만 start_routine을 넣는다(코칭 안 하는 날은 브리핑만 한다).
     adjust_step_time은 루틴 세션에만 넣는다(콘텐츠는 고정 시간).
@@ -57,5 +70,6 @@ def tools_for(kind: str, inp=None) -> list[dict]:
         follows = not getattr(inp, "coaching_skipped", False)
         return [{"functionDeclarations": ([START_ROUTINE] if follows else []) + [END_SESSION]}]
     if kind == "coaching" and getattr(inp, "morning_call_type", "ROUTINE") == "CONTENT":
-        return [{"functionDeclarations": [REPORT_STEP_RESULT, END_SESSION]}]
+        report = REPORT_STEP_RESULT_QUIZ if content_kind(inp) == "QUIZ" else REPORT_STEP_RESULT
+        return [{"functionDeclarations": [report, END_SESSION]}]
     return [{"functionDeclarations": list(_BY_KIND[kind])}]

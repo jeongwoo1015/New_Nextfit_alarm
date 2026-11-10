@@ -3,11 +3,13 @@
 MORNING_CALL_TYPES = ("ROUTINE", "CONTENT")
 CONTENT_TYPES = ("MEDITATION", "EXERCISE", "LANGUAGE", "QUIZ")
 # 예시 값(팀 확정 전). 확정되면 여기만 고친다
+# 11/10 AI CONTRACTS B8·B14: 콘텐츠 3종 = 스트레칭(EXERCISE/STRETCH)·영어(LANGUAGE/ENGLISH)·퀴즈 게임(QUIZ/PERSON·GENERAL·WORDCHAIN).
+# 팀이 목록을 줄이기 전까지 옛 값(MASSAGE 등)도 받는다 (AI도 옛 값을 그대로 처리)
 CONTENT_OPTIONS = {
     "MEDITATION": ("BREATH", "BODY_SCAN"),
     "EXERCISE": ("STRETCH", "MASSAGE"),
     "LANGUAGE": ("ENGLISH", "JAPANESE", "CHINESE"),
-    "QUIZ": ("GENERAL", "SCIENCE", "HISTORY", "NONSENSE"),
+    "QUIZ": ("PERSON", "GENERAL", "WORDCHAIN", "SCIENCE", "HISTORY", "NONSENSE"),
 }
 
 DURATION_STEP_SEC = 30              # 항목 시간 단위 (0 = 그 알람에서 항목 빼기)

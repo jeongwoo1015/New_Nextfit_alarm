@@ -156,3 +156,28 @@ def test_overall_is_cumulative_and_series_is_period(client, clock, week):
     assert (r["totals"]["n_sessions"], r["totals"]["routine_total"]) == (5, 30)   # 그래프 영역은 이번 주만
     last = client.get("/reports", params={"period": "week", "date": "2026-10-26"}, headers=H).json()
     assert last["totals"]["n_sessions"] == 1 and last["overall"]["n_sessions"] == 6   # 지난주를 봐도 상단은 누적
+
+
+def test_bedtime_stats(client, clock, week):
+    """취침 성공률 = 밤 대화를 마친 날 ÷ 기록 기간(첫 기록일~오늘 밤까지), 평균 취침 시각은 자정을 넘겨도 이어서 (팀 결정 11/06)."""
+    for at in (datetime(2026, 11, 3, 23, 30, tzinfo=KST),      # 11/3 밤
+               datetime(2026, 11, 5, 0, 30, tzinfo=KST),       # 11/4 밤 (자정 넘김, RECORD_DATE = 11/4)
+               datetime(2026, 11, 6, 22, 0, tzinfo=KST)):      # 오늘(11/6) 밤
+        clock.now = at
+        assert client.post("/night/transcript", json={"transcript": TALK}, headers=H).status_code == 202
+    r = client.get("/reports", params={"period": "week"}, headers=H).json()
+    o = r["overall"]
+    assert (o["bed_days"], o["bed_record_days"]) == (3, 5)                     # 11/2~11/6 (오늘 밤을 마쳐서 오늘까지)
+    assert o["bedtime_success_rate"] == pytest.approx(0.6)
+    assert o["avg_bed_clock"] == "23:20"                                      # 23:30·00:30·22:00
+    assert r["totals"]["avg_bed_clock"] == "23:20"
+    s = r["series"]
+    assert [b["avg_bed_clock"] for b in s] == [None, "23:30", "00:30", None, "22:00", None, None]
+    assert [b["bedtime_success_rate"] for b in s[:5]] == [0.0, 1.0, 1.0, 0.0, 1.0]
+    assert s[5]["bedtime_success_rate"] is None                               # 아직 오지 않은 날은 분모에서 뺀다
+
+
+def test_bedtime_rate_excludes_tonight_until_done(client, clock, week):
+    r = client.get("/reports", params={"period": "week"}, headers=H).json()
+    assert (r["overall"]["bed_days"], r["overall"]["bed_record_days"]) == (0, 4)   # 오늘 밤 전이라 11/2~11/5
+    assert r["overall"]["bedtime_success_rate"] == 0.0 and r["overall"]["avg_bed_clock"] is None

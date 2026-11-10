@@ -4,13 +4,13 @@
 일기 날짜 D = RECORD_DATE가 D인 밤 기록 + SESSION_DATE가 D인 아침 세션 + DIARY_DATE가 D인 사진 (정의서 공통 규칙).
 """
 import calendar
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import date, timedelta
 
 from backend.clients import ai_stats
 from backend.core.errors import ValidationFailed, check_media_type
 from backend.core.timeutil import now_kst, today_kst
-from backend.domain import codes
+from backend.domain import bedtime_rules, codes
 from backend.domain.models import MorningSession, NightRecord, SessionStep
 from backend.repositories.registry import Repositories
 
@@ -48,8 +48,9 @@ class HistoryService:
         today = today_kst(self.clock())
         anchor = anchor or today
         start, end = ai_stats.period_bounds(period, anchor)
-        rec = self.r.sessions.recent_records(user_id, ALL_HISTORY_SINCE, max(end - timedelta(days=1), today))
-        return ai_stats.report(rec, period, anchor, today)
+        # 밤 기록은 APPLY_DATE(= RECORD_DATE + 1)로 걸러지므로 하루 더 읽어야 오늘 밤 기록까지 들어온다 (취침 통계)
+        rec = self.r.sessions.recent_records(user_id, ALL_HISTORY_SINCE, max(end - timedelta(days=1), today) + timedelta(days=1))
+        return _with_bedtime(ai_stats.report(rec, period, anchor, today), rec, today)
 
     def _photo_url(self, path: str | None) -> str | None:
         return self.r.storage.signed_url("photo", path) if path else None
@@ -92,3 +93,17 @@ class HistoryService:
     def delete_photo(self, user_id: str, day: date) -> None:
         """하루 대표 사진 지우기. 사진이 없어도 성공(다시 눌러도 같은 결과)."""
         self.r.storage.delete_photo(user_id, day)
+
+
+def _with_bedtime(rep: ai_stats.Report, rec, today: date) -> ai_stats.Report:
+    """리포트에 취침 통계(팀 결정 11/06)를 더한다: 상단은 전체 기록, 합계·그래프 칸은 각자의 범위."""
+    nights = [n for n in rec.nights if n.record_date <= today]
+    first = min([s.session_date for s in rec.sessions if s.session_date <= today] + [n.record_date for n in nights], default=None)
+    span = bedtime_rules.record_span(first, nights, today)
+
+    def add(t, start, end):
+        return replace(t, **asdict(bedtime_rules.bed_stats(nights, span, start, end)))
+
+    return replace(rep, overall=add(rep.overall, ALL_HISTORY_SINCE, today + timedelta(days=1)),
+                   totals=add(rep.totals, rep.start, rep.end),
+                   series=[add(b, b.start, b.end) for b in rep.series])

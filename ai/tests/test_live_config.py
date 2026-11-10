@@ -120,7 +120,7 @@ def test_coaching_steps_and_script():
     assert "직접 말하기 전에는 report_step_result를 호출하지 않는다" in p   # 시작 신호만으로 단계를 완료 처리하지 않는다
     assert "방금 사용자가 직접 답한 그 단계에 대해서만, 한 번만" in p       # 한 응답에서 다음 단계를 미리 판정하지 않는다
     assert "이어서 하는 중" in coaching_prompt(CoachingInput(steps=STEPS[1:], resumed=True))
-    assert "사용자가 답하기 전에는 말하지 않고" in p and "맞고 틀림은 저장하지 않으므로" in p   # 퀴즈 정답을 미리 말하지 않는다
+    assert "사용자가 답하기 전에는 말하지 않고" in p and "답을 말했으면 verdict는 done이다" in p   # 퀴즈 정답을 미리 말하지 않는다
 
 
 def test_weather_block_partial():

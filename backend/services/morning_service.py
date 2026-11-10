@@ -4,11 +4,13 @@
 코칭 토큰을 요청할 때 PENDING으로 만든다(이미 있으면 그대로 = 재연결).
 """
 import logging
+import threading
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import timedelta
 
-from backend.clients.ai_gateway import (AIGateway, BriefingContext, CalendarEvent, CoachingContext, CoachStep, LiveToken,
-                                        Persona, night_view)
+from backend.clients.ai_gateway import (AIGateway, BriefingContext, CalendarEvent, CoachingContext, CoachStep, Fortune,
+                                        LiveToken, Persona, night_view)
 from backend.clients.weather import NoWeather, WeatherClient
 from backend.core.errors import AppError, Conflict, NotFound
 from backend.core.timeutil import now_kst, to_kst, today_kst
@@ -21,9 +23,18 @@ from backend.repositories.registry import Repositories
 
 log = logging.getLogger(__name__)
 
-CONTENT_NAMES = {"MEDITATION": "명상", "EXERCISE": "운동", "LANGUAGE": "외국어", "QUIZ": "퀴즈"}
+CONTENT_NAMES = {"MEDITATION": "명상", "EXERCISE": "스트레칭", "LANGUAGE": "영어 따라 읽기", "QUIZ": "퀴즈 게임"}   # B14 이름
+OPTION_NAMES = {"PERSON": "인물 퀴즈", "GENERAL": "상식 퀴즈", "WORDCHAIN": "끝말잇기", "JAPANESE": "일본어", "CHINESE": "중국어"}
+
+
+def content_name(content_type: str | None, content_option: str | None) -> str:
+    """브리핑에서 말할 오늘 콘텐츠 이름. 세부가 정해져 있으면 세부 이름(끝말잇기 등), 아니면 종류 이름."""
+    return OPTION_NAMES.get(content_option or "") or CONTENT_NAMES.get(content_type or "", "")
 BANDIT_KEY = "global"           # AI CONTRACTS 6-4: 여러 사용자를 합쳐야 경향이 보여 전체 합산 상태를 쓴다
 RECENT_DAYS = 7
+
+# 같은 세션의 포춘을 백그라운드와 토큰 요청이 동시에 만들지 않게 (서버 프로세스 하나 기준, 문장은 세션에 한 번만 저장)
+_fortune_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
 
 
 @dataclass(frozen=True)
@@ -137,7 +148,7 @@ class MorningService:
             program = t.template_name if t else ""
         weather = self.weather.today(location.lat, location.lon, location.name) if location else None
         ctx = BriefingContext(persona, to_kst(self.clock()).strftime("%H:%M"), tuple(events_today), night_view(night),
-                              program, CONTENT_NAMES.get(s.content_type or "", ""), s.coaching_skipped, briefing_block,
+                              program, content_name(s.content_type, s.content_option), s.coaching_skipped, briefing_block,
                               weather)
         return self.ai.issue_briefing_token(ctx)
 
@@ -161,6 +172,36 @@ class MorningService:
             log.warning("개인화 전략 결정 실패 user=%s: %s", user_id, e.message)
             return "", ""
 
+    # ---------- 오늘의 포춘 (CONTRACTS B13, 11/10 결정) ----------
+    def prepare_fortune(self, user_id: str, session_id: str) -> MorningSession:
+        """세션에 오늘의 포춘 문장이 없으면 만들어 저장한다. 세션 생성 직후 백그라운드에서, 포춘 토큰 때 아직 없으면 그 자리에서.
+        재료 = 어젯밤 받아쓴 한마디(VOICE_TEXT), 없으면 한 줄 일기. 둘 다 없거나 AI가 실패해도 AI 쪽이 기본 문장을 준다."""
+        with _fortune_locks[session_id]:
+            s = self._session(user_id, session_id)
+            if s.fortune_text:
+                return s
+            night = self.r.nights.get_night_for_morning(user_id, s.session_date)
+            setting = self.r.users.get_setting(user_id)
+            one_liner = (night.voice_text or "") if night else ""
+            diary = (night.diary_text or "") if night else ""
+            f = self.ai.compose_fortune(one_liner, setting.tone if setting else "FORMAL", s.session_date, diary)
+            return self.r.sessions.update_session(user_id, session_id, {"fortune_text": f.text, "fortune_style": f.style,
+                                                                        "fortune_source": f.source})
+
+    def prepare_fortune_quietly(self, user_id: str, session_id: str) -> None:
+        """백그라운드용: 실패해도 알람 흐름에 영향 없이 로그만 남긴다 (포춘 토큰 때 다시 시도)."""
+        try:
+            self.prepare_fortune(user_id, session_id)
+        except Exception as e:   # noqa: BLE001 — 응답이 이미 나간 백그라운드 작업이라 여기서 멈춘다
+            log.warning("포춘 미리 만들기 실패 user=%s session=%s: %s", user_id, session_id, e)
+
+    def fortune_token(self, user_id: str, session_id: str) -> tuple[LiveToken, MorningSession]:
+        """포춘 단계에서 호출. 저장된 문장을 AI가 그대로 읽는 Live 토큰 (재연결도 같은 문장)."""
+        s = self.prepare_fortune(user_id, session_id)        # 다른 사용자의 세션이면 여기서 404
+        persona = self._persona(user_id)
+        token = self.ai.issue_fortune_token(persona, Fortune(s.fortune_text, s.fortune_style, s.fortune_source))
+        return token, s
+
     # ---------- 단계·코칭 ----------
     def ensure_steps(self, user_id: str, session_id: str) -> list[SessionStep]:
         s = self._session(user_id, session_id)
@@ -171,9 +212,13 @@ class MorningService:
             plans = routine_steps(self._routine_items(user_id, s))
         else:
             duration = content_duration_sec(self.r.presets.get_app_config())
-            plans = content_steps(self.ai.compose_content_steps(s.content_type, s.content_option, duration, s.session_date))
+            plan = self.ai.compose_content_steps(s.content_type, s.content_option, duration, s.session_date)
+            plans = content_steps(plan.steps)
         steps = self.r.sessions.create_steps(user_id, session_id, plans)
-        self.r.sessions.update_session(user_id, session_id, {"planned_total_sec": planned_total_sec(plans)})
+        changes = {"planned_total_sec": planned_total_sec(plans)}
+        if s.morning_call_type == "CONTENT" and plan.option and plan.option != s.content_option:
+            changes["content_option"] = plan.option   # 오늘 실제로 한 세부 (세부 없는 퀴즈 알람이면 AI가 정한 값). 재연결·앱 표시용
+        self.r.sessions.update_session(user_id, session_id, changes)
         return steps
 
     def _routine_items(self, user_id: str, s: MorningSession):
@@ -202,8 +247,10 @@ class MorningService:
             raise Conflict("모든 단계를 마쳤어요", "ALL_STEPS_CHECKED")
         night = self.r.nights.get_night_for_morning(user_id, s.session_date)
         _, coaching_block = self._strategy(user_id, s, night)
+        s = self._session(user_id, session_id)            # 단계를 만들며 정해진 세부(content_option)를 다시 읽는다
         ctx = CoachingContext(self._persona(user_id), s.morning_call_type, tuple(self._coach_steps(s, pending)),
-                              resumed=len(pending) < len(steps), night=night_view(night), strategy_block=coaching_block)
+                              resumed=len(pending) < len(steps), night=night_view(night), strategy_block=coaching_block,
+                              content_type=s.content_type or "", content_option=s.content_option or "")
         return self.ai.issue_coaching_token(ctx), steps
 
     def _coach_steps(self, s: MorningSession, steps: list[SessionStep]) -> list[CoachStep]:

@@ -243,7 +243,9 @@ def test_scenarios_build_valid_setup(name):
     setup = build_setup(s.kind, s.inp)
     assert setup["systemInstruction"]["parts"][0]["text"]
     assert isinstance(s.inp, {"night": NightInput, "briefing": BriefingInput}.get(s.kind, object))
-    assert s.utterances                                              # 새 흐름에서는 브리핑도 사용자 답(확인 질문 답/준비됐어)이 필요하다
+    assert s.utterances or s.kind == "fortune"                       # 새 흐름에서는 브리핑도 사용자 답(확인 질문 답/준비됐어)이 필요하다. 포춘은 읽기만 해서 말이 없어도 된다
+    if s.kind == "fortune":
+        assert s.expect.get("fortune_text") and s.expect["fortune_text"] in s.inp.fortune_text         # 읽을 문장이 기대값과 같다
     if s.expect.get("farewell"):
         assert s.utterances[-1] and any(w in s.utterances[-1] for w in ("잘게", "끊을게", "끝낼게"))   # 끝내는 쪽은 항상 사용자
     if s.kind == "briefing":
@@ -251,7 +253,7 @@ def test_scenarios_build_valid_setup(name):
     if s.kind == "coaching":
         removed = {k for k, v in s.expect.get("adjust", {}).items() if v == 0}                          # 오늘 뺀 단계는 판정하지 않는다
         assert set(s.expect["verdicts"]) == {st.order for st in s.inp.steps} - removed
-        assert len(s.utterances) == len(s.expect["verdicts"]) + len(s.expect.get("no_verdict_turns", ())) + 1   # 판정 턴 + 시간 변경 턴 + 작별 인사
+        assert len(s.utterances) == len(s.expect["verdicts"]) + len(s.expect.get("no_verdict_turns", ())) + s.expect.get("extra_turns", 0) + 1   # 판정 턴 + 시간 변경 턴 + (게임처럼 한 단계 안의 추가 대화) + 작별 인사
 
 
 def test_new_scenarios_exist():
@@ -443,3 +445,63 @@ def test_fixed_script_sentences_are_exempt_from_tone_check():
     said = "스트레칭 하자. 목을 천천히 좌우로 돌려요. 어깨를 크게 돌려요."          # 스크립트 문장은 그대로 읽은 것
     assert "반말 유지" not in failed(check(log("coaching", [T(said)]), s))
     assert "반말 유지" in failed(check(log("coaching", [T("스트레칭 해요. 시작해요.")]), s))      # 스크립트가 아닌 존댓말은 여전히 실패
+
+
+# ---------- 포춘 읽기 ----------
+FORTUNE = "용기는 떨림이 사라진 뒤가 아니라, 첫마디를 꺼낼 때 찾아옵니다."
+
+
+def fscn(**kw):
+    s = scn("fortune", fortune_text=FORTUNE, **kw)
+    return s
+
+
+def test_fortune_exact_reading_passes():
+    r = check(log("fortune", [T(f"오늘의 포춘이에요. {FORTUNE}")]), fscn())
+    assert not failed(r) and not failed(r, SOFT)
+    r = check(log("fortune", [T(f"오늘의 포춘이에요.{FORTUNE.replace(', ', ',')}")]), fscn())     # 받아쓰기 공백·쉼표 차이는 허용
+    assert not failed(r)
+
+
+def test_fortune_changed_or_missing_sentence_fails():
+    changed = "용기는 떨림이 사라진 뒤에 찾아옵니다."
+    assert "포춘: 문장을 한 글자도 바꾸지 않고 읽음" in failed(check(log("fortune", [T(f"오늘의 포춘이에요. {changed}")]), fscn()))
+    assert "포춘: 문장을 한 글자도 바꾸지 않고 읽음" in failed(check(log("fortune", [T("오늘의 포춘이에요.")]), fscn()))
+
+
+def test_fortune_extras_are_soft_but_repeat_question_and_calls_are_hard():
+    chatty = f"좋은 아침이에요. 오늘의 포춘이에요. {FORTUNE} 힘이 되었으면 좋겠어요. 오늘도 파이팅이에요."
+    r = check(log("fortune", [T(chatty)]), fscn())
+    assert "포춘: 소개 한 문장 외에 덧붙이지 않음" in failed(r, SOFT) and not failed(r)
+    assert "포춘: 첫 응답에서 한 번만 읽음" in failed(check(log("fortune", [T(f"{FORTUNE} {FORTUNE}")]), fscn()))
+    assert "포춘: 읽은 뒤 질문하지 않음" in failed(check(log("fortune", [T(f"{FORTUNE} 어때요?")]), fscn()))
+    assert "포춘: 읽는 중 함수 호출 없음" in failed(check(log("fortune", [T(FORTUNE, calls=[END])]), fscn()))
+
+
+def test_fortune_replay_check():
+    ok = log("fortune", [T(FORTUNE), T(FORTUNE, heard="다시 읽어 주세요"), T("네 좋은 하루 보내세요.", [END], heard="이만 끝낼게요")], "end_session")
+    assert not failed(check(ok, fscn(replay=True, farewell=True)))
+    bad = log("fortune", [T(FORTUNE), T("네 알겠어요.", heard="다시 읽어 주세요")])
+    assert "포춘: 다시 읽어 달라고 하면 그대로 한 번 더 읽음" in failed(check(bad, fscn(replay=True)))
+
+
+def test_morning_sessions_reject_night_greetings():
+    from ai.devclient.rules import NIGHT_GREETING
+    bad = log("coaching", [T("퀴즈를 모두 풀었네요. 안녕히 주무세요.")])
+    assert "아침 대화에 밤 인사 없음" in failed(check(bad, scn("coaching")))
+    ok = log("coaching", [T("퀴즈를 모두 풀었네요. 좋은 하루 보내세요.")])
+    assert "아침 대화에 밤 인사 없음" not in failed(check(ok, scn("coaching")))
+    assert "아침 대화에 밤 인사 없음" not in {r.rule for r in check(log("night", [T("편안한 밤 되세요.")]), scn("night"))}     # 밤 대화는 해당 없음
+    assert all(NIGHT_GREETING.search(x) for x in ("잘 자요", "편안한 밤 되세요", "좋은 꿈 꾸세요"))
+
+
+def test_wordchain_pass_tolerances():
+    s = Scenario("w", "coaching", None, expect={"verdicts": {1: "done"}, "verdict_any_of": {1: ("skipped",)}, "pass_ends": True, "report_turn": {1: 2}})
+    skipped = log("coaching", [T("앞 단어의 마지막 글자로 시작해요. 첫 단어는 사과예요."), T("일기"), T("알겠어요.", [rep(1, "skipped")], heard="패스할게요")])
+    assert "코칭: 판정이 기대와 같음" not in failed(check(skipped, s))
+    ended = log("coaching", [T("앞 단어의 마지막 글자로 시작해요. 첫 단어는 사과예요."), T("일기"),
+                             T("함께해 주셔서 감사해요.", [rep(1, "done"), END], heard="음 패스할게요")], "end_session")
+    assert "사용자가 끝내자고 하기 전에 AI가 끝내지 않음" not in failed(check(ended, s))
+    strict = Scenario("w", "coaching", None, expect={"verdicts": {1: "done"}, "report_turn": {1: 2}})
+    assert "사용자가 끝내자고 하기 전에 AI가 끝내지 않음" in failed(check(ended, strict))            # 허용은 끝말잇기 시나리오에만 적용된다
+    assert "코칭: 판정이 기대와 같음" in failed(check(skipped, strict))

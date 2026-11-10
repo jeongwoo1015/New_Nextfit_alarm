@@ -157,13 +157,38 @@ def test_content_alarm_steps_from_ai(client, morning, ai):
                                          "content_option": "HISTORY"}, headers=auth(USER_A)).json()
     v = start(client, alarm).json()
     client.post(url(v, "/briefing-token"), json={}, headers=auth(USER_A))
-    assert ai.calls[-1][1].content_name == "퀴즈" and ai.calls[-1][1].program_name == ""
+    assert ai.calls[-1][1].content_name == "퀴즈 게임" and ai.calls[-1][1].program_name == ""
     steps = client.post(url(v, "/coaching-token"), headers=auth(USER_A)).json()["steps"]
     assert [s["template_item_id"] for s in steps] == [None, None, None]
     assert ("content", ("QUIZ", "HISTORY", 300)) in ai.calls
     ctx = ai.calls[-1][1]
     assert ctx.morning_call_type == "CONTENT" and ctx.steps[0].response_type == "SPEECH" and "정답:" in ctx.steps[0].script
     assert client.get(url(v), headers=auth(USER_A)).json()["session"]["planned_total_sec"] == 300
+    assert (ctx.content_type, ctx.content_option) == ("QUIZ", "HISTORY")                  # B14: 콘텐츠 종류·세부를 코칭에
+
+
+def test_content_option_decided_by_ai_is_kept(client, morning, ai):
+    """세부를 고르지 않은 퀴즈 알람: AI가 정한 오늘 세부를 세션에 남기고, 코칭·재연결·브리핑 이름에 쓴다."""
+    alarm = client.post("/alarms", json={"alarm_time": "06:30", "morning_call_type": "CONTENT", "content_type": "QUIZ"},
+                        headers=auth(USER_A)).json()
+    v = start(client, alarm).json()
+    assert v["session"]["content_option"] is None
+    ai.content_option = "WORDCHAIN"
+    client.post(url(v, "/coaching-token"), headers=auth(USER_A))
+    assert (ai.calls[-1][1].content_type, ai.calls[-1][1].content_option) == ("QUIZ", "WORDCHAIN")
+    assert client.get(url(v), headers=auth(USER_A)).json()["session"]["content_option"] == "WORDCHAIN"
+    client.post(url(v, "/coaching-token"), headers=auth(USER_A))                         # 재연결: 다시 구성하지 않고 같은 세부
+    assert [c[0] for c in ai.calls].count("content") == 1 and ai.calls[-1][1].content_option == "WORDCHAIN"
+    client.post(url(v, "/briefing-token"), json={}, headers=auth(USER_A))
+    assert ai.calls[-1][1].content_name == "끝말잇기"
+    assert client.get("/alarms", headers=auth(USER_A)).json()[0]["content_option"] is None   # 알람 설정은 그대로
+
+
+@pytest.mark.parametrize("option", ["PERSON", "GENERAL", "WORDCHAIN"])
+def test_new_quiz_options_accepted(client, morning, option):
+    r = client.post("/alarms", json={"alarm_time": "06:30", "morning_call_type": "CONTENT", "content_type": "QUIZ",
+                                     "content_option": option}, headers=auth(USER_A))
+    assert r.status_code in (200, 201) and r.json()["content_option"] == option
 
 
 def test_response_and_wake_check_success(client, morning, clock):

@@ -117,6 +117,7 @@ class NightRecord:
     encouragement: str | None = None
     insight: str | None = None
     voice_audio_path: str | None = None
+    voice_text: str | None = None              # 내일의 한마디를 기기에서 받아쓴 글 (음성이 있을 때만, 11/06)
     override_alarm_id: str | None = None
     override_wake_time: time | None = None
     override_skip_coaching: bool = False       # 내일 하루 코칭 안 하기 (브리핑만)
@@ -174,6 +175,9 @@ class MorningSession:
     wake_checked_at: datetime | None = None  # 브리핑 전 확인 멘트를 모두 마친 시각 = 기상 성공 판정 시점 (DB 컬럼 추가 요청)
     wake_success: bool = False
     session_end_at: datetime | None = None
+    fortune_text: str | None = None        # 오늘의 포춘 문장 (11/06). 세 칸은 모두 있거나 모두 없다
+    fortune_style: str | None = None       # COOKIE / HOROSCOPE
+    fortune_source: str | None = None      # ai / fallback / safe
 
 
 @dataclass(frozen=True)

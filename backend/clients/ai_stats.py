@@ -18,6 +18,10 @@ class Totals:
     routine_done: int = 0
     routine_total: int = 0
     routine_completion_rate: float | None = None
+    bed_days: int = 0                          # 취침 통계는 서버가 채운다 (domain/bedtime_rules.py)
+    bed_record_days: int = 0
+    bedtime_success_rate: float | None = None
+    avg_bed_clock: str | None = None           # "HH:MM"
 
 
 @dataclass(frozen=True)

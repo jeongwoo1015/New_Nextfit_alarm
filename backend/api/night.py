@@ -9,7 +9,7 @@ from backend.core.auth import current_user_id
 from backend.domain.models import NightRecord
 from backend.services.night_service import NightService
 
-from .schemas import LiveTokenOut, NightRecordOut, NightTokenIn, TranscriptIn
+from .schemas import LiveTokenOut, NightRecordOut, NightTokenIn, TranscriptIn, VoiceTextIn
 
 router = APIRouter(prefix="/night", tags=["night"])
 
@@ -54,3 +54,11 @@ async def put_voice(night_record_id: str, request: Request, user_id: str = Depen
                     svc: NightService = Depends(night_service)):
     """목소리 파일(m4a)을 본문 그대로 보낸다 (Content-Type: audio/mp4·audio/x-m4a·audio/m4a·audio/aac). 다시 올리면 덮어쓴다."""
     return _record(svc, svc.save_voice(user_id, night_record_id, await request.body(), request.headers.get("content-type")))
+
+
+@router.patch("/records/{night_record_id}/voice-text", response_model=NightRecordOut)
+def patch_voice_text(night_record_id: str, body: VoiceTextIn, user_id: str = Depends(current_user_id),
+                     svc: NightService = Depends(night_service)):
+    """목소리 업로드(PUT .../voice) 뒤에 기기에서 받아쓴 '내일의 한마디' 글을 보낸다. 다음 날 포춘 문장의 재료.
+    목소리를 다시 올리면 글이 비워지므로 다시 보낸다. 목소리가 없으면 409 VOICE_NOT_UPLOADED."""
+    return _record(svc, svc.save_voice_text(user_id, night_record_id, body.text))
