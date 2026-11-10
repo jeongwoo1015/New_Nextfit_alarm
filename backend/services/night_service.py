@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from backend.clients.ai_gateway import AIGateway, CalendarEvent, LiveToken, NightContext, Persona
-from backend.core.errors import AppError, NotFound, ValidationFailed, check_media_type
+from backend.core.errors import AppError, Conflict, NotFound, ValidationFailed, check_media_type
 from backend.core.timeutil import now_kst, to_kst
 from backend.domain import codes
 from backend.domain.alarm_rules import pick_override_alarm
@@ -149,6 +149,15 @@ class NightService:
         check_media_type(content_type, codes.VOICE_MIME_TYPES)
         self.r.storage.upload_voice(user_id, rec.record_date, data)
         self.r.nights.set_voice_path(user_id, night_record_id)
+        return self.get_record(user_id, night_record_id)
+
+    def save_voice_text(self, user_id: str, night_record_id: str, text: str | None) -> NightRecord:
+        """내일의 한마디를 기기에서 받아쓴 글 (목소리 업로드 뒤 별도 요청, 11/10 결정). 다음 날 아침 포춘의 재료.
+        목소리를 다시 올리면 글은 비워지므로 그 뒤에 다시 보낸다. 빈 글이면 비운다."""
+        rec = self.get_record(user_id, night_record_id)
+        if not rec.voice_audio_path:
+            raise Conflict("목소리를 먼저 올려 주세요", "VOICE_NOT_UPLOADED")   # CHECK rs_night_voice_text
+        self.r.nights.set_voice_path(user_id, night_record_id, text)
         return self.get_record(user_id, night_record_id)
 
     def voice_url(self, rec: NightRecord) -> str | None:

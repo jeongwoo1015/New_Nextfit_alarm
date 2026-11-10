@@ -1,12 +1,12 @@
 """아침 흐름: 모닝 세션, 재기상, 브리핑·코칭 토큰, 단계 판정·체크."""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 
 from backend.app.deps import morning_service
 from backend.clients.ai_gateway import CalendarEvent
 from backend.core.auth import current_user_id
 from backend.services.morning_service import Location, MorningService, SessionView
 
-from .schemas import (BriefingTokenIn, CoachingTokenOut, LiveTokenOut, ProgressOut, RewakeOut, SessionOut, SessionStartIn,
+from .schemas import (BriefingTokenIn, CoachingTokenOut, FortuneTokenOut, LiveTokenOut, ProgressOut, RewakeOut, SessionOut, SessionStartIn,
                       SessionViewOut, SnoozeOut, StepDurationIn, StepOut, StepStatusIn, VerdictIn)
 
 router = APIRouter(prefix="/morning", tags=["morning"])
@@ -18,9 +18,14 @@ def _view(v: SessionView) -> SessionViewOut:
 
 
 @router.post("/sessions", response_model=SessionViewOut)
-def start_session(body: SessionStartIn, user_id: str = Depends(current_user_id), svc: MorningService = Depends(morning_service)):
-    """알람이 울릴 때. 오늘 그 알람의 세션을 만들거나(그날 값 스냅샷, 하루 한정 변경 반영) 이미 있으면 그대로 돌려준다."""
-    return _view(svc.start(user_id, body.alarm_id))
+def start_session(body: SessionStartIn, tasks: BackgroundTasks, user_id: str = Depends(current_user_id),
+                  svc: MorningService = Depends(morning_service)):
+    """알람이 울릴 때. 오늘 그 알람의 세션을 만들거나(그날 값 스냅샷, 하루 한정 변경 반영) 이미 있으면 그대로 돌려준다.
+    오늘의 포춘 문장은 응답 뒤 백그라운드에서 만들어 둔다(브리핑 동안 준비, 알람 응답을 늦추지 않음)."""
+    v = svc.start(user_id, body.alarm_id)
+    if not v.session.fortune_text:
+        tasks.add_task(svc.prepare_fortune_quietly, user_id, v.session.session_id)
+    return _view(v)
 
 
 @router.get("/sessions/today", response_model=SessionViewOut)
@@ -68,6 +73,15 @@ def briefing_token(session_id: str, body: BriefingTokenIn, user_id: str = Depend
     events = [CalendarEvent(e.title, e.start, e.end, e.all_day) for e in body.events_today]
     loc = Location(body.location.lat, body.location.lon, body.location.name.strip()) if body.location else None
     return svc.briefing_token(user_id, session_id, events, loc)
+
+
+@router.post("/sessions/{session_id}/fortune-token", response_model=FortuneTokenOut)
+def fortune_token(session_id: str, user_id: str = Depends(current_user_id), svc: MorningService = Depends(morning_service)):
+    """포춘 단계(브리핑 → 전날 녹음 듣기 → 포춘 → 코칭)에서 호출. AI가 오늘의 포춘 문장을 한 번 그대로 읽는다(함수 호출 없음).
+    AI 음성이 끝나면(turnComplete) 앱이 다음 단계로 넘어간다. 재연결해도 같은 문장(세션에 저장)."""
+    token, s = svc.fortune_token(user_id, session_id)
+    return FortuneTokenOut(**token.__dict__, fortune_text=s.fortune_text, fortune_style=s.fortune_style,
+                           fortune_source=s.fortune_source)
 
 
 @router.post("/sessions/{session_id}/coaching-token", response_model=CoachingTokenOut)

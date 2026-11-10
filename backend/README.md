@@ -33,11 +33,13 @@
 | `POST /night/transcript` | 굿나잇콜 종료 | 받아쓰기 저장(202, `extract_status: PENDING`), 추출은 백그라운드 |
 | `GET /night/records/{id}` · `GET /night/records?record_date=` | 밤 기록·일기 | 추출 결과, 하루 한정 변경, 목소리 서명 URL |
 | `PUT /night/records/{id}/voice` | 굿나잇콜 | 목소리 m4a를 본문 그대로(`Content-Type: audio/mp4`, 10MB 이하) |
-| `POST /morning/sessions` | 알람 울림 | `{alarm_id}` → 오늘 세션 만들기(하루 한정 변경 반영) 또는 기존 세션(재연결) |
+| `PATCH /night/records/{id}/voice-text` | 굿나잇콜 | 목소리 업로드 뒤 기기에서 받아쓴 '내일의 한마디' `{text}`(500자 이하, 빈 글 = 비우기). 목소리를 다시 올리면 비워지므로 다시 보낸다. 목소리가 없으면 409 `VOICE_NOT_UPLOADED` |
+| `POST /morning/sessions` | 알람 울림 | `{alarm_id}` → 오늘 세션 만들기(하루 한정 변경 반영) 또는 기존 세션(재연결). 응답 뒤 백그라운드에서 오늘의 포춘 문장을 만들어 세션에 저장 |
 | `POST /morning/sessions/{id}/rewake` · `/response` | 모닝콜 | 8초 무응답 재기상(AI 음악) 횟수 +1 / 첫 음성 응답 시각(= 기상 성공 시각) |
 | `POST /morning/sessions/{id}/snooze` | 모닝콜 | "5분 뒤 다시 울리기" 횟수 +1 (제한 없음). 다시 울리면 `POST /morning/sessions`로 같은 세션 |
 | `POST /morning/sessions/{id}/wake-check` | 브리핑 | 확인 멘트(2~3개)를 모두 마침 — 브리핑 Live의 `wake_check_done`을 앱이 전달. 이때 기상 성공 판정 |
 | `POST /morning/sessions/{id}/briefing-token` | 브리핑 | 오늘 일정·현재 위치(선택, 날씨용)를 보내면 브리핑 Live 토큰. 그날 처음이면 개인화 전략을 정해 로그 |
+| `POST /morning/sessions/{id}/fortune-token` | 포춘 | 오늘의 포춘(어젯밤 한마디, 없으면 한 줄 일기)을 AI가 그대로 읽는 Live 토큰 + `fortune_text`·`fortune_style`·`fortune_source`. 문장이 아직 없으면 이때 만든다(재연결도 같은 문장). AI 음성이 끝나면 앱이 다음 단계로 |
 | `POST /morning/sessions/{id}/coaching-token` | 루틴·콘텐츠 | `start_routine` 뒤(재연결도) 호출. 처음이면 단계를 PENDING으로 만들고 남은 단계만 토큰에 |
 | `POST /morning/sessions/{id}/steps/{n}/verdict` | 코칭 | Live `report_step_result` 전달 |
 | `PATCH /morning/sessions/{id}/steps/{n}` | 체크리스트 | 직접 체크·건너뛰기·해제 |

@@ -142,6 +142,14 @@ class NightExtract:
     error: str = ""
 
 
+@dataclass(frozen=True)
+class Fortune:
+    """오늘의 포춘 문장 (RS_MORNING_SESSION.FORTUNE_*). AI 쪽 compose_fortune은 실패해도 기본 문장을 준다."""
+    text: str
+    style: str                  # COOKIE / HOROSCOPE
+    source: str                 # ai / fallback / safe
+
+
 SCOPES = ("TOMORROW", "ALWAYS")        # 내일만(밤 대화 기본) / 앞으로 계속(사용자가 그렇게 말했을 때)
 
 
@@ -185,6 +193,8 @@ class AIGateway(Protocol):
     def decide_strategy(self, user_id: str, records: RecentRecords, today: date, condition: str | None,
                         speech_style: str | None, mode: str, bandit_state: dict | None) -> StrategyDecision: ...
     def strategy_blocks(self, strategy: dict | None) -> tuple[str, str]: ...   # 재연결: 로그의 strategy → (브리핑, 코칭) 문장
+    def compose_fortune(self, one_liner: str, tone: str, today: date, diary_text: str) -> Fortune: ...
+    def issue_fortune_token(self, persona: Persona, fortune: Fortune) -> LiveToken: ...   # 문장을 그대로 읽는 Live
 
 
 def _wake(v) -> time | None:
@@ -311,6 +321,18 @@ class RealAIGateway:
                    bandit=ContextualBandit.from_dict(bandit_state) if bandit_state else None)
         return StrategyDecision(d.strategy.to_dict(), d.briefing_block, d.coaching_block, d.log.to_row())
 
+    def compose_fortune(self, one_liner: str, tone: str, today: date, diary_text: str) -> Fortune:
+        """스타일은 정하지 않는다(None = 날짜에 따라 포춘쿠키·오늘의 운세를 번갈아, CONTRACTS B13 기본)."""
+        from ai.tasks.fortune import compose_fortune
+        res = compose_fortune(one_liner or "", self.llm, None, tone, today, diary_text or "")
+        return Fortune(res.text, res.style, res.source)
+
+    def issue_fortune_token(self, persona: Persona, fortune: Fortune) -> LiveToken:
+        from ai.live import inputs as ai
+        from ai.live.config import build_setup
+        inp = ai.FortuneInput(persona=self._persona(ai, persona), fortune_text=fortune.text, style=fortune.style)
+        return self._issue("fortune", build_setup("fortune", inp))
+
     def strategy_blocks(self, strategy: dict | None) -> tuple[str, str]:
         from ai.personalization.strategy import Strategy, strategy_block
         s = Strategy.from_dict(strategy)
@@ -328,6 +350,7 @@ class UnavailableAIGateway:
 
     issue_night_token = extract_night_record = parse_routine_changes = _fail
     issue_briefing_token = issue_coaching_token = compose_content_steps = decide_strategy = _fail
+    compose_fortune = issue_fortune_token = _fail
 
     def strategy_blocks(self, strategy):
         return "", ""           # 전략 문장이 없으면 대화는 기본 방식으로 진행된다

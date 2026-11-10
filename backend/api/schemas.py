@@ -233,6 +233,10 @@ class NightRecordOut(Out):
     voice_text: str | None = None       # 내일의 한마디를 기기에서 받아쓴 글 (음성이 있을 때만)
 
 
+class VoiceTextIn(BaseModel):
+    text: str = Field(default="", max_length=500)   # 빈 글이면 비운다
+
+
 # ---------- 아침 흐름 ----------
 class SessionStartIn(BaseModel):
     alarm_id: str
@@ -296,6 +300,12 @@ class LocationIn(BaseModel):
 class BriefingTokenIn(BaseModel):
     events_today: list[CalendarEventIn] = Field(default=[], max_length=30)
     location: LocationIn | None = None   # 없으면 날씨 없이 브리핑
+
+
+class FortuneTokenOut(LiveTokenOut):
+    fortune_text: str                   # AI가 읽을 문장 (자막 표시용)
+    fortune_style: str                  # COOKIE 포춘쿠키 / HOROSCOPE 오늘의 운세
+    fortune_source: str                 # ai / fallback 기본 문장 / safe 위기 표현이 있어 담담한 문장
 
 
 class CoachingTokenOut(LiveTokenOut):
