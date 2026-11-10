@@ -22,6 +22,10 @@
     <!-- 설정의 '다른 앱 위에 표시': 다른 앱을 쓰는 중에도 알람을 바로 띄움 (선언해야 시스템 설정에서 켤 수 있음) -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- 수면 음악: 화면을 끄거나 나가도 이어서 재생 (알림창에 재생 중 표시) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
     <!-- 한 마디 녹음 뒤 마무리 안내(TTS) -->
     <queries>
         <intent>
@@ -55,6 +59,11 @@
         </activity>
 
         <receiver android:name=".alarm.AlarmReceiver" android:exported="false" />
+
+        <service
+            android:name=".audio.SleepMusicService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
         <receiver android:name=".alarm.BootReceiver" android:exported="true">
             <intent-filter>

@@ -275,6 +275,20 @@ object RespecApi {
         return if (r.ok) r.json()?.optString("url")?.takeIf { it.isNotBlank() } else null
     }
 
+    /** 수면 음악 한 곡 (music_id로 곡이 바뀌었는지 비교) */
+    data class SleepTrack(val musicId: String, val url: String)
+
+    /**
+     * 수면 음악 (GET /music/sleep). mood: GOOD / NORMAL / TIRED / STRESSED.
+     * null이면 서버가 오늘 밤 기록의 컨디션으로 고름(추출 전이면 NORMAL). 없으면(404) null
+     */
+    suspend fun sleepMusic(mood: String?): SleepTrack? {
+        val r = ApiClient.get("/music/sleep" + (mood?.let { "?mood=$it" } ?: "")) ?: return null
+        val j = if (r.ok) r.json() else null
+        val url = j?.optString("url")?.takeIf { it.isNotBlank() } ?: return null
+        return SleepTrack(j.optString("music_id"), url)
+    }
+
     /** end_session을 받았거나 사용자가 통화를 끊었을 때 */
     suspend fun endMorning(sessionId: String): JSONObject? {
         val r = ApiClient.post("/morning/sessions/$sessionId/end") ?: return null

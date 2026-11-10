@@ -3,95 +3,182 @@ package com.example.respeclive.audio
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import kotlinx.coroutines.delay
 
 /**
- * 수면 음악 반복 재생. 서버 음악(GET /music/sleep의 서명 URL)을 먼저 쓰고,
+ * 수면 음악 반복 재생 (SleepMusicService가 씀). 서버 음악(GET /music/sleep의 서명 URL)을 먼저 쓰고,
  * 없으면 앱 내 res/raw/sleep_music.* 파일로 대체.
+ * 볼륨 = 상황별 기본 볼륨(setBaseVolume) × 페이드 배율. 곡을 바꿀 때는 새 곡을 0에서 올리고 이전 곡을 내려 이어 줌.
  */
-class SleepMusicPlayer(
-    private val context: Context,
-    private val normalVolume: Float = 0.35f,
-    private val duckedVolume: Float = 0.08f,
-) {
+class SleepMusicPlayer(private val context: Context) {
     private val resId = context.resources.getIdentifier("sleep_music", "raw", context.packageName)
     private var player: MediaPlayer? = null
-    private var ducked = false
+    private var base = 0f          // 상황별 기본 볼륨
+    private var fade = 1f          // 페이드 배율 (0~1)
+    private var paused = false
+
+    /** 지금 곡의 서버 music_id (앱 내 파일이면 null) */
+    var musicId: String? = null
+        private set
+
+    val hasFallback: Boolean get() = resId != 0
 
     val isPlaying: Boolean
         get() = try { player?.isPlaying == true } catch (e: IllegalStateException) { false }
 
-    /** url이 있으면 서버 음악(비동기 준비), 없으면 앱 내 파일. 재생할 음악이 없으면 false */
-    fun start(url: String? = null): Boolean {
-        player?.let {
-            it.start()
-            return true
-        }
-        if (!url.isNullOrBlank() && startUrl(url)) return true
-        if (resId == 0) return false
-        player = MediaPlayer.create(context, resId)?.apply {
-            isLooping = true
-            applyVolume(this)
-            start()
-        }
-        return player != null
+    /** 새로 틀기. url이 있으면 서버 음악(비동기 준비), 없으면 앱 내 파일. 재생할 음악이 없으면 false */
+    fun play(url: String?, id: String?, baseVolume: Float): Boolean {
+        release()
+        base = baseVolume
+        fade = 1f
+        paused = false
+        val mp = (if (!url.isNullOrBlank()) createUrl(url) else null) ?: createFallback() ?: return false
+        player = mp
+        musicId = if (url.isNullOrBlank()) null else id
+        return true
     }
 
-    private fun startUrl(url: String): Boolean {
-        val mp = MediaPlayer()
-        return try {
-            mp.setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
-            )
-            mp.setDataSource(url)
-            mp.isLooping = true
-            mp.setOnPreparedListener {
-                if (player === it) {
-                    applyVolume(it)
-                    it.start()
-                }
-            }
-            mp.setOnErrorListener { p, _, _ ->
-                if (player === p) {
-                    p.release()
-                    player = null
-                }
-                true
-            }
-            player = mp
-            mp.prepareAsync()
-            true
-        } catch (e: Exception) {
-            mp.release()
-            false
+    /**
+     * 다른 곡으로 서서히 바꿈: 새 곡을 준비해 0에서 올리고, 이전 곡은 내린 뒤 해제.
+     * 새 곡을 준비하지 못하면 이전 곡을 그대로 둠 (false)
+     */
+    suspend fun crossfadeTo(url: String, id: String, ms: Long): Boolean {
+        val old = player ?: return play(url, id, base)
+        val next = createUrl(url, startVolume = 0f) ?: return false
+        // 준비(prepareAsync)를 기다림. 오래 걸리면 포기하고 이전 곡 유지
+        var waited = 0L
+        while (!next.preparedFlag && !next.failedFlag && waited < PREPARE_TIMEOUT_MS) {
+            delay(100)
+            waited += 100
         }
+        if (!next.preparedFlag) {
+            next.mp.release()
+            return false
+        }
+        val steps = 20
+        for (i in 1..steps) {
+            val t = i / steps.toFloat()
+            volume(next.mp, current() * t)
+            volume(old, current() * (1 - t))
+            delay(ms / steps)
+        }
+        old.release()
+        player = next.mp
+        musicId = id
+        if (paused) pause()
+        return true
+    }
+
+    /** 상황별 기본 볼륨 바꾸기 (대화 중 작게, 끝나면 보통) */
+    fun setBaseVolume(v: Float) {
+        base = v
+        player?.let { volume(it, current()) }
     }
 
     fun pause() {
+        paused = true
         try {
             player?.takeIf { it.isPlaying }?.pause()
         } catch (_: IllegalStateException) {
         }
     }
 
-    /** 대화·녹음 중에는 음악 소리가 마이크에 섞이지 않도록 볼륨을 낮춤 */
-    fun setDucked(ducked: Boolean) {
-        this.ducked = ducked
-        player?.let { applyVolume(it) }
+    fun resume() {
+        paused = false
+        try {
+            player?.takeIf { !it.isPlaying && prepared.contains(it) }?.start()
+        } catch (_: IllegalStateException) {
+        }
     }
 
-    private fun applyVolume(mp: MediaPlayer) {
-        val v = if (ducked) duckedVolume else normalVolume
+    /** 볼륨을 ms 동안 서서히 0까지 낮춘 뒤 멈추고 해제 (잠든 사람이 깨지 않도록 뚝 끊지 않음) */
+    suspend fun fadeOutAndRelease(ms: Long) {
+        val steps = 20
+        for (i in steps - 1 downTo 0) {
+            fade = i / steps.toFloat()
+            player?.let { volume(it, current()) }
+            delay(ms / steps)
+        }
+        release()
+    }
+
+    fun release() {
+        player?.let {
+            prepared.remove(it)
+            it.release()
+        }
+        player = null
+        musicId = null
+    }
+
+    // ---------------- 내부 ----------------
+
+    private fun current() = base * fade
+
+    // 준비가 끝난 플레이어 (준비 전에 start하면 오류)
+    private val prepared = mutableSetOf<MediaPlayer>()
+
+    private class Pending(val mp: MediaPlayer) {
+        @Volatile var preparedFlag = false
+        @Volatile var failedFlag = false
+    }
+
+    private fun createUrl(url: String): MediaPlayer? = createUrl(url, startVolume = null)?.mp
+
+    /** 서버 음악 준비 시작. startVolume이 null이면 준비되는 대로 지금 볼륨으로 바로 틂(새로 틀기) */
+    private fun createUrl(url: String, startVolume: Float?): Pending? {
+        val mp = MediaPlayer()
+        val pending = Pending(mp)
+        return try {
+            mp.setAudioAttributes(MUSIC_ATTRIBUTES)
+            mp.setDataSource(url)
+            mp.isLooping = true
+            mp.setOnPreparedListener {
+                prepared += it
+                pending.preparedFlag = true
+                volume(it, startVolume ?: current())
+                if (!paused) it.start()
+            }
+            mp.setOnErrorListener { p, _, _ ->
+                pending.failedFlag = true
+                prepared.remove(p)
+                if (player === p) {
+                    p.release()
+                    player = null
+                    musicId = null
+                }
+                true
+            }
+            mp.prepareAsync()
+            pending
+        } catch (e: Exception) {
+            mp.release()
+            null
+        }
+    }
+
+    private fun createFallback(): MediaPlayer? {
+        if (resId == 0) return null
+        return MediaPlayer.create(context, resId)?.apply {
+            isLooping = true
+            prepared += this
+            volume(this, current())
+            if (!paused) start()
+        }
+    }
+
+    private fun volume(mp: MediaPlayer, v: Float) {
         try {
             mp.setVolume(v, v)
         } catch (_: IllegalStateException) {
         }
     }
 
-    fun release() {
-        player?.release()
-        player = null
+    companion object {
+        private const val PREPARE_TIMEOUT_MS = 15_000L
+        private val MUSIC_ATTRIBUTES: AudioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build()
     }
 }

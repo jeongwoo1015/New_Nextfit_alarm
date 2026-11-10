@@ -39,7 +39,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.respeclive.audio.AiSpeaker
 import com.example.respeclive.audio.CallAudio
-import com.example.respeclive.audio.SleepMusicPlayer
+import com.example.respeclive.audio.SleepLevel
+import com.example.respeclive.audio.SleepMusic
 import com.example.respeclive.audio.VoiceRecorder
 import com.example.respeclive.audio.VoiceTranscriber
 import com.example.respeclive.data.ApiClient
@@ -89,6 +90,13 @@ private const val MAX_SPEECH_MS = 60_000
 /** 원문·목소리 업로드를 마무리 멘트 뒤 최대 이만큼 기다림 (화면을 닫아도 업로드는 계속됨) */
 private const val SAVE_WAIT_MS = 15_000L
 
+// 수면 타이머: 마무리 뒤 음악만 흐르기 시작한 때(그 전에 화면을 나가면 나간 때)부터 10분 뒤 서서히 끔
+private const val SLEEP_MUSIC_MS = 10 * 60_000L
+
+// 컨디션 곡 전환: 대화 원문 저장 뒤 밤 기록 추출(extract_status)이 끝났는지 이 간격으로 이만큼 확인
+private const val EXTRACT_POLL_MS = 3_000L
+private const val EXTRACT_WAIT_MS = 3 * 60_000L
+
 private enum class Phase { AiSpeaking, Listening, Recording, Review }
 
 /** 동그라미 최대 크기 (자리가 모자라면 줄어듦) */
@@ -108,7 +116,6 @@ fun NightChatScreen(onClose: () -> Unit) {
 
     val client = remember { LiveClient(context) }
     val speaker = remember { AiSpeaker(context) }
-    val music = remember { SleepMusicPlayer(context) }
     val recorder = remember { VoiceRecorder(context) }
     val previewHolder = remember { arrayOfNulls<MediaPlayer>(1) }
     val toolEvents = remember { Channel<String>(Channel.UNLIMITED) }      // end_session
@@ -138,9 +145,9 @@ fun NightChatScreen(onClose: () -> Unit) {
     var skipAi by remember { mutableStateOf(false) }
     var skipSave by remember { mutableStateOf(false) }
     var finishNow by remember { mutableStateOf(false) }
-    var sleepUrl by remember { mutableStateOf<String?>(null) }
-    var musicReady by remember { mutableStateOf(false) }   // 서버 수면 음악 URL 조회를 마침 (대화가 끝난 뒤)
+    var musicStarted by remember { mutableStateOf(false) } // 굿나잇콜 시작과 함께 수면 음악을 틀었음 (SleepMusicService)
     var sleeping by remember { mutableStateOf(false) }     // 마무리 뒤 수면 음악만 흐르는 상태
+    val musicPlaying by SleepMusic.playing.collectAsState()
     var liveSaying by remember { mutableStateOf(false) }   // 안내 문장을 AI 목소리로 읽는 중 (자막은 AI가 실제로 한 말)
 
     // ---- 마이크·캘린더 권한: 결과를 받은 뒤 Live 연결 (캘린더는 없어도 대화는 됨, 일정만 빠짐) ----
@@ -172,7 +179,9 @@ fun NightChatScreen(onClose: () -> Unit) {
         }
     }
 
-    // ---- 정리 + 화면 켜짐 유지 ----
+    // ---- 정리 + 화면 켜짐 유지 (음악만 흐르는 동안은 화면을 꺼도 됨) ----
+    LaunchedEffect(sleeping) { view.keepScreenOn = !sleeping }
+    val musicOnNow by rememberUpdatedState(musicOn)
     DisposableEffect(Unit) {
         view.keepScreenOn = true
         CallAudio.acquire(context)
@@ -186,21 +195,32 @@ fun NightChatScreen(onClose: () -> Unit) {
             recorder.cancel()
             previewHolder[0]?.release()
             speaker.shutdown()
-            music.release()
+            // 화면을 나가도 수면 음악은 서비스에서 이어짐: 보통 볼륨으로 되돌리고 수면 타이머를 걸어 둠 (이미 걸었으면 그대로).
+            // 음악을 꺼 둔 채로 나가면 끝냄
+            if (musicOnNow) {
+                SleepMusic.setLevel(context, SleepLevel.NORMAL)
+                SleepMusic.resume(context)
+                SleepMusic.startTimer(context, SLEEP_MUSIC_MS)
+            } else {
+                SleepMusic.stop(context)
+            }
         }
     }
 
-    // ---- 수면 음악: 밤 대화 뒤에 틂 (GET /music/sleep). 한 마디 녹음 중에는 일시정지, 듣는 중에는 볼륨만 낮춤 ----
-    LaunchedEffect(musicOn, musicReady, talking, phase, saveStep) {
-        music.setDucked(phase == Phase.Listening || phase == Phase.Recording)
-        when {
-            talking || !musicOn || (saveStep && phase != Phase.AiSpeaking) -> music.pause()
-            !musicReady -> Unit
-            !music.start(sleepUrl) -> {
-                musicOn = false
-                Toast.makeText(context, "재생할 수면 음악이 없어요", Toast.LENGTH_SHORT).show()
-            }
+    // ---- 수면 음악 볼륨: 대화·녹음 듣기 중에는 아주 작게, 한 마디 녹음·들어보기 중에는 멈춤 (마이크에 섞이지 않게) ----
+    LaunchedEffect(musicOn, musicStarted, talking, phase, saveStep) {
+        if (!musicStarted) return@LaunchedEffect
+        if (!musicOn || (saveStep && phase != Phase.AiSpeaking)) {
+            SleepMusic.pause(context)
+        } else {
+            SleepMusic.setLevel(context, if (talking || phase == Phase.Listening) SleepLevel.QUIET else SleepLevel.NORMAL)
+            SleepMusic.resume(context)
         }
+    }
+
+    // ---- 음악만 흐르는 중에 수면 타이머·알림창 정지로 음악이 끝나면 화면도 닫음 ----
+    LaunchedEffect(sleeping, musicPlaying) {
+        if (sleeping && !musicPlaying) onClose()
     }
 
     LaunchedEffect(muted) { client.setMuted(muted) }
@@ -314,6 +334,18 @@ fun NightChatScreen(onClose: () -> Unit) {
             }
         }
 
+        // ===== 0) 굿나잇콜 시작과 함께 기본 수면 음악(NORMAL)을 작은 볼륨으로 =====
+        // 컨디션은 통화가 끝나고 밤 기록을 추출한 뒤에 정해지므로 우선 NORMAL 곡. 서버 곡이 없으면 앱 내 파일
+        launch {
+            val track = RespecApi.sleepMusic("NORMAL")
+            if (SleepMusic.play(context, track, SleepLevel.QUIET)) {
+                musicStarted = true
+            } else {
+                musicOn = false
+                Toast.makeText(context, "재생할 수면 음악이 없어요", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         // ===== 1) Live 대화. 끝은 사용자가 정함 (말로 → end_session, 또는 버튼) =====
         micReady.await()
         // 토큰마다(재연결 포함) 그때의 폰 캘린더 일정을 넣음. 권한이 없으면 빈 일정
@@ -328,11 +360,7 @@ fun NightChatScreen(onClose: () -> Unit) {
         val talkEndedAt = System.currentTimeMillis()
         talking = false
 
-        // 수면 음악 URL 조회, 내일 아침 재기상 음악 미리 받기 (12시간 유효)
-        launch {
-            sleepUrl = RespecApi.musicUrl("sleep")
-            musicReady = true
-        }
+        // 내일 아침 재기상 음악 미리 받기 (12시간 유효)
         ApiClient.scope.launch { MusicStore.prefetchRewake(context.applicationContext) }
 
         // ===== 2) 원문 저장은 백그라운드로 (화면을 닫아도 계속). 사용자 발화가 없으면 서버가 받지 않음 =====
@@ -347,6 +375,21 @@ fun NightChatScreen(onClose: () -> Unit) {
             RespecApi.saveTranscript(transcript, startedAt, endedAt)?.also { r ->
                 NightMessageStore.saveRecord(appCtx, r.optString("night_record_id"), r.optString("apply_date"))
             }
+        }
+
+        // 컨디션 곡 전환: 밤 기록 추출이 끝나면(DONE) 오늘 컨디션 곡을 다시 받아, 곡이 다르면 서서히 바꿈.
+        // 화면을 닫아도 계속 확인. 추출 실패·시간 초과·요청 실패면 기본 곡 유지
+        ApiClient.scope.launch {
+            val id = saveJob.await()?.optString("night_record_id")?.takeIf { it.isNotBlank() } ?: return@launch
+            var status: String? = null
+            withTimeoutOrNull(EXTRACT_WAIT_MS) {
+                while (status != "DONE" && status != "FAILED") {
+                    delay(EXTRACT_POLL_MS)
+                    status = RespecApi.nightRecord(id)?.optString("extract_status")
+                }
+            }
+            if (status != "DONE" || !SleepMusic.playing.value) return@launch
+            RespecApi.sleepMusic(null)?.let { SleepMusic.switchTo(appCtx, it) }
         }
 
         // ===== 3) 내일의 한 마디 녹음 =====
@@ -409,9 +452,10 @@ fun NightChatScreen(onClose: () -> Unit) {
             Toast.makeText(context, "서버에 저장하지 못했어요. 한 마디는 기기에 보관돼요", Toast.LENGTH_SHORT).show()
         }
         delay(800)
-        if (musicOn && music.isPlaying) {
-            sleeping = true      // 수면 음악이 흐르는 동안은 화면을 유지, 통화 종료로 끝냄
-            subtitle = "수면 음악이 흐르고 있어요. 편히 주무세요. 끝내려면 통화 종료를 눌러 주세요."
+        if (musicOn && SleepMusic.playing.value) {
+            sleeping = true      // 음악만 흐르는 상태. 수면 타이머를 걸고, 화면을 끄거나 나가도 음악은 이어짐
+            SleepMusic.startTimer(context, SLEEP_MUSIC_MS, force = true)
+            subtitle = "수면 음악이 흐르고 있어요. 10분 뒤에 저절로 꺼져요. 화면을 꺼도 계속 들려요. 편히 주무세요."
         } else {
             onClose()
         }
