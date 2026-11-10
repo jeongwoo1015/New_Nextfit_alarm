@@ -57,7 +57,7 @@ def test_night_uses_today_events():
 
 def test_night_without_events_falls_back():
     p = night_prompt(NightInput())
-    assert "[오늘 일정]\n없음" in p and "하루가 어땠는지 묻는 것으로 시작" in p
+    assert "[오늘 일정]\n없음" in p and "열린 질문으로 바로 시작한다" in p
 
 
 def test_night_override_only_with_tomorrow_alarm():
@@ -97,8 +97,8 @@ def test_briefing_without_weather_or_night():
 
 def test_briefing_content_alarm_and_no_coaching():
     c = briefing_prompt(BriefingInput(content_name="퀴즈"))
-    assert "오늘의 콘텐츠(퀴즈) 시작할 준비가 됐는지 묻는" in c and "start_routine" in c
-    assert "루틴이나 콘텐츠의 진행은 이 대화에서 하지 않는다(다음 세션에서 한다)" in c
+    assert "이어질 순서(오늘의 포춘 → 퀴즈)를 알리면서 시작할 준비가 됐는지 묻는" in c and "start_routine" in c
+    assert "한마디·포춘·콘텐츠의 진행은 이 대화에서 하지 않는다(다음 단계에서 한다)" in c
     z = briefing_prompt(BriefingInput(coaching_skipped=True))
     assert "코칭을 하지 않는 날" in z and "시작할 준비가 됐는지 묻는 질문도 하지 않는다" in z and "준비가 됐는지 묻는 질문 한 문장을 한다" not in z
 
@@ -189,13 +189,13 @@ def test_night_override_proposal_exception():
 
 def test_night_flow_new_design():
     p = night_prompt(NightInput(events_today=EVENTS, tomorrow_wake_time="07:00"))
-    assert "내일의 핵심 목표 한 가지" in p and "내일 특이사항" in p and "하루 요약 뒤에 위 4번처럼 묻는다" in p   # 내일 목표·특이사항을 다시 묻되 하루 이야기 뒤에
+    assert "내일의 핵심 목표 한 가지" in p and "내일 특이사항" in p and "하루 이야기를 마친 뒤에 위 5번처럼 묻는다" in p   # 내일 목표·특이사항을 다시 묻되 하루 이야기 뒤에
     assert "오늘은 내일 …" in p and "어색한 표현은 쓰지 않는다" in p                                          # 사용자가 지적한 어색한 문장 금지
-    assert "오늘 하루를 한두 문장으로 요약해 맞는지 묻는다" in p and "한 줄 일기의 바탕" in p   # 요약을 사용자가 확인 → 일기
-    assert "하루 요약이나 내일 이야기를 마치기 전에는 스스로 대화를 끝내지 않는다" in p
+    assert "하루를 요약해 맞는지 되묻거나 확인받지 않는다" in p and "한 줄 일기는 대화가 끝난 뒤 따로 정리한다" in p   # 요약 재확인 없음(11/10 사용자 요청)
+    assert "내일 이야기를 마치기 전에는 스스로 대화를 끝내지 않는다" in p
     assert "제안한 뒤에는 반드시 사용자의 대답을 기다린다" in p and "변경을 정했다고 말하지 않는다" in p   # 가짜 동의 방지
     assert "사용자가 맞다고 해야 확정이다" in p
-    assert "조정은 두 경우에만 다룬다" in p and "많이 피곤해 보이면" in p and "직접 알람 시각 변경이나 코칭" in p
+    assert "조정은 두 경우에만 다룬다" in p and "많이 지쳐 보이면" in p and "직접 알람 시각 변경이나 코칭" in p
 
 
 def test_briefing_flow_new_design():
@@ -217,7 +217,7 @@ def test_briefing_ready_question_and_start_are_separate_turns():
 
 
 def test_night_two_sentence_example():
-    assert "발표를 잘 끝내서 다행이에요. 그때 기분이 어땠어요?" in night_prompt(NightInput())      # 두 문장 예시로 3문장 답변을 줄인다
+    assert "발표를 잘 끝내서 다행이에요. 발표 끝나고는 뭘 하셨어요?" in night_prompt(NightInput())      # 두 문장 예시로 3문장 답변을 줄인다
 
 
 
@@ -270,7 +270,7 @@ def test_adjust_step_time_declaration_and_rules():
 
 def test_briefing_asks_about_content_when_content_alarm_and_does_not_run_it():
     p = briefing_prompt(BriefingInput(program_name="현실 모닝루틴", content_name="퀴즈"))
-    assert "이제 퀴즈 시간을 시작할 준비가 됐어요?" in p and "'현실 모닝루틴' 시작할 준비가 됐는지 묻는" not in p     # 콘텐츠가 있으면 콘텐츠가 먼저
+    assert "먼저 오늘의 포춘을 듣고 퀴즈 시간으로 넘어갈 건데, 준비됐어요?" in p and "'현실 모닝루틴' 시작할 준비가 됐는지 묻는" not in p     # 콘텐츠가 있으면 콘텐츠가 먼저
     assert "report_step_result" not in p.split("[현재 시각]")[0] or "콘텐츠 진행 규칙" not in p                     # 브리핑 세션은 단계를 진행하지 않는다
 
 
@@ -295,21 +295,21 @@ def test_weather_location_is_included_only_with_weather_values():
 
 def test_night_closes_by_itself_without_asking_and_ends_on_short_answers():
     p = night_prompt(NightInput())
-    assert "마무리(공통 규칙의 종료 조건보다 이 규칙이 우선한다)" in p and "마무리해도 되는지 묻지 말고 마무리한다고 알린다" in p
-    assert "이제 마무리할게요. 오늘 하루도 수고하셨어요, 편안한 밤 되세요." in p and "같은 응답에서 end_session을 호출한다" in p
+    assert "마무리(공통 규칙의 종료 조건보다 이 규칙이 우선한다)" in p and "마무리해도 되는지 묻지 말고 마무리하며 내일의 나에게 남길 한마디를 녹음하자고 알린다" in p
+    assert "오늘 하루도 수고하셨어요. 이제 내일의 나에게 남길 한마디를 녹음해 볼게요." in p and "같은 응답에서 end_session을 호출한다" in p
     assert "마무리한다는 말과 질문을 함께 하지 않는다" in p and "마무리하는 응답은 예외" in p
-    assert "하루 요약이나 내일 이야기를 마치기 전에는 스스로 대화를 끝내지 않는다" in p       # 요약·내일 이야기 전에는 끝내지 않음
+    assert "내일 이야기를 마치기 전에는 스스로 대화를 끝내지 않는다" in p       # 요약·내일 이야기 전에는 끝내지 않음
     assert "마무리할까요" not in p                                                      # 허락을 묻는 문장은 없다 (사용자 지시: 끝낼 때 의견을 묻지 않는다)
     assert "덕담이나 인사를 더 붙이지 않는다" in p and "곧바로 end_session을 호출한다" in p
     casual = night_prompt(NightInput(persona=Persona(tone="CASUAL")))
-    assert "이제 마무리할게. 오늘 하루도 수고했어, 잘 자." in casual and "마무리할게요" not in casual
+    assert "오늘 하루도 수고했어. 이제 내일의 나에게 남길 한마디를 녹음해 볼게." in casual and "녹음해 볼게요" not in casual
 
 
 def test_night_asks_small_concrete_things_on_quiet_days():
     p = night_prompt(NightInput())
     assert "작은 일 묻기(사용자가" in p and "아주 작고 구체적인 일 하나를 골라 묻는다" in p
     assert "작은 일은 최대 두 번만 묻는다" in p and "막연한 질문은 하지 않는다" in p and "지어내거나" in p
-    assert "요약 확인 전에는 내일 이야기를 묻지 않는다" in p and "작은 일 한두 가지여도 된다" in p
+    assert "내일 이야기로 넘어가는 응답이다(요약을 되묻지 않는다)" in p and "작은 일 한두 가지를 들었으면" in p
     assert "점심은 뭘 드셨어요?" in p
     casual = night_prompt(NightInput(persona=Persona(tone="CASUAL")))
     assert "점심은 뭐 먹었어?" in casual and "점심은 뭘 드셨어요?" not in casual and "하루였구나." in casual
@@ -323,3 +323,32 @@ def test_night_examples_follow_the_tone_setting():
     for polite in ("맞죠?", "잘 마무리하셨어요?", "맞아요?", "쉬어 갈까요?", "빠져요.", "줄여 둘게요", "바꿔 둘게요", "드셨어요?", "하루였군요.", "마무리할게요"):                         # 반말 설정의 지시문에 존댓말 예시가 남아 있으면 말투가 섞인다
         assert polite not in casual
     assert night_prompt(NightInput(persona=Persona(tone="???"))).count("잘 마무리하셨어요?") == 1             # 모르는 어조는 존댓말 예시
+
+
+def test_night_new_flow_open_question_and_recording_close():
+    """밤 대화 흐름(11/10): 일정 안부로 시작 → 하루·한 일·기분을 한 질문으로 → 요약 → 내일 첫 일정·목표 → 내일의 나에게 남길 한마디 녹음 안내로 마무리."""
+    p = night_prompt(NightInput(events_today=EVENTS, tomorrow_wake_time="07:00"))
+    assert "그 일정이 잘 끝났는지만 묻는 것으로 첫마디를 한다" in p and "이 첫 질문에서는 기분이나 느낌을 묻지 않는다" in p
+    assert "오늘 하루가 어땠는지, 뭘 하며 보냈는지, 기분은 어땠는지를 한 문장의 열린 질문 하나로 묻는다" in p
+    assert "첫 질문에서 물은 일정에 대한 기분을 따로 묻지 않는다" in p and "다른 일정을 하나씩 짚으며" in p
+    assert "[내일 일정]이 있으면 가장 이른 일정의 시각과 제목을 한 문장으로 짚고 이어서 질문한다" in p
+    assert "내일의 나에게 남길 한마디를 녹음하자고 알린다" in p and "녹음 방법이나 내용을 설명하지 않는다" in p
+    casual = night_prompt(NightInput(persona=Persona(tone="CASUAL")))
+    assert "얘기해 줄래?" in casual and "얘기해 주실래요" not in casual
+
+
+def test_night_no_recap_and_no_end_with_question():
+    p = night_prompt(NightInput(events_today=EVENTS, tomorrow_wake_time="07:00"))
+    assert "이미 들은 하루 이야기를 요약해 맞는지 되묻지 않는다" in p and "내일 이야기를 하지 않은 채 마무리하지도 않는다" in p
+    assert "질문을 하는 응답에서는 end_session을 호출하지 않는다" in p
+    assert "물음표로 끝나는 의문문 한 문장이고, 하루 전체·한 일·기분 세 가지를 모두 담는다" in p
+
+
+def test_night_always_asks_notes_and_proposes_override_when_tired():
+    p = night_prompt(NightInput(events_today=EVENTS, tomorrow_wake_time="07:00"))
+    assert "목표 질문에 답을 들으면 반드시 이어서 특이사항 질문도 한 번 한다(목표 질문만 하고 마무리하지 않는다)" in p
+    assert "내일 이야기(첫 일정 언급, 목표와 특이사항 두 질문)까지 답을 들었으면" in p
+    assert "피곤하다는 말을 했거나(피곤, 지쳤다, 진이 빠진다, 힘들다, 졸리다 등)" in p
+    assert "마무리하기 전에 반드시 한 번 제안한다(제안 없이 마무리하지 않는다)" in p
+    # 내일 알람이 없으면 조정 규칙 자체가 없다
+    assert "마무리하기 전에 반드시 한 번 제안한다" not in night_prompt(NightInput(events_today=EVENTS))
