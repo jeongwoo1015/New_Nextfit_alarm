@@ -77,6 +77,21 @@ def test_calendar(client, clock, week):
     assert client.get("/diary/calendar", params={"month": "2026-13"}, headers=H).status_code == 422
 
 
+def test_calendar_condition_label(client, clock, week, ai):
+    """채원님 요청 11/11: 날짜별로 그날 밤 기록의 컨디션 (밤 기록이나 컨디션이 없으면 null)."""
+    from backend.clients.ai_gateway import NightExtract
+    clock.now = datetime(2026, 11, 4, 23, 30, tzinfo=KST)
+    client.post("/night/transcript", json={"transcript": TALK}, headers=H)       # 11/4 밤: 컨디션 없음
+    ai.extract = NightExtract("DONE", {"condition_label": "TIRED", "tomorrow_notes": []})
+    clock.now = datetime(2026, 11, 6, 0, 30, tzinfo=KST)
+    client.post("/night/transcript", json={"transcript": TALK}, headers=H)       # 11/5 밤(자정 넘김): TIRED
+    clock.now = datetime(2026, 11, 6, 21, 0, tzinfo=KST)
+    days = {d["date"]: d for d in client.get("/diary/calendar", params={"month": "2026-11"}, headers=H).json()}
+    assert days["2026-11-05"]["condition_label"] == "TIRED"
+    assert days["2026-11-04"]["condition_label"] is None and days["2026-11-04"]["has_night_record"] is True
+    assert days["2026-11-03"]["condition_label"] is None and days["2026-11-03"]["has_night_record"] is False
+
+
 def test_diary_day(client, clock, week, repos):
     clock.now = datetime(2026, 11, 5, 23, 30, tzinfo=KST)
     rec_id = client.post("/night/transcript", json={"transcript": TALK}, headers=H).json()["night_record_id"]

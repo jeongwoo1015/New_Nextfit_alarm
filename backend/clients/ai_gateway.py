@@ -87,6 +87,7 @@ class BriefingContext:
     coaching_skipped: bool = False          # 내일 코칭 안 하기에 동의한 날 → 브리핑만
     strategy_block: str = ""
     weather: Weather | None = None          # 없으면 브리핑에서 날씨를 건너뜀
+    one_liner_follows: bool = False         # 브리핑 뒤 앱이 어젯밤 한마디 녹음을 틀어 줌 → 마무리에서 순서 안내 (AI 11/10)
 
 
 @dataclass(frozen=True)
@@ -203,7 +204,7 @@ class AIGateway(Protocol):
                         speech_style: str | None, mode: str, bandit_state: dict | None) -> StrategyDecision: ...
     def strategy_blocks(self, strategy: dict | None) -> tuple[str, str]: ...   # 재연결: 로그의 strategy → (브리핑, 코칭) 문장
     def compose_fortune(self, one_liner: str, tone: str, today: date, diary_text: str) -> Fortune: ...
-    def issue_fortune_token(self, persona: Persona, fortune: Fortune) -> LiveToken: ...   # 문장을 그대로 읽는 Live
+    def issue_fortune_token(self, persona: Persona, fortune: Fortune, based_on: str = "") -> LiveToken: ...   # 문장을 그대로 읽는 Live
 
 
 def _wake(v) -> time | None:
@@ -299,6 +300,7 @@ class RealAIGateway:
         inp = ai.BriefingInput(
             persona=self._persona(ai, ctx.persona), morning_call_type="CONTENT" if ctx.content_name else "ROUTINE",
             program_name=ctx.program_name, content_name=ctx.content_name, coaching_skipped=ctx.coaching_skipped,
+            one_liner_follows=ctx.one_liner_follows,
             now_hhmm=ctx.now_hhmm, events_today=tuple(ai.CalendarEvent(e.title, e.start, e.end, e.all_day) for e in ctx.events_today),
             weather=ai.Weather(**asdict(ctx.weather)) if ctx.weather else None, night=self._night(ai, ctx.night),
             strategy_block=ctx.strategy_block)
@@ -339,10 +341,12 @@ class RealAIGateway:
         res = compose_fortune(one_liner or "", self.llm, None, tone, today, diary_text or "")
         return Fortune(res.text, res.style, res.source)
 
-    def issue_fortune_token(self, persona: Persona, fortune: Fortune) -> LiveToken:
+    def issue_fortune_token(self, persona: Persona, fortune: Fortune, based_on: str = "") -> LiveToken:
+        """based_on: ONE_LINER / DIARY / "" — 소개 문장이 "어젯밤 한마디로 만든 …"처럼 재료를 밝힌다(AI 11/10)."""
         from ai.live import inputs as ai
         from ai.live.config import build_setup
-        inp = ai.FortuneInput(persona=self._persona(ai, persona), fortune_text=fortune.text, style=fortune.style)
+        inp = ai.FortuneInput(persona=self._persona(ai, persona), fortune_text=fortune.text, style=fortune.style,
+                              based_on=based_on)
         return self._issue("fortune", build_setup("fortune", inp))
 
     def strategy_blocks(self, strategy: dict | None) -> tuple[str, str]:
