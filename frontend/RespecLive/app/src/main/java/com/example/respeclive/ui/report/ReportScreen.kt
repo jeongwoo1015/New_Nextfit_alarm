@@ -73,8 +73,9 @@ private fun percent(rate: Float?) = rate?.let { "${Math.round(it * 100)}%" } ?: 
 /**
  * 리포트 (GET /reports). 상단은 전체 누적 기상·취침 성공률, 그래프 두 개(기상·취침 시간 추이)는 각각 주·월·연을 고를 수 있고,
  * 아래는 현재·최장 연속 기상일.
- * 취침 값은 서버가 같은 응답에 넣어 준다고 보고 읽음: overall.bedtime_success_rate(굿나잇콜이 켜진 날 중 밤 대화를 마친 날의 비율),
- * totals.avg_bed_clock · series[].avg_bed_clock (밤 대화를 마친 시각의 평균 "HH:MM"). 없으면 '-'와 빈 그래프.
+ * 취침 값(서버 backend/domain/bedtime_rules.py, 팀 결정 11/06): overall.bedtime_success_rate
+ * (밤 대화를 마친 날 ÷ 첫 기록일부터 어제까지의 날 수, 오늘 밤 대화를 마쳤으면 오늘까지),
+ * totals.avg_bed_clock · series[].avg_bed_clock (밤 대화를 마친 시각의 평균 "HH:MM"). 기록이 없으면 '-'와 빈 그래프.
  */
 @Composable
 fun ReportScreen() {
