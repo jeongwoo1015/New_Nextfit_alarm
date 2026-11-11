@@ -67,6 +67,6 @@ class FakeAIGateway:
             return Fortune("오늘은 작은 시작이 큰 하루를 만들어요.", "COOKIE", "fallback")
         return Fortune(f"포춘: {one_liner or diary_text}", "HOROSCOPE" if today.toordinal() % 2 else "COOKIE", "ai")
 
-    def issue_fortune_token(self, persona, fortune):
-        self.calls.append(("fortune_token", (persona, fortune)))
+    def issue_fortune_token(self, persona, fortune, based_on=""):
+        self.calls.append(("fortune_token", (persona, fortune, based_on)))
         return _token("fortune")

@@ -80,6 +80,7 @@ class BriefingInput:
     program_name: str = ""             # 루틴 알람의 프리셋 이름 (전환 문장에 사용)
     content_name: str = ""             # 콘텐츠 알람의 콘텐츠 이름 (예: 퀴즈). 있으면 브리핑 뒤에 이어질 세션이 콘텐츠다
     coaching_skipped: bool = False     # 밤 대화에서 '내일 코칭 안 하기'에 동의한 날. True면 브리핑만 하고 이어서 시작하지 않는다
+    one_liner_follows: bool = False    # 브리핑 뒤에 앱이 어젯밤 남긴 한마디를 틀어 주면 True. 콘텐츠 알람의 마무리 문장이 이어질 순서(한마디 → 포춘 → 콘텐츠)를 알린다
     now_hhmm: str = ""                 # 브리핑 시작 시각(KST) "HH:MM" — 이미 일어난 뒤라 알람 시각 대신 현재 시각을 말한다
     target_wake_time: str = ""         # (지시문에서는 쓰지 않음. 서버 호환용으로 남김)
     events_today: tuple[CalendarEvent, ...] = ()
@@ -94,6 +95,7 @@ class FortuneInput:
     persona: Persona = Persona()
     fortune_text: str = ""             # 읽을 포춘 문장 (비어 있으면 읽을 것이 없다고만 말한다)
     style: str = ""                    # COOKIE / HOROSCOPE (참고용, 지시문 동작은 같다)
+    based_on: str = ""                 # 문장을 만든 재료: ONE_LINER(어젯밤 한마디) / DIARY(한 줄 일기). compose_fortune 결과의 used_input(voice / diary / none)을 그대로 넘겨도 된다. 소개 문장이 "어젯밤 한마디로 만든 …"으로 바뀐다
 
 
 @dataclass(frozen=True)

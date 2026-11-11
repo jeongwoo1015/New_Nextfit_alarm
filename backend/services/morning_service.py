@@ -30,6 +30,16 @@ OPTION_NAMES = {"PERSON": "인물 퀴즈", "GENERAL": "상식 퀴즈", "WORDCHAI
 def content_name(content_type: str | None, content_option: str | None) -> str:
     """브리핑에서 말할 오늘 콘텐츠 이름. 세부가 정해져 있으면 세부 이름(끝말잇기 등), 아니면 종류 이름."""
     return OPTION_NAMES.get(content_option or "") or CONTENT_NAMES.get(content_type or "", "")
+
+
+def fortune_based_on(source: str | None, night) -> str:
+    """포춘 소개에 밝힐 재료. 문장을 만들 때와 같은 순서(받아쓴 한마디 → 한 줄 일기)로 정한다.
+    AI가 만든 문장(source="ai")만 밝힌다 — 기본 문장(fallback)·담담한 문장(safe)에 "어젯밤 한마디로 만든"은 틀린 말이라서."""
+    if source != "ai" or night is None:
+        return ""
+    if (night.voice_text or "").strip():
+        return "ONE_LINER"
+    return "DIARY" if (night.diary_text or "").strip() else ""
 BANDIT_KEY = "global"           # AI CONTRACTS 6-4: 여러 사용자를 합쳐야 경향이 보여 전체 합산 상태를 쓴다
 RECENT_DAYS = 7
 
@@ -149,7 +159,7 @@ class MorningService:
         weather = self.weather.today(location.lat, location.lon, location.name) if location else None
         ctx = BriefingContext(persona, to_kst(self.clock()).strftime("%H:%M"), tuple(events_today), night_view(night),
                               program, content_name(s.content_type, s.content_option), s.coaching_skipped, briefing_block,
-                              weather)
+                              weather, one_liner_follows=bool(night and night.voice_audio_path))
         return self.ai.issue_briefing_token(ctx)
 
     def _strategy(self, user_id: str, s: MorningSession, night) -> tuple[str, str]:
@@ -199,7 +209,9 @@ class MorningService:
         """포춘 단계에서 호출. 저장된 문장을 AI가 그대로 읽는 Live 토큰 (재연결도 같은 문장)."""
         s = self.prepare_fortune(user_id, session_id)        # 다른 사용자의 세션이면 여기서 404
         persona = self._persona(user_id)
-        token = self.ai.issue_fortune_token(persona, Fortune(s.fortune_text, s.fortune_style, s.fortune_source))
+        night = self.r.nights.get_night_for_morning(user_id, s.session_date)
+        token = self.ai.issue_fortune_token(persona, Fortune(s.fortune_text, s.fortune_style, s.fortune_source),
+                                            fortune_based_on(s.fortune_source, night))
         return token, s
 
     # ---------- 단계·코칭 ----------

@@ -371,6 +371,7 @@ class CalendarDayOut(BaseModel):
     routine_total: int
     has_session: bool
     has_night_record: bool
+    condition_label: str | None = None   # 그날 밤 기록의 컨디션 GOOD/NORMAL/TIRED/STRESSED (밤 기록·컨디션이 없으면 null)
 
 
 class DiarySessionOut(BaseModel):

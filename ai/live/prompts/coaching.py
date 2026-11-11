@@ -2,7 +2,7 @@
 
 알람은 루틴 또는 콘텐츠 중 하나라 이 세션 뒤에 이어지는 세션은 없다."""
 from ..inputs import CoachingInput, Step, content_kind
-from .common import MORNING_RULE, SAFETY_RULES, VOICE_RULES, clean, join_blocks, night_record_block, persona_block
+from .common import MORNING_FLOW, MORNING_RULE, SAFETY_RULES, VOICE_RULES, clean, join_blocks, night_record_block, persona_block
 
 COACH_INTRO = "당신은 사용자의 아침 루틴을 옆에서 코칭해 주는 친근한 모닝 코치입니다."
 CONTENT_INTRO = "당신은 사용자의 아침 콘텐츠(스트레칭·퀴즈 게임·영어 따라 읽기 등)를 함께 진행해 주는 친근한 진행자입니다."
@@ -78,6 +78,19 @@ QUIZ_RULES = """퀴즈 진행([고정 스크립트]에 '문제:'와 '정답:' �
 - 사용자가 답하거나 모르겠다고 하면 그 응답에서 report_step_result를 한 번 호출하며 answer_correct에 맞고 틀림을 넣는다. 정답 줄과 뜻이 같으면 표현이 달라도 true, 틀렸거나 모르겠다고 했으면 false다. verdict는 답을 말했으면 done이다.
 - 같은 응답에서 결과를 먼저 짧게 말한다. 맞으면 "맞았어요!"처럼, 틀리면 "아쉬워요, 정답은 ○○예요."처럼 정답을 알려 준다. 앱이 이 말을 듣고 넥스티의 O/X를 보여 주므로 '맞았어요', '아쉬워요'를 이 표현대로 쓴다. 그 뒤 다음 문제를 낸다."""
 
+# 콘텐츠 시작: 앞 단계(오늘의 포춘)에서 바로 이어 말하도록 연결 한 문장으로 연다
+CONTENT_NAMES = {"STRETCH": "스트레칭", "ENGLISH": "영어 따라 읽기", "WORDCHAIN": "끝말잇기", "QUIZ": "퀴즈"}
+QUIZ_OPTION_NAMES = {"PERSON": "인물 퀴즈", "GENERAL": "상식 퀴즈"}
+CONTENT_OPEN = """콘텐츠 시작(이 세션의 첫 안내): 오늘의 포춘에 이어서 시작하므로 첫 안내는 연결 문장 한 문장으로 연다. 예) "이어서 {name} 시간이에요." 콘텐츠 이름은 반드시 "{name}" 그대로 쓰고 다른 이름(예: 역사 퀴즈, 운동)으로 바꿔 부르지 않는다. 이 문장은 인사가 아니며, 포춘 내용을 되풀이하거나 평가하지 않는다. 연결 문장 다음에 바로 첫 단계 안내를 한다(연결 문장은 첫 안내의 문장 수에 넣지 않는다). 이어서 하는 중이면 이 연결 문장 대신 "이어서 할게요"만 말한다."""
+
+
+def content_label(inp: CoachingInput) -> str:
+    kind = content_kind(inp)
+    if kind == "QUIZ":
+        return QUIZ_OPTION_NAMES.get(inp.content_option, CONTENT_NAMES["QUIZ"])
+    return CONTENT_NAMES.get(kind, "")
+
+
 CONTENT_RULES = {"STRETCH": STRETCH_RULES, "ENGLISH": ENGLISH_RULES, "WORDCHAIN": WORDCHAIN_RULES, "QUIZ": QUIZ_RULES}
 
 
@@ -108,7 +121,8 @@ def coaching_prompt(inp: CoachingInput) -> str:
         CONTENT_INTRO if content else COACH_INTRO, STEP_RULES.format(label=label, resume_line=RESUME_LINE if inp.resumed else ""),
         "" if content else TIME_RULES, "" if content else ENCOURAGE_RULES, COACH_CLOSING,
         CONTENT_RULES.get(content_kind(inp), ""),
-        MORNING_RULE, SAFETY_RULES, VOICE_RULES, persona_block(inp.persona), steps,
+        (CONTENT_OPEN.format(name=content_label(inp) or "오늘의 콘텐츠") if content else ""),
+        MORNING_FLOW if content else "", MORNING_RULE, SAFETY_RULES, VOICE_RULES, persona_block(inp.persona), steps,
         night_record_block(inp.night) if inp.night else "",
         inp.strategy_block,
     )
