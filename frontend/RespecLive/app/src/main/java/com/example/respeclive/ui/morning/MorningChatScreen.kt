@@ -153,6 +153,10 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     var liveSaying by remember { mutableStateOf(false) }   // 마무리 안내를 AI 목소리로 읽는 중 (자막은 AI가 실제로 한 말)
     var coachingStarted by remember { mutableStateOf(false) }   // 이번 통화의 단계를 받아 코칭 세션을 열었음
     var coachSpoke by remember { mutableStateOf(false) }        // 코칭 세션에서 AI가 첫 안내를 시작함
+    // 퀴즈 O / X 반응. AI가 판정 함수에 정답 여부(answer_correct)를 보내면 그 값을 쓰고(quizByTool),
+    // 받은 적이 없으면 넥스티의 말로 추측함
+    var reaction by remember { mutableStateOf<NextyMotion?>(null) }
+    var quizByTool by remember { mutableStateOf(false) }
 
     fun finish() {
         val sid = sessionId ?: initialSession?.optJSONObject("session")?.optString("session_id")?.takeIf { it.isNotBlank() }
@@ -270,6 +274,14 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                     val sid = RoutineRepository.sessionId
                     val order = call.args.optInt("step_order", -1)
                     val verdict = call.args.optString("verdict")
+                    // 퀴즈 콘텐츠: AI가 정답 여부를 함께 보냄 → 넥스티가 바로 O / X
+                    if (call.args.has("answer_correct")) {
+                        val correct = call.args.optBoolean("answer_correct")
+                        withContext(Dispatchers.Main) {
+                            quizByTool = true
+                            reaction = if (correct) NextyMotion.QUIZ_O else NextyMotion.QUIZ_X
+                        }
+                    }
                     if (sid != null && order > 0 && verdict.isNotBlank()) {
                         RespecApi.reportVerdict(sid, order, verdict)
                             ?.let { v -> withContext(Dispatchers.Main) { applyStepView(v) } }
@@ -498,12 +510,11 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     val remainingMs = stepTotalMs?.takeIf { coachSpoke }?.let { (it - (nowMs - stepStartMs)).coerceIn(0L, it) }
     val timerFraction = if (remainingMs != null && stepTotalMs != null) remainingMs.toFloat() / stepTotalMs else null
 
-    // 퀴즈: 사용자가 답한 바로 뒤 넥스티의 말로 맞고 틀림을 알아내 잠깐 몸으로 O / X
-    // (서버 판정은 답만 하면 done이라 정답 여부가 없음. 말이 끝나기 전에도 분명한 표현이면 바로 반응)
-    var reaction by remember { mutableStateOf<NextyMotion?>(null) }
+    // 퀴즈 예비 방법: AI가 정답 여부를 보내지 않는 동안만, 사용자가 답한 바로 뒤 넥스티의 말로 맞고 틀림을 추측해 O / X
+    // (말이 끝나기 전에도 분명한 표현이면 바로 반응)
     var judgedAt by remember { mutableLongStateOf(-1L) }
     LaunchedEffect(lines, aiSpeaking) {
-        if (contentType != "QUIZ" || !coachingStarted || lines.size < 2) return@LaunchedEffect
+        if (quizByTool || contentType != "QUIZ" || !coachingStarted || lines.size < 2) return@LaunchedEffect
         val line = lines.last()
         if (line.atMs == judgedAt || line.role != LiveClient.Role.Assistant || lines[lines.lastIndex - 1].role != LiveClient.Role.User) {
             return@LaunchedEffect
