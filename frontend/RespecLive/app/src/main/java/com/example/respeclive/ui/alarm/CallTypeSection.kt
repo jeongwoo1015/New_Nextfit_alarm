@@ -57,12 +57,12 @@ internal fun MorningContentPicker(selected: String?, onSelect: (String) -> Unit)
                 Box(
                     Modifier
                         .clip(RoundedCornerShape(50))
-                        .background(if (on) RespecColors.MintDark else RespecColors.Card)
-                        .border(1.dp, if (on) RespecColors.Mint else RespecColors.CardBorder, RoundedCornerShape(50))
+                        .background(if (on) RespecColors.Lime else RespecColors.Card)
+                        .border(1.dp, if (on) RespecColors.Lime else RespecColors.CardBorder, RoundedCornerShape(50))
                         .clickable { onSelect(code) }
                         .padding(horizontal = 20.dp, vertical = 10.dp)
                 ) {
-                    Text(label, color = if (on) RespecColors.Mint else RespecColors.Text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text(label, color = if (on) RespecColors.OnAccent else RespecColors.Text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 }
             }
         }

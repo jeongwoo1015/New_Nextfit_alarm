@@ -1,6 +1,7 @@
 package com.example.respeclive.ui.alarm
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -70,8 +71,26 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
     }
 
     val scope = rememberCoroutineScope()
-    var saving by remember { mutableStateOf(false) }   // 서버 저장·삭제 중에는 버튼을 막음
-    val canSave = !saving && label.isNotBlank() && (isBedtime || contentType != null)
+    var saving by remember { mutableStateOf(false) }     // 서버에 저장하는 중
+    var deleting by remember { mutableStateOf(false) }   // 서버에서 지우는 중 (둘 중 하나라도 진행 중이면 버튼을 막음)
+    val busy = saving || deleting
+    // 저장할 수 없는 이유 (없으면 저장 가능). 버튼 위에 그대로 안내함
+    val missing = when {
+        label.isBlank() -> "알람 이름을 입력해 주세요"
+        !isBedtime && contentType == null -> "아침 콘텐츠를 골라 주세요"
+        else -> null
+    }
+    val canSave = !busy && missing == null
+
+    var confirmDelete by remember { mutableStateOf(false) }
+    var confirmLeave by remember { mutableStateOf(false) }
+    // 처음 값과 비교해 바뀐 것이 있으면 저장하지 않고 나갈 때 확인함
+    val initial = remember { listOf(ampm, hour12, minute, days, label, isBedtime, contentType) }
+    val changed = listOf(ampm, hour12, minute, days, label, isBedtime, contentType) != initial
+    fun leave() {
+        if (changed && !busy) confirmLeave = true else onBack()
+    }
+    BackHandler { leave() }
 
     fun save() {
         val base = existing ?: Alarm(
@@ -117,7 +136,7 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
                     .size(44.dp)
                     .clip(CircleShape)
                     .background(RespecColors.PurpleDark)
-                    .clickable(onClick = onBack),
+                    .clickable { leave() },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "뒤로", tint = RespecColors.AccentText)
@@ -238,6 +257,17 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
         }
 
         Spacer(Modifier.height(28.dp))
+        // 저장 버튼이 꺼져 있는 이유
+        if (missing != null && !busy) {
+            Text(
+                missing,
+                color = RespecColors.AccentText,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
+            )
+        }
         Button(
             onClick = { save() },
             enabled = canSave,
@@ -257,21 +287,55 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
 
         if (existing != null) {
             TextButton(
-                onClick = {
-                    saving = true
-                    scope.launch {
-                        val error = AlarmRepository.delete(context, existing.id)
-                        saving = false
-                        if (error == null) onBack() else Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
-                    }
-                },
-                enabled = !saving,
+                onClick = { confirmDelete = true },
+                enabled = !busy,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             ) {
-                Text("이 알람 삭제", color = RespecColors.Danger)
+                Text(if (deleting) "삭제 중…" else "이 알람 삭제", color = RespecColors.Danger)
             }
         }
         Spacer(Modifier.height(24.dp))
+    }
+
+    if (confirmDelete && existing != null) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            containerColor = RespecColors.Card,
+            title = { Text("이 알람을 삭제할까요?", color = RespecColors.Text, fontWeight = FontWeight.Bold) },
+            text = { Text("삭제한 알람은 되돌릴 수 없어요.", color = RespecColors.TextSub) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    deleting = true
+                    scope.launch {
+                        val error = AlarmRepository.delete(context, existing.id)
+                        deleting = false
+                        if (error == null) onBack() else Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                    }
+                }) { Text("삭제", color = RespecColors.Danger) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("취소", color = RespecColors.TextSub) }
+            }
+        )
+    }
+
+    if (confirmLeave) {
+        AlertDialog(
+            onDismissRequest = { confirmLeave = false },
+            containerColor = RespecColors.Card,
+            title = { Text("저장하지 않고 나갈까요?", color = RespecColors.Text, fontWeight = FontWeight.Bold) },
+            text = { Text("바꾼 내용은 저장되지 않아요.", color = RespecColors.TextSub) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmLeave = false
+                    onBack()
+                }) { Text("나가기", color = RespecColors.Danger) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmLeave = false }) { Text("계속 수정", color = RespecColors.TextSub) }
+            }
+        )
     }
 }
 
