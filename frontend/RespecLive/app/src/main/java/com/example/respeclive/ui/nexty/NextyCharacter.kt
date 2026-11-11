@@ -173,45 +173,125 @@ enum class NextyMotion(
             NextyStep(memoPose(4f), 500), NextyStep(memoPose(-4f), 500)
         )
     ),
+    // ---- 아침 스트레칭 (ai/tasks/stretch_sets.py). 모두 서서 하는 동작이고, 안내 문장의 순서·머무는 시간을 따라 움직임 ----
+    // 목 옆으로 기울이기: 손으로 당기지 않고 오른쪽으로 기울여 머문 뒤 왼쪽
     NECK(
-        "목 옆 늘리기", true, NextyFace.FOCUS, NextyProp.NONE,
-        neckPose().let { peak ->
-            listOf(
-                NextyStep(peak, 900), NextyStep(peak, 1800), NextyStep(NextyPose(), 800),
-                NextyStep(peak.mirrored(), 900), NextyStep(peak.mirrored(), 1800), NextyStep(NextyPose(), 800)
-            )
-        }
+        "목 옆으로 기울이기", false, NextyFace.FOCUS, NextyProp.NONE,
+        holdBothSides(neckTiltPose(), reachMs = 1000, holdMs = 5000)
     ),
+    // 목 돌리기와 턱 당기기: 턱을 당겼다 풀기 3번 → 고개를 오른쪽, 왼쪽으로 돌려 머묾
+    NECK_TURN(
+        "목 돌리기와 턱 당기기", false, NextyFace.FOCUS, NextyProp.NONE,
+        List(3) {
+            listOf(NextyStep(chinTuckPose(), 600), NextyStep(chinTuckPose(), 1400), NextyStep(relaxedPose(), 600))
+        }.flatten() + holdBothSides(relaxedPose().copy(tilt = 6f), reachMs = 900, holdMs = 3000)
+    ),
+    // 옆구리 늘리기: 한쪽으로 기울여 5초 머물기를 반복한 뒤 반대쪽
     RAINBOW(
-        "옆구리 무지개", true, NextyFace.FOCUS, NextyProp.NONE,
+        "옆구리 늘리기", false, NextyFace.FOCUS, NextyProp.NONE,
         rainbowPose().let { peak ->
-            listOf(
-                NextyStep(peak, 1000), NextyStep(peak, 1800), NextyStep(NextyPose(), 900),
-                NextyStep(peak.mirrored(), 1000), NextyStep(peak.mirrored(), 1800), NextyStep(NextyPose(), 900)
-            )
+            val side = { p: NextyPose -> listOf(NextyStep(p, 1000), NextyStep(p, 3000), NextyStep(relaxedPose(), 900)) }
+            side(peak) + side(peak) + side(peak.mirrored()) + side(peak.mirrored())
         }
     ),
+    // 옆구리 한쪽씩 늘리기: 한쪽으로 기울여 길게 머문 뒤 팔을 바꿈
+    RAINBOW_HOLD(
+        "옆구리 한쪽씩 늘리기", false, NextyFace.FOCUS, NextyProp.NONE,
+        holdBothSides(rainbowPose(), reachMs = 1000, holdMs = 6000)
+    ),
+    // 어깨뼈 모으기: 팔꿈치를 굽혀 어깨뼈를 모아 3초 멈추고 풂
     CHEST_W(
-        "가슴 펴기 W", true, NextyFace.HAPPY, NextyProp.NONE,
+        "어깨뼈 모으기", false, NextyFace.HAPPY, NextyProp.NONE,
         listOf(
             NextyStep(chestPose(), 800),
             NextyStep(chestPose().copy(leftShoulder = 88f, rightShoulder = 88f, stretch = 1.05f), 700),
-            NextyStep(chestPose().copy(leftShoulder = 88f, rightShoulder = 88f, stretch = 1.05f), 1200),
-            NextyStep(chestPose(), 700)
+            NextyStep(chestPose().copy(leftShoulder = 88f, rightShoulder = 88f, stretch = 1.05f), 2300),
+            NextyStep(chestPose(), 800)
         )
     ),
+    // 허리 골반 기울이기: 허리에 손을 얹고 배에 힘을 주며 천천히 눌렀다 풂
     WAIST(
-        "서서 허리 펴기", false, NextyFace.HAPPY, NextyProp.NONE,
+        "허리 골반 기울이기", false, NextyFace.FOCUS, NextyProp.NONE,
         waistPose().let { hands ->
             listOf(
-                NextyStep(hands, 800),
-                NextyStep(hands.copy(stretch = 1.07f), 900),
-                NextyStep(hands.copy(stretch = 1.07f), 1600),
-                NextyStep(hands, 800)
+                NextyStep(hands.copy(stretch = 0.96f), 1500),
+                NextyStep(hands.copy(stretch = 0.96f), 800),
+                NextyStep(hands, 1500)
             )
         }
+    ),
+    // 허리 비틀기: 두 팔을 가슴 앞에 모으고 상체를 좌우로 천천히
+    TWIST(
+        "허리 비틀기", false, NextyFace.FOCUS, NextyProp.NONE,
+        foldedArmsPose().let { arms ->
+            listOf(
+                NextyStep(arms.copy(tilt = 6f), 1200), NextyStep(arms.copy(tilt = 6f), 500), NextyStep(arms, 900),
+                NextyStep(arms.copy(tilt = -6f), 1200), NextyStep(arms.copy(tilt = -6f), 500), NextyStep(arms, 900)
+            )
+        }
+    ),
+    // 팔 흔들며 제자리 걷기: 팔을 번갈아 흔들며 몸이 살짝 오르내림
+    MARCH(
+        "팔 흔들며 제자리 걷기", false, NextyFace.HAPPY, NextyProp.NONE,
+        marchPose().let { step -> listOf(NextyStep(step, 500), NextyStep(step.mirrored().copy(stretch = 1f), 500)) }
+    ),
+    // 어깨 돌리기: 어깨를 귀 쪽으로 올렸다가 뒤로 돌려 내림
+    SHOULDER_ROLL(
+        "어깨 돌리기", false, NextyFace.FOCUS, NextyProp.NONE,
+        listOf(
+            NextyStep(relaxedPose().copy(stretch = 1.06f, leftShoulder = 20f, rightShoulder = 20f), 500),
+            NextyStep(relaxedPose().copy(stretch = 1.03f, leftShoulder = 30f, rightShoulder = 30f), 400),
+            NextyStep(relaxedPose().copy(stretch = 0.97f), 500)
+        )
+    ),
+    // 어깨 으쓱 내리기: 귀까지 올려 3초 멈추고 툭 내림
+    SHRUG(
+        "어깨 으쓱 내리기", false, NextyFace.FOCUS, NextyProp.NONE,
+        listOf(
+            NextyStep(relaxedPose().copy(stretch = 1.08f, leftShoulder = 16f, rightShoulder = 16f), 600),
+            NextyStep(relaxedPose().copy(stretch = 1.08f, leftShoulder = 16f, rightShoulder = 16f), 2400),
+            NextyStep(relaxedPose().copy(stretch = 0.97f), 250),
+            NextyStep(relaxedPose(), 900)
+        )
+    ),
+    // 어깨 교차로 당기기: 한 팔을 가슴 앞으로 뻗고 반대 손으로 당겨 머문 뒤 팔을 바꿈
+    CROSS_PULL(
+        "어깨 교차로 당기기", false, NextyFace.FOCUS, NextyProp.NONE,
+        holdBothSides(crossPullPose(), reachMs = 900, holdMs = 5000)
+    ),
+    // 뒤로 깍지 가슴 열기: 팔을 등 뒤로 내려 모으고 가슴을 활짝 폄
+    BACK_CLASP(
+        "뒤로 깍지 가슴 열기", false, NextyFace.HAPPY, NextyProp.NONE,
+        listOf(
+            NextyStep(backClaspPose(), 900),
+            NextyStep(backClaspPose(), 5000),
+            NextyStep(relaxedPose(), 900),
+            NextyStep(relaxedPose(), 1200)
+        )
+    ),
+    // 가슴 벽 짚고 늘리기: 한 손을 어깨 높이로 옆에 짚고 몸을 반대쪽으로 살짝 돌려 머묾
+    WALL_CHEST(
+        "가슴 벽 짚고 늘리기", false, NextyFace.FOCUS, NextyProp.NONE,
+        holdBothSides(wallChestPose(), reachMs = 1000, holdMs = 5000)
+    ),
+    // 양팔 만세 기지개: 두 팔을 머리 위로 쭉 올려 길게 늘린 뒤 내려 쉼
+    OVERHEAD(
+        "양팔 만세 기지개", false, NextyFace.HAPPY, NextyProp.STRETCH_LINES,
+        listOf(
+            NextyStep(armsUpPose(), 1000),
+            NextyStep(armsUpPose().copy(stretch = 1.07f), 800),
+            NextyStep(armsUpPose().copy(stretch = 1.07f), 4500),
+            NextyStep(relaxedPose(), 1000),
+            NextyStep(relaxedPose(), 1200)
+        )
     )
 }
+
+/** 한쪽 자세로 가서 머물고 돌아온 뒤 반대쪽도 같은 방법으로 (좌우 번갈아 하는 스트레칭) */
+private fun holdBothSides(peak: NextyPose, reachMs: Int, holdMs: Int) = listOf(
+    NextyStep(peak, reachMs), NextyStep(peak, holdMs), NextyStep(relaxedPose(), 900),
+    NextyStep(peak.mirrored(), reachMs), NextyStep(peak.mirrored(), holdMs), NextyStep(relaxedPose(), 900)
+)
 
 // 두 팔을 머리 양옆으로 들어 반기기
 private fun welcomePose(shoulder: Float) = NextyPose(
@@ -242,8 +322,41 @@ private fun memoPose(tilt: Float) = NextyPose(
     tilt = tilt, leftShoulder = 28f, leftElbow = -118f, rightShoulder = 28f, rightElbow = -118f, leftReach = 2.7f, rightReach = 2.7f
 )
 
-// 한 손을 머리 위에 얹고 고개를 옆으로
-private fun neckPose() = NextyPose(tilt = 14f, rightShoulder = 165f, rightElbow = 62f, rightReach = 2.4f)
+// 팔에 힘을 빼고 몸 옆에 내림 (스트레칭 사이의 기본 자세)
+private fun relaxedPose() = NextyPose(leftShoulder = 10f, leftElbow = 0f, rightShoulder = 10f, rightElbow = 0f, leftReach = 1.3f, rightReach = 1.3f)
+
+// 팔은 내린 채 고개(몸)를 오른쪽으로 기울임 (손으로 당기지 않음)
+private fun neckTiltPose() = relaxedPose().copy(tilt = 13f)
+
+// 턱 당기기: 살짝 움츠림
+private fun chinTuckPose() = relaxedPose().copy(stretch = 0.95f)
+
+// 두 팔을 가슴 앞에 모음
+private fun foldedArmsPose() = NextyPose(
+    leftShoulder = 40f, leftElbow = -125f, rightShoulder = 40f, rightElbow = -125f, leftReach = 2.6f, rightReach = 2.6f
+)
+
+// 제자리 걷기 한 걸음: 왼팔은 앞(바깥), 오른팔은 뒤(몸 쪽)로 흔들고 몸이 살짝 내려감
+private fun marchPose() = NextyPose(
+    tilt = 2f, stretch = 0.97f, leftShoulder = 42f, leftElbow = -25f, rightShoulder = 6f, rightElbow = 0f,
+    leftReach = 1.8f, rightReach = 1.4f
+)
+
+// 오른팔을 가슴 앞으로 가로질러 뻗고 왼손으로 팔꿈치 쪽을 당김
+private fun crossPullPose() = NextyPose(
+    rightShoulder = -68f, rightElbow = -4f, rightReach = 2.4f,      // 입을 가리지 않게 가슴 높이로 비스듬히
+    leftShoulder = 35f, leftElbow = -115f, leftReach = 2.4f
+)
+
+// 등 뒤로 팔을 내려 모으고 가슴을 폄 (몸 뒤로 손이 가려짐)
+private fun backClaspPose() = NextyPose(
+    stretch = 1.05f, leftShoulder = 4f, leftElbow = 0f, rightShoulder = 4f, rightElbow = 0f, leftReach = 1.6f, rightReach = 1.6f
+)
+
+// 오른손을 어깨 높이로 옆에 짚고 몸을 왼쪽으로 살짝 돌림
+private fun wallChestPose() = NextyPose(
+    tilt = -5f, rightShoulder = 92f, rightElbow = 0f, rightReach = 2.6f, leftShoulder = 10f, leftElbow = 0f, leftReach = 1.3f
+)
 
 // 한 팔을 머리 위로 크게 넘기고 반대쪽으로 기울임
 private fun rainbowPose() = NextyPose(

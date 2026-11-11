@@ -844,18 +844,33 @@ private fun TimerRing(
     }
 }
 
-/** 스트레칭 단계 이름에 맞는 넥스티 시범 동작. 맞는 것이 없으면 단계 순서대로 돌아가며 보여 줌 */
+/**
+ * 스트레칭 단계 이름에 맞는 넥스티 시범 동작 (단계 이름·안내 문장은 ai/tasks/stretch_sets.py).
+ * 이름에 여러 낱말이 겹치므로(예: "팔 흔들며 제자리 걷기"의 '팔') 더 구체적인 이름부터 확인함.
+ * 맞는 것이 없으면 단계 순서대로 돌아가며 보여 줌
+ */
 private fun stretchMotionFor(name: String, order: Int): NextyMotion = when {
-    "옆구리" in name -> NextyMotion.RAINBOW
-    "허리" in name -> NextyMotion.WAIST
-    "가슴" in name || "어깨" in name -> NextyMotion.CHEST_W
-    "기지개" in name || "팔" in name || "만세" in name -> NextyMotion.STRETCH
+    "걷기" in name -> NextyMotion.MARCH
+    "목" in name && ("돌리" in name || "턱" in name) -> NextyMotion.NECK_TURN
     "목" in name -> NextyMotion.NECK
+    "으쓱" in name -> NextyMotion.SHRUG
+    "교차" in name -> NextyMotion.CROSS_PULL
+    "어깨뼈" in name -> NextyMotion.CHEST_W
+    "어깨" in name && "돌리" in name -> NextyMotion.SHOULDER_ROLL
+    "깍지" in name && "가슴" in name -> NextyMotion.BACK_CLASP
+    "벽" in name && "가슴" in name -> NextyMotion.WALL_CHEST
+    "가슴" in name -> NextyMotion.CHEST_W
+    "옆구리" in name && "한쪽" in name -> NextyMotion.RAINBOW_HOLD
+    "옆구리" in name -> NextyMotion.RAINBOW
+    "비틀" in name -> NextyMotion.TWIST
+    "허리" in name || "골반" in name -> NextyMotion.WAIST
+    "기지개" in name || "만세" in name || "팔" in name -> NextyMotion.OVERHEAD
+    "어깨" in name -> NextyMotion.SHOULDER_ROLL
     else -> STRETCH_CYCLE[(order - 1).mod(STRETCH_CYCLE.size)]
 }
 
 private val STRETCH_CYCLE = listOf(
-    NextyMotion.STRETCH, NextyMotion.RAINBOW, NextyMotion.CHEST_W, NextyMotion.NECK, NextyMotion.WAIST
+    NextyMotion.OVERHEAD, NextyMotion.RAINBOW, NextyMotion.CHEST_W, NextyMotion.NECK, NextyMotion.WAIST
 )
 
 /** 포춘 문장 비교용: 공백·문장부호를 뺀 글자 */
