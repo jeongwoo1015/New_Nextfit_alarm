@@ -160,7 +160,7 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
 
         Spacer(Modifier.height(20.dp))
 
-        // 요일
+        // 요일: 고른 요일은 포인트 색으로 채우고, 안 고른 요일은 테두리만 (두 테마 모두 한눈에 구분되게)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             DAY_NAMES.forEachIndexed { index, name ->
                 val on = index in days
@@ -169,7 +169,8 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
                         .weight(1f)
                         .aspectRatio(1f)
                         .clip(CircleShape)
-                        .background(if (on) RespecColors.PurpleDark else RespecColors.Disabled)
+                        .background(if (on) RespecColors.Lime else RespecColors.Disabled)
+                        .border(1.dp, if (on) RespecColors.Lime else RespecColors.CardBorder, CircleShape)
                         .clickable {
                             if (on && days.size == 1) {
                                 Toast.makeText(context, "요일을 하나 이상 선택해 주세요", Toast.LENGTH_SHORT).show()
@@ -181,9 +182,9 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
                 ) {
                     Text(
                         name,
-                        color = if (on) RespecColors.Text else RespecColors.TextSub,
+                        color = if (on) RespecColors.OnAccent else RespecColors.TextSub,
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = if (on) FontWeight.ExtraBold else FontWeight.Medium
                     )
                 }
             }
