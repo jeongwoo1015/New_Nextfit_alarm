@@ -176,9 +176,14 @@ def test_content_unknown_response_type_gets_default():
 
 @pytest.mark.parametrize("ctype", CONTENT_OPTIONS)
 def test_every_fallback_is_valid(ctype):
+    # 세부 없는 퀴즈는 날짜마다 세부(인물·상식·끝말잇기)가 달라지므로 오늘 날짜에 기대지 않고 연속 사흘로 확인한다(끝말잇기는 1단계)
+    from datetime import date, timedelta
+    from ai.tasks.content_steps import resolve_option
     for option in (*CONTENT_OPTIONS[ctype], None):
-        steps = fallback_steps(ctype, option)
-        assert len(steps) >= (1 if option == "WORDCHAIN" else 2) and sum(s.planned_sec for s in steps) == CONTENT_TOTAL_SEC and all(s.script for s in steps)
+        for day in (date(2026, 11, 9) + timedelta(k) for k in range(3)):
+            steps = fallback_steps(ctype, option, day)
+            resolved = resolve_option(ctype, option, day)
+            assert len(steps) >= (1 if resolved == "WORDCHAIN" else 2) and sum(s.planned_sec for s in steps) == CONTENT_TOTAL_SEC and all(s.script for s in steps), (ctype, option, day)
 
 
 def test_validate_steps_requires_script_and_name():
