@@ -175,13 +175,35 @@ private fun AlarmCard(
                     )
                 )
             }
-            Text(
-                alarm.timeText(),
-                color = RespecColors.Text,
-                fontSize = 38.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.alpha(dim)
-            )
+            // 밤 대화로 하루만 바꾼 시각이 다음 차례면 그 시각을 보여 줌. 그날 울리고 나면 원래 시각으로 돌아옴
+            val override = WakeOverrides.upcoming(alarm)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    override?.let { "%02d:%02d".format(it.hour, it.minute) } ?: alarm.timeText(),
+                    color = RespecColors.Text,
+                    fontSize = 38.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.alpha(dim)
+                )
+                if (override != null) {
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        val today = WakeOverrides.dateKey(java.util.Date())
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(RespecColors.PurpleDark)
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                if (override.date == today) "오늘만" else "내일만",
+                                color = RespecColors.AccentText, fontSize = 12.sp, fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text("원래 ${alarm.timeText()}", color = RespecColors.TextSub, fontSize = 12.sp)
+                    }
+                }
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.example.respeclive.data
 
 import android.content.Context
+import androidx.compose.runtime.mutableStateMapOf
 import com.example.respeclive.alarm.AlarmScheduler
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -18,7 +19,8 @@ object WakeOverrides {
 
     data class Override(val date: String, val hour: Int, val minute: Int)   // date "YYYY-MM-DD"
 
-    private val byServerAlarm = mutableMapOf<String, Override>()
+    // 화면(홈 알람 카드)이 바뀌면 바로 다시 그리도록 Compose 상태로 둠
+    private val byServerAlarm = mutableStateMapOf<String, Override>()
     private var loaded = false
 
     @Synchronized
@@ -41,6 +43,16 @@ object WakeOverrides {
     fun forAlarm(alarm: Alarm): Override? = alarm.serverId?.let { byServerAlarm[it] }
 
     /**
+     * 알람 카드에 보여 줄 하루 변경: 켜진 알람의 다음 울릴 날이 바로 그 변경 날이면 그 변경.
+     * 그날 알람이 울려 다음 차례가 다른 날로 넘어가면 null이 되어 카드는 원래 시각으로 돌아옴
+     */
+    fun upcoming(alarm: Alarm): Override? {
+        val ov = forAlarm(alarm)?.takeIf { alarm.enabled } ?: return null
+        val next = AlarmScheduler.nextTriggerMillis(alarm) ?: return null
+        return ov.takeIf { dateKey(Date(next)) == it.date }
+    }
+
+    /**
      * 추출이 끝난 밤 기록(NightRecordOut)을 반영. 그날(apply_date)에 걸려 있던 변경을 지우고,
      * override_wake_time이 있으면 그 알람만 새로 걸고 알람을 다시 예약함. 지난 날짜·추출 전이면 무시
      */
@@ -53,7 +65,7 @@ object WakeOverrides {
         val hour = time?.getOrNull(0)?.toIntOrNull()
         val minute = time?.getOrNull(1)?.toIntOrNull()
         synchronized(this) {
-            byServerAlarm.entries.removeAll { it.value.date == applyDate }
+            byServerAlarm.filterValues { it.date == applyDate }.keys.forEach { byServerAlarm.remove(it) }
             if (alarmId != null && hour != null && minute != null) byServerAlarm[alarmId] = Override(applyDate, hour, minute)
             save(context)
         }
