@@ -13,12 +13,18 @@ fun themeLabel(code: String?): String? = THEMES.firstOrNull { it.first == code }
 /** 알람을 만들 때 고를 수 있는 아침 콘텐츠 (루틴·명상은 고르지 않기로 함) */
 val MORNING_CONTENTS = listOf("EXERCISE" to "운동", "LANGUAGE" to "외국어", "QUIZ" to "퀴즈")
 
-/** 콘텐츠 세부 (서버 CONTENT_OPTIONS, backend/domain/codes.py. 팀 확정 전 예시 값) */
+/**
+ * 콘텐츠 세부 (서버 CONTENT_OPTIONS, backend/domain/codes.py 11/10 기준).
+ * 퀴즈·게임은 인물·상식·끝말잇기 3종이 기본(세부를 안 고르면 AI가 날짜별로 번갈아 정함), 과학·역사·넌센스는 예전 값
+ */
 val CONTENT_OPTIONS = mapOf(
     "MEDITATION" to listOf("BREATH" to "호흡", "BODY_SCAN" to "바디스캔"),
     "EXERCISE" to listOf("STRETCH" to "스트레칭", "MASSAGE" to "마사지"),
     "LANGUAGE" to listOf("ENGLISH" to "영어", "JAPANESE" to "일본어", "CHINESE" to "중국어"),
-    "QUIZ" to listOf("GENERAL" to "상식", "SCIENCE" to "과학", "HISTORY" to "역사", "NONSENSE" to "넌센스"),
+    "QUIZ" to listOf(
+        "PERSON" to "인물", "GENERAL" to "상식", "WORDCHAIN" to "끝말잇기",
+        "SCIENCE" to "과학", "HISTORY" to "역사", "NONSENSE" to "넌센스"
+    ),
 )
 
 fun contentOptionLabel(type: String?, option: String?): String? =
