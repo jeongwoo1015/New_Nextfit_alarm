@@ -229,9 +229,14 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
                     }
                 }
             }
+            wakeResultText(session)?.let {
+                Spacer(Modifier.height(10.dp))
+                Text(it, color = RespecColors.TextSub, fontSize = 13.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+            }
             if (session.optBoolean("coaching_skipped")) {
                 Spacer(Modifier.height(10.dp))
-                Text("이날은 루틴을 쉬어 간 날이에요", color = RespecColors.TextSub, fontSize = 13.sp)
+                Text("이날은 루틴을 쉬어 간 날이에요", color = RespecColors.TextSub, fontSize = 13.sp,
+                    modifier = Modifier.align(Alignment.CenterHorizontally))
             }
             if (steps.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
@@ -329,6 +334,19 @@ private fun StepRow(step: JSONObject) {
         }
         Chip(label, fg, bg)
     }
+}
+
+/**
+ * 아침 세션(SessionOut)의 기상 결과 한 줄: "기상 성공 · 다시 깨우기 1번 · 스누즈 2번".
+ * 기상 성공(wake_success)은 확인 멘트를 마쳤을 때 정해짐. 횟수는 0이면 빼고, 알람이 울린 적 없는 세션은 null
+ */
+internal fun wakeResultText(session: JSONObject): String? {
+    if (session.isNull("alarm_rang_at") && session.isNull("first_response_at")) return null
+    return listOfNotNull(
+        if (session.optBoolean("wake_success")) "기상 성공" else "기상 미확인",
+        session.optInt("rewake_count").takeIf { it > 0 }?.let { "다시 깨우기 ${it}번" },
+        session.optInt("snooze_count").takeIf { it > 0 }?.let { "스누즈 ${it}번" }
+    ).joinToString(" · ")
 }
 
 /** 서버 시각(ISO, 시간대 포함) → 기기 시간대의 "HH:MM" */

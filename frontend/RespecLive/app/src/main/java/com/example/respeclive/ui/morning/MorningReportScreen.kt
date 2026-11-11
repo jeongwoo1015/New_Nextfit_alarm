@@ -31,6 +31,7 @@ import com.example.respeclive.data.RespecApi
 import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.diary.clockOf
 import com.example.respeclive.ui.diary.text
+import com.example.respeclive.ui.diary.wakeResultText
 import com.example.respeclive.ui.theme.RespecColors
 import org.json.JSONObject
 import java.util.Calendar
@@ -77,6 +78,11 @@ fun MorningReportScreen(sessionId: String, talkSec: Int, onOpenReport: () -> Uni
                         StatTile("기상 시간", clockOf(session.text("first_response_at")) ?: "-", RespecColors.Text, Modifier.weight(1f))
                         StatTile("대화 시간", talkLabel(talkSec), RespecColors.Text, Modifier.weight(1f))
                         StatTile("연속 달성", streak?.let { "${it}일" } ?: "-", RespecColors.AccentText, Modifier.weight(1f))
+                    }
+                    // 기상 성공 · 다시 깨우기 · 스누즈 횟수
+                    wakeResultText(session)?.let {
+                        Spacer(Modifier.height(10.dp))
+                        Text(it, color = RespecColors.TextSub, fontSize = 13.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
                     }
                     Spacer(Modifier.height(14.dp))
                     MorningTimeline(session, loaded)
