@@ -78,9 +78,9 @@ import java.util.TimeZone
 
 // 대화(Live)가 끝난 뒤 앱이 읽는 고정 안내 문장
 private const val SAVE_QUESTION = "내일 아침의 나에게 들려줄 한 마디를 남겨 볼까요?"
-private const val CLOSING = "오늘 하루도 정말 수고했어요. 이제 편안하게 숨을 크게 들이쉬어 볼까요? 푹 쉬세요."
-private const val CLOSING_SAVED =
-    "내일 아침 모닝콜에서 오늘 남긴 한 마디를 들려드릴게요. 이제 편안하게 숨을 크게 들이쉬어 볼까요? 푹 쉬세요."
+// 마무리 인사: 한 마디를 저장했으면 아침에 들려준다는 말을 앞에 붙임
+private const val CLOSING = "오늘 하루도 정말 수고했어요."
+private const val CLOSING_SAVED = "내일 아침 모닝콜에서 오늘 남긴 한 마디를 들려 드릴게요. 오늘 하루도 정말 수고했어요."
 
 // 말 감지 설정 (한 마디 녹음용)
 private const val MIN_THRESHOLD = 2500

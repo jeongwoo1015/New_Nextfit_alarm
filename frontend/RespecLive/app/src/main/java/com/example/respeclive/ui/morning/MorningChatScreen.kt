@@ -45,7 +45,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.example.respeclive.audio.AiSpeaker
 import com.example.respeclive.audio.AlarmSoundPlayer
 import com.example.respeclive.audio.CallAudio
 import com.example.respeclive.audio.MessagePlayer
@@ -105,7 +104,8 @@ private const val ALREADY_DONE_NOTE = "\n(앱 안내: 사용자는 오늘 루틴
         "사용자가 끝내겠다고 하면 작별 인사 뒤 end_session을 호출해 주세요.)"
 
 /** 어젯밤 메시지를 재생하기 직전의 안내 (AI 목소리) */
-private const val MESSAGE_INTRO = "그전에 어젯밤 남긴 한 마디를 들려 드릴게요."
+/** 마무리 안내 자막을 보여 주는 시간 (앱은 읽지 않음) */
+private const val NOTE_SHOW_MS = 2_500L
 
 /** AI 질문 뒤 이 시간 동안 대답이 없으면 재기상 음악 (브리핑의 기상 확인 전까지만) */
 private const val REWAKE_SILENCE_MS = 8_000L
@@ -126,7 +126,6 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
 
     val client = remember { LiveClient(context) }
     val messagePlayer = remember { MessagePlayer() }
-    val speaker = remember { AiSpeaker(context) }     // Live 연결이 끊겼을 때만 마무리 안내를 대신 읽음
     val rewakePlayer = remember { AlarmSoundPlayer(context) }
     val messageDone = remember { arrayOfNulls<CompletableDeferred<Unit>>(1) }
     val toolEvents = remember { Channel<String>(Channel.UNLIMITED) }   // start_routine / end_session
@@ -150,7 +149,6 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     var rewaking by remember { mutableStateOf(false) }
     var messageText by remember { mutableStateOf<String?>(null) }   // 어젯밤 한 마디를 받아쓴 글자
     var wrapText by remember { mutableStateOf("") }        // 마무리 안내 문장
-    var liveSaying by remember { mutableStateOf(false) }   // 마무리 안내를 AI 목소리로 읽는 중 (자막은 AI가 실제로 한 말)
     var coachingStarted by remember { mutableStateOf(false) }   // 이번 통화의 단계를 받아 코칭 세션을 열었음
     var coachSpoke by remember { mutableStateOf(false) }        // 코칭 세션에서 AI가 첫 안내를 시작함
     // 퀴즈 O / X 반응. AI가 판정 함수에 정답 여부(answer_correct)를 보내면 그 값을 쓰고(quizByTool),
@@ -195,7 +193,6 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             CallAudio.release(context)
             CallAudio.volumeKeys(context, AudioManager.USE_DEFAULT_STREAM_TYPE)
             client.release()
-            speaker.shutdown()
             messagePlayer.release()
             rewakePlayer.stop()
             RoutineRepository.sessionId?.let { sid ->
@@ -350,15 +347,11 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             messageDone[0] = null
         }
 
-        // 마무리 안내: 연결된 AI 목소리로 그대로 읽게 하고, 연결이 없으면 기기 TTS
-        suspend fun say(text: String) {
+        // 마무리 안내: 앱이 소리 내어 읽지 않고 자막으로만 잠깐 보여 줌 (말은 AI만 함)
+        suspend fun showNote(text: String) {
             stage = Stage.Wrapup
             wrapText = text
-            liveSaying = true
-            val byLive = client.speakExact(text)
-            liveSaying = false
-            if (byLive) client.transcript.value.getOrNull(client.exactLineIndex)?.text?.let { wrapText = it }
-            else speaker.speakAndWait(text)
+            delay(NOTE_SHOW_MS)
         }
 
         // 1) 오늘 세션 (수신 화면에서 만들었으면 그대로, 아니면 지금 만듦)
@@ -400,13 +393,11 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             client.awaitSpeechEnd()      // AI의 마지막 말을 끝까지 들려줌. 연결은 마무리 안내까지 유지
             client.pauseMic()
 
-            // 브리핑이 끝나면(루틴을 시작하든 통화를 끝내든) 안내 후 어젯밤 한 마디를 먼저 들려줌
+            // 브리핑이 끝나면(루틴을 시작하든 통화를 끝내든) 어젯밤 한 마디를 먼저 들려줌
+            // (브리핑 마무리에서 AI가 "먼저 어젯밤 남긴 한마디를 듣고…"라고 이미 안내함)
             if (!messageHeard) {
                 messageHeard = true
-                if (message != null) {
-                    say(MESSAGE_INTRO)
-                    playLastNightMessage(message)
-                }
+                if (message != null) playLastNightMessage(message)
             }
 
             // end_session, 또는 루틴의 모든 단계를 판정함(routine_over): 바로 마무리
@@ -420,7 +411,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             if (firstAuth == null) {
                 first.steps?.let { RoutineRepository.applySteps(it) }
                 if (first.code != "ALL_STEPS_CHECKED") {      // 다 마친 날은 아래에서 완수 안내
-                    say(
+                    showNote(
                         if (first.code == "COACHING_SKIPPED") "오늘은 루틴을 쉬어 가는 날이에요. 좋은 하루 보내세요!"
                         else "루틴을 시작하지 못했어요. 루틴 탭에서 직접 체크해 주세요."
                     )
@@ -474,7 +465,6 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     }
     // AI가 말하는 줄: 지금 말하는 박스를 통째로 먼저 보여 줌
     val spokenLine = when {
-        stage == Stage.Wrapup && liveSaying -> lines.getOrNull(client.exactLineIndex)
         (stage == Stage.Briefing || stage == Stage.Coaching) && !preparing && live && lastLine?.role == LiveClient.Role.Assistant -> lastLine
         else -> null
     }
@@ -482,7 +472,6 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     val subtitle = when {
         spokenPage != null -> spokenPage.text
         stage == Stage.Message -> messageText?.let { "“$it”" } ?: notice
-        stage == Stage.Wrapup && liveSaying -> ""
         stage == Stage.Wrapup -> wrapText
         stage == Stage.Preparing || stage == Stage.Finished -> notice
         status == LiveClient.Status.Error -> liveMessage ?: "연결이 끊겼어요"
