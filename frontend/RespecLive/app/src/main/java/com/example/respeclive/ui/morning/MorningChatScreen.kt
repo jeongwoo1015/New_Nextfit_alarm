@@ -53,7 +53,9 @@ import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.data.ApiClient
 import com.example.respeclive.data.CalendarEvents
+import com.example.respeclive.data.CoachingToken
 import com.example.respeclive.data.DeviceLocation
+import com.example.respeclive.data.FortuneToken
 import com.example.respeclive.data.MusicStore
 import com.example.respeclive.data.NightMessageStore
 import com.example.respeclive.data.RespecApi
@@ -69,6 +71,7 @@ import com.example.respeclive.ui.nexty.NextyCharacter
 import com.example.respeclive.ui.nexty.NextyMotion
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -82,7 +85,7 @@ import java.util.Date
 import java.util.Locale
 
 private enum class MPhase { AiSpeaking, Playing, Listening }
-private enum class Stage { Preparing, Message, Briefing, Coaching, Wrapup, Finished }   // Wrapup: 마무리 안내
+private enum class Stage { Preparing, Message, Briefing, Fortune, Coaching, Wrapup, Finished }   // Wrapup: 마무리 안내
 private data class Banner(val title: String, val sub: String)
 
 // 말 대신 누를 수 있는 대답 (Live에 사용자 글자 입력으로 보냄). 루틴 단계: 건너뛰기 / 완료
@@ -103,9 +106,33 @@ private const val ALREADY_DONE_NOTE = "\n(앱 안내: 사용자는 오늘 루틴
         "시작할 준비가 됐는지 묻지 말고, start_routine도 호출하지 마세요. 브리핑 마지막에는 오늘 루틴을 이미 다 마쳤다고 짧게 칭찬하고, " +
         "사용자가 끝내겠다고 하면 작별 인사 뒤 end_session을 호출해 주세요.)"
 
-/** 어젯밤 메시지를 재생하기 직전의 안내 (AI 목소리) */
+/**
+ * 브리핑 마무리 질문을 '한마디·포춘부터 들어 볼까요?'로 바꿈. 브리핑 뒤에는 루틴이 아니라 한마디 → 포춘이 먼저 나오므로,
+ * 여기서 루틴 준비를 묻고 "시작할게요"라고 하면 바로 한마디·포춘으로 넘어가 어색함. 루틴·콘텐츠 안내는 코칭 세션의 첫 말이 맡음.
+ * what: "어젯밤 남긴 한마디와 오늘의 포춘" 또는 "오늘의 포춘"
+ */
+private fun listenFirstNote(what: String) = "\n(앱 안내: 브리핑 다음에는 ${what}을 먼저 듣고, 그 뒤에 루틴이나 콘텐츠를 시작합니다. " +
+        "그래서 브리핑 마지막 질문은 루틴이나 콘텐츠를 시작할 준비가 됐는지가 아니라, ${what}부터 들어 볼지 묻는 한 문장으로 " +
+        "말투 설정에 맞춰 해 주세요(예: \"그럼 먼저 ${what}부터 들어 볼까요?\"). 사용자가 좋다고 하면 \"같이 들어 봐요\"처럼 한마디로만 반응한 뒤 " +
+        "start_routine을 호출하고, '시작할게요'처럼 루틴을 바로 시작하는 말이나 루틴 안내는 하지 마세요.)"
+
+/**
+ * 한마디·포춘 뒤 코칭 세션의 첫 연결 시작 신호에 덧붙임: 들은 것에서 루틴·콘텐츠로 넘어가는 한 문장을 먼저 하게 함
+ * (없으면 포춘이 끝나자마자 1단계 안내가 나와 어색함). heard: "오늘의 포춘을" / "어젯밤 남긴 한마디를"
+ */
+private fun bridgeNote(heard: String) = "\n(앱 안내: 사용자는 방금 ${heard} 들었습니다. 첫 단계를 안내하기 전에 " +
+        "\"잘 들었죠? 그럼 이제 시작해 볼게요\"처럼 방금 들은 것에서 오늘의 루틴이나 콘텐츠로 넘어가는 짧은 한 문장을 말투 설정에 맞춰 먼저 해 주세요. " +
+        "들은 내용은 되풀이하지 말고, 이 첫 응답은 3문장까지 괜찮습니다.)"
+
 /** 마무리 안내 자막을 보여 주는 시간 (앱은 읽지 않음) */
 private const val NOTE_SHOW_MS = 2_500L
+
+/** 포춘을 읽는 AI 응답을 기다리는 최대 시간 (넘으면 다음 단계로) */
+private const val FORTUNE_MAX_MS = 40_000L
+/** 포춘을 다 읽은 뒤 카드를 더 보여 주는 시간 */
+private const val FORTUNE_HOLD_MS = 2_500L
+/** AI 말에서 포춘 문장의 앞 글자가 이만큼 나오면 쿠키를 엶 (공백·문장부호 빼고) */
+private const val FORTUNE_MATCH_CHARS = 6
 
 /** AI 질문 뒤 이 시간 동안 대답이 없으면 재기상 음악 (브리핑의 기상 확인 전까지만) */
 private const val REWAKE_SILENCE_MS = 8_000L
@@ -113,7 +140,8 @@ private const val REWAKE_LEVEL = 3
 
 /**
  * 아침 대화 (Gemini Live). 지시문·함수는 서버가 토큰에 고정한다 (ai/live, AI CONTRACTS 2절).
- * 세션 시작 → 브리핑 세션(시작 질문에 대답) → 안내 후 어젯밤 한 마디 → start_routine이면 코칭 세션(새 토큰) → 종료
+ * 세션 시작 → 브리핑 세션(시작 질문에 대답) → 안내 후 어젯밤 한 마디 → 오늘의 포춘(포춘 세션, AI가 문장을 읽음)
+ * → start_routine이면 코칭 세션(새 토큰) → 종료
  * 이미 다 마친 날 다시 열면 브리핑에서 루틴을 안내하지 않음
  * initialSession: 알람 수신 화면에서 이미 만든 세션 (없으면 여기서 만듦)
  * onFinish: 통화가 끝나면 세션 id(세션을 만들지 못했으면 null)와 통화 길이(초)를 넘김
@@ -155,6 +183,8 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     // 받은 적이 없으면 넥스티의 말로 추측함
     var reaction by remember { mutableStateOf<NextyMotion?>(null) }
     var quizByTool by remember { mutableStateOf(false) }
+    var fortune by remember { mutableStateOf<FortuneShow?>(null) }    // 오늘의 포춘 (포춘 단계에서만)
+    var fortuneOpen by remember { mutableStateOf(false) }             // 쿠키를 열어 카드를 보여 줌
 
     fun finish() {
         val sid = sessionId ?: initialSession?.optJSONObject("session")?.optString("session_id")?.takeIf { it.isNotBlank() }
@@ -324,7 +354,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
         }
 
         // 서버 음성을 먼저 시도하고, 안 되면 기기 파일로 재생
-        suspend fun playLastNightMessage(found: Pair<String?, java.io.File?>) {
+        suspend fun playLastNightMessage(found: Pair<String?, java.io.File?>): Boolean {
             val (url, file) = found
 
             stage = Stage.Message
@@ -345,6 +375,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             }
             messagePlayer.release()
             messageDone[0] = null
+            return ok
         }
 
         // 마무리 안내: 앱이 소리 내어 읽지 않고 자막으로만 잠깐 보여 줌 (말은 AI만 함)
@@ -352,6 +383,34 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             stage = Stage.Wrapup
             wrapText = text
             delay(NOTE_SHOW_MS)
+        }
+
+        // 오늘의 포춘: 포춘 토큰으로 짧은 세션을 열어 AI가 문장을 읽고, 첫 응답이 끝나면(turnComplete) 다음 단계로.
+        // 토큰을 못 받으면(503 AI_UNAVAILABLE 등) 건너뜀. 듣기만 하는 단계라 마이크는 열지 않음
+        // tokenJob: 어젯밤 한 마디를 듣는 동안 미리 요청해 둔 포춘 토큰. 포춘을 들려줬으면 true
+        suspend fun playFortune(tokenJob: Deferred<FortuneToken>): Boolean {
+            stage = Stage.Fortune
+            fortune = null
+            fortuneOpen = false
+            notice = "넥스티가 오늘의 포춘쿠키를 가져오는 중…"
+            val t = tokenJob.await()
+            val auth = t.auth ?: return false
+            // 재료 표시: AI가 만든 문장이면 어젯밤 한 마디(받아쓴 글이 있으면 그 글)를 밝힘
+            val heard = messageText?.trim()?.takeIf { it.isNotEmpty() }
+            val basedOn = when {
+                t.source != "ai" -> null
+                heard != null -> "어젯밤 한마디 · “$heard”"
+                else -> "어젯밤 이야기로 만든 포춘"
+            }
+            fortune = FortuneShow(t.text, t.style, basedOn)
+            client.stop()
+            client.start(listen = false) { auth }
+            val read = client.awaitFirstTurn(FORTUNE_MAX_MS)
+            fortuneOpen = true
+            if (read || t.text != null) delay(FORTUNE_HOLD_MS)
+            // 포춘 세션에서 온 함수 호출은 쓰지 않음 (다음 단계는 앞 세션의 start_routine / end_session대로)
+            while (toolEvents.tryReceive().isSuccess) Unit
+            return true
         }
 
         // 1) 오늘 세션 (수신 화면에서 만들었으면 그대로, 아니면 지금 만듦)
@@ -379,25 +438,38 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
         val placeJob = async { DeviceLocation.lastKnown(context) }   // 재연결 때마다 다시 찾지 않도록 한 번만
         stage = Stage.Briefing
         notice = "리스펙과 연결하는 중…"
+        val coachingSkipped = RoutineRepository.session?.coachingSkipped == true
         client.start {
             // 오늘 일정은 폰 캘린더에서 (권한은 밤 대화에서 받음. 없으면 빈 일정), 날씨용 위치는 마지막으로 알던 위치
             val auth = RespecApi.briefingToken(sid, CalendarEvents.today(context), placeJob.await())
                 ?: RespecApi.tokenError()
-            if (doneAtStart) LiveAuth(auth.token, auth.wsUrl, auth.model, auth.startSignal + ALREADY_DONE_NOTE) else auth
+            val note = when {
+                doneAtStart -> ALREADY_DONE_NOTE
+                coachingSkipped -> ""          // 코칭이 없는 날은 마무리 질문 자체가 없음
+                else -> listenFirstNote(if (messageJob.await() != null) "어젯밤 남긴 한마디와 오늘의 포춘" else "오늘의 포춘")
+            }
+            if (note.isEmpty()) auth else LiveAuth(auth.token, auth.wsUrl, auth.model, auth.startSignal + note)
         }
 
         // 3) 함수 호출에 따라 다음 세션으로 넘어가거나 종료
         val message = messageJob.await()
         var messageHeard = false
+        var heard: String? = null                              // 코칭 첫 말에서 이어받을 것 (bridgeNote)
+        var coachJob: Deferred<CoachingToken>? = null          // 포춘을 듣는 동안 미리 요청한 코칭 토큰
         for (event in toolEvents) {
             client.awaitSpeechEnd()      // AI의 마지막 말을 끝까지 들려줌. 연결은 마무리 안내까지 유지
             client.pauseMic()
 
-            // 브리핑이 끝나면(루틴을 시작하든 통화를 끝내든) 어젯밤 한 마디를 먼저 들려줌
-            // (브리핑 마무리에서 AI가 "먼저 어젯밤 남긴 한마디를 듣고…"라고 이미 안내함)
+            // 브리핑이 끝나면(루틴을 시작하든 통화를 끝내든) 어젯밤 한 마디 → 오늘의 포춘을 먼저 들려줌
+            // (브리핑 마무리에서 AI가 "먼저 한마디와 포춘부터 들어 볼까요?"라고 묻고 답을 들었음: listenFirstNote)
             if (!messageHeard) {
                 messageHeard = true
-                if (message != null) playLastNightMessage(message)
+                val fortuneJob = async { RespecApi.fortuneToken(sid) }
+                if (message != null && playLastNightMessage(message)) heard = "어젯밤 남긴 한마디를"
+                // 루틴으로 넘어갈 거면 포춘을 듣는 동안 코칭 토큰을 미리 받아 둠 (콘텐츠는 단계를 만드느라 오래 걸림).
+                // 토큰은 받은 뒤 2분 안에 연결해야 하는데 포춘 단계는 그보다 짧음
+                if (event == "start_routine") coachJob = async { RespecApi.coachingToken(sid) }
+                if (playFortune(fortuneJob)) heard = "오늘의 포춘을"
             }
 
             // end_session, 또는 루틴의 모든 단계를 판정함(routine_over): 바로 마무리
@@ -406,7 +478,8 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             // start_routine: 코칭 토큰을 받으면 지금 세션을 닫고 새 토큰으로 코칭(콘텐츠 → 기본 루틴 순) 세션 시작
             stage = Stage.Coaching
             notice = if (RoutineRepository.session?.isContent == true) "콘텐츠를 준비하는 중…" else "루틴을 준비하는 중…"
-            val first = RespecApi.coachingToken(sid)
+            val first = coachJob?.await() ?: RespecApi.coachingToken(sid)
+            coachJob = null
             val firstAuth = first.auth
             if (firstAuth == null) {
                 first.steps?.let { RoutineRepository.applySteps(it) }
@@ -422,8 +495,10 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             first.steps?.let { RoutineRepository.applySteps(it) }
             coachingStarted = true
 
-            // 첫 연결은 받아 둔 토큰, 재연결은 서버가 남은 단계만 넣은 새 토큰
-            var pending: LiveAuth? = firstAuth
+            // 첫 연결은 받아 둔 토큰(한마디·포춘에서 넘어가는 말을 덧붙임), 재연결은 서버가 남은 단계만 넣은 새 토큰
+            var pending: LiveAuth? = heard?.let { h ->
+                LiveAuth(firstAuth.token, firstAuth.wsUrl, firstAuth.model, firstAuth.startSignal + bridgeNote(h))
+            } ?: firstAuth
             client.start {
                 pending?.also { pending = null } ?: RespecApi.coachingToken(sid).let { r ->
                     r.steps?.let { steps -> withContext(Dispatchers.Main) { RoutineRepository.applySteps(steps) } }
@@ -440,6 +515,15 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
         finish()
     }
 
+    // AI가 포춘 문장을 읽기 시작하면 쿠키를 엶 (소개 한 문장 뒤)
+    LaunchedEffect(lines, stage, fortune) {
+        val text = fortune?.text ?: return@LaunchedEffect
+        if (stage != Stage.Fortune || fortuneOpen) return@LaunchedEffect
+        val head = fortuneKey(text).take(FORTUNE_MATCH_CHARS)
+        val said = lines.lastOrNull { it.role == LiveClient.Role.Assistant }?.text ?: return@LaunchedEffect
+        if (head.isNotEmpty() && head in fortuneKey(said)) fortuneOpen = true
+    }
+
     fun skipMessage() {
         if (stage == Stage.Message) messageDone[0]?.complete(Unit)
     }
@@ -451,7 +535,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     val preparing = stage == Stage.Coaching && !coachSpoke
     val phase = when {
         stage == Stage.Message -> MPhase.Playing
-        stage == Stage.Wrapup || preparing -> MPhase.AiSpeaking
+        stage == Stage.Wrapup || stage == Stage.Fortune || preparing -> MPhase.AiSpeaking
         live && !aiSpeaking -> MPhase.Listening
         else -> MPhase.AiSpeaking
     }
@@ -542,73 +626,85 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             MorningHeader(elapsed)
             Spacer(Modifier.height(8.dp))
 
-            // 세로가 짧은 폰에서는 자막·버튼과 겹치지 않도록 남은 공간에 맞춰 줄임 (아래 상태 문구 자리 30dp)
-            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                val ring = minOf(RING_SIZE, maxHeight - 30.dp, maxWidth).coerceAtLeast(0.dp)
-                val k = ring / RING_SIZE
-                val tint = when (phase) {
-                    MPhase.AiSpeaking -> RespecColors.AccentText
-                    MPhase.Playing -> RespecColors.Mint
-                    MPhase.Listening -> RespecColors.Purple
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(Modifier.size(ring), contentAlignment = Alignment.Center) {
-                        // 코칭 중에는 단계 타이머 링만, 그 전(브리핑·메시지)에는 파동과 테두리
-                        if (!showRoutine) OrbHalo(ring, tint)
-                        TimerRing(
-                            remaining = timerFraction,
-                            visible = showRoutine,
-                            stroke = 12.dp * k,
-                            modifier = Modifier.size(ring)
-                        ) {
-                            Column(
-                                Modifier
-                                    .size(ring * (if (showRoutine) 188 else 156) / 240)
-                                    .clip(CircleShape)
-                                    .background(RespecColors.Card)
-                                    .border(2.dp, if (showRoutine) Color.Transparent else tint.copy(alpha = 0.7f), CircleShape)
-                                    .clickable(enabled = phase == MPhase.Playing) { skipMessage() },
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
+            // 오늘의 포춘: 원·자막 자리를 포춘쿠키 화면으로
+            if (stage == Stage.Fortune) {
+                FortuneScene(
+                    fortune = fortune,
+                    opened = fortuneOpen,
+                    aiLine = lines.lastOrNull { it.role == LiveClient.Role.Assistant }?.text ?: notice,
+                    speaking = aiSpeaking,
+                    onOpen = { if (fortune != null) fortuneOpen = true },
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                )
+            } else {
+                // 세로가 짧은 폰에서는 자막·버튼과 겹치지 않도록 남은 공간에 맞춰 줄임 (아래 상태 문구 자리 30dp)
+                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    val ring = minOf(RING_SIZE, maxHeight - 30.dp, maxWidth).coerceAtLeast(0.dp)
+                    val k = ring / RING_SIZE
+                    val tint = when (phase) {
+                        MPhase.AiSpeaking -> RespecColors.AccentText
+                        MPhase.Playing -> RespecColors.Mint
+                        MPhase.Listening -> RespecColors.Purple
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(Modifier.size(ring), contentAlignment = Alignment.Center) {
+                            // 코칭 중에는 단계 타이머 링만, 그 전(브리핑·메시지)에는 파동과 테두리
+                            if (!showRoutine) OrbHalo(ring, tint)
+                            TimerRing(
+                                remaining = timerFraction,
+                                visible = showRoutine,
+                                stroke = 12.dp * k,
+                                modifier = Modifier.size(ring)
                             ) {
-                                // 햇살 꼭지 넥스티 (말할 때 입이 움직임). 코칭 중에는 스트레칭 시범·퀴즈 O/X를 몸으로
-                                if (showRoutine) {
-                                    NextyCharacter(
-                                        coachMotion,
-                                        Modifier.size(ring * 176 / 240),
-                                        speaking = phase == MPhase.AiSpeaking && shownReaction == null
-                                    )
-                                } else {
-                                    NextyCharacter(
-                                        NextyMotion.IDLE,
-                                        Modifier.size(ring * 134 / 240),
-                                        speaking = phase == MPhase.AiSpeaking
-                                    )
+                                Column(
+                                    Modifier
+                                        .size(ring * (if (showRoutine) 188 else 156) / 240)
+                                        .clip(CircleShape)
+                                        .background(RespecColors.Card)
+                                        .border(2.dp, if (showRoutine) Color.Transparent else tint.copy(alpha = 0.7f), CircleShape)
+                                        .clickable(enabled = phase == MPhase.Playing) { skipMessage() },
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    // 햇살 꼭지 넥스티 (말할 때 입이 움직임). 코칭 중에는 스트레칭 시범·퀴즈 O/X를 몸으로
+                                    if (showRoutine) {
+                                        NextyCharacter(
+                                            coachMotion,
+                                            Modifier.size(ring * 176 / 240),
+                                            speaking = phase == MPhase.AiSpeaking && shownReaction == null
+                                        )
+                                    } else {
+                                        NextyCharacter(
+                                            NextyMotion.IDLE,
+                                            Modifier.size(ring * 134 / 240),
+                                            speaking = phase == MPhase.AiSpeaking
+                                        )
+                                    }
                                 }
                             }
                         }
+                        Spacer(Modifier.height(8.dp))
+                        FitText(
+                            when {
+                                phase == MPhase.Playing -> "어젯밤의 내가 남긴 한 마디 · 탭하면 건너뛰기"
+                                preparing -> "곧 시작해요"
+                                phase == MPhase.Listening -> "듣고 있어요"
+                                stage == Stage.Coaching && currentTitle != null ->
+                                    "지금은 · $currentTitle" + (remainingMs?.let { " · ${(it + 999) / 1000}초" } ?: "")
+                                stage == Stage.Briefing -> "아침 브리핑"
+                                else -> "리스펙이 이야기하는 중"
+                            },
+                            color = if (showRoutine) RespecColors.TextSub else tint,
+                            fontSize = if (showRoutine) 13.sp else 14.sp,
+                            fontWeight = if (showRoutine) FontWeight.Normal else FontWeight.SemiBold,
+                            textAlign = TextAlign.Center
+                        )
                     }
-                    Spacer(Modifier.height(8.dp))
-                    FitText(
-                        when {
-                            phase == MPhase.Playing -> "어젯밤의 내가 남긴 한 마디 · 탭하면 건너뛰기"
-                            preparing -> "곧 시작해요"
-                            phase == MPhase.Listening -> "듣고 있어요"
-                            stage == Stage.Coaching && currentTitle != null ->
-                                "지금은 · $currentTitle" + (remainingMs?.let { " · ${(it + 999) / 1000}초" } ?: "")
-                            stage == Stage.Briefing -> "아침 브리핑"
-                            else -> "리스펙이 이야기하는 중"
-                        },
-                        color = if (showRoutine) RespecColors.TextSub else tint,
-                        fontSize = if (showRoutine) 13.sp else 14.sp,
-                        fontWeight = if (showRoutine) FontWeight.Normal else FontWeight.SemiBold,
-                        textAlign = TextAlign.Center
-                    )
                 }
-            }
 
-            // 크기가 고정된 자막 박스 (AI 음성 받아쓰기)
-            SubtitleBox(subtitle, fromUser = subtitleFromUser, pageKey = spokenPage?.key)
+                // 크기가 고정된 자막 박스 (AI 음성 받아쓰기)
+                SubtitleBox(subtitle, fromUser = subtitleFromUser, pageKey = spokenPage?.key)
+            }
             Spacer(Modifier.height(12.dp))
 
             // 대답 버튼: 대답을 기다릴 때만 (말 대신 누르기). 시작 전(preparing은 Listening이 아님)과 루틴을 다 마쳤으면 숨김
@@ -761,6 +857,9 @@ private fun stretchMotionFor(name: String, order: Int): NextyMotion = when {
 private val STRETCH_CYCLE = listOf(
     NextyMotion.STRETCH, NextyMotion.RAINBOW, NextyMotion.CHEST_W, NextyMotion.NECK, NextyMotion.WAIST
 )
+
+/** 포춘 문장 비교용: 공백·문장부호를 뺀 글자 */
+private fun fortuneKey(text: String): String = text.filter { it.isLetterOrDigit() }
 
 private val QUIZ_WRONG = Regex("아쉬|틀렸|틀리셨|아니에요|아닙니다")
 private val QUIZ_RIGHT = Regex("정답이|정답입|맞았|맞아요|맞습니다|맞혔|맞히셨|맞추셨|맞췄")

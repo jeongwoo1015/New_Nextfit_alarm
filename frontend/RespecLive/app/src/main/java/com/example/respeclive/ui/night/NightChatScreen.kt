@@ -409,6 +409,7 @@ fun NightChatScreen(onClose: () -> Unit) {
         if (aiAnnounced) subtitle = SAVE_QUESTION else say(SAVE_QUESTION)
 
         var voice: File? = null
+        var voiceText: String? = null      // 저장한 한 마디를 받아쓴 글 (업로드 뒤 서버에 보냄)
         var attempts = 0
         while (voice == null && attempts < 2) {
             skipSave = false
@@ -435,8 +436,9 @@ fun NightChatScreen(onClose: () -> Unit) {
             previewHolder[0] = null
             if (save) {
                 voice = rec
+                voiceText = withTimeoutOrNull(5_000) { textJob.await() }
                 // 기기에도 보관 (서버 조회 실패 시 대체 재생, 아침에 글자로도 보여 줌)
-                NightMessageStore.save(context, rec, withTimeoutOrNull(5_000) { textJob.await() })
+                NightMessageStore.save(context, rec, voiceText)
                 Toast.makeText(context, "내일의 나에게 남긴 한 마디를 저장했어요", Toast.LENGTH_SHORT).show()
             } else {
                 textJob.cancel()
@@ -449,11 +451,16 @@ fun NightChatScreen(onClose: () -> Unit) {
         saveStep = false
 
         // ===== 4) 밤 기록이 저장되면 목소리 업로드, 그동안 마무리 멘트 =====
+        // 업로드 직후 받아쓴 글도 보냄 (다음 날 포춘 문장의 재료. 업로드하면 서버가 글을 비우므로 매번)
         val sendVoice = voice
+        val sendText = voiceText?.trim()?.takeIf { it.isNotEmpty() }
         val uploadJob = ApiClient.scope.async {
             val rec = saveJob.await() ?: return@async false
             val id = rec.optString("night_record_id")
-            sendVoice == null || (id.isNotBlank() && RespecApi.uploadVoice(id, sendVoice))
+            if (sendVoice == null) return@async true
+            val uploaded = id.isNotBlank() && RespecApi.uploadVoice(id, sendVoice)
+            if (uploaded && sendText != null) RespecApi.saveVoiceText(id, sendText)
+            uploaded
         }
 
         say(if (voice != null) CLOSING_SAVED else CLOSING)

@@ -10,6 +10,12 @@ import java.io.File
 /** 코칭 토큰 결과. 토큰을 못 받으면 code에 서버 오류 코드 (COACHING_SKIPPED, ALL_STEPS_CHECKED 등) */
 class CoachingToken(val auth: LiveAuth?, val steps: JSONArray?, val code: String?)
 
+/**
+ * 포춘 토큰 결과. auth가 null이면 포춘 단계를 건너뜀 (code: 서버 오류 코드, 503이면 AI_UNAVAILABLE).
+ * text: AI가 읽을 문장(자막용), style: COOKIE 포춘쿠키 / HOROSCOPE 오늘의 운세, source: ai / fallback / safe
+ */
+class FortuneToken(val auth: LiveAuth?, val text: String?, val style: String?, val source: String?, val code: String?)
+
 /** 백엔드 API (backend/README.md). 실패하면 null (이유는 ApiClient.lastError) */
 object RespecApi {
 
@@ -135,6 +141,10 @@ object RespecApi {
         return ApiClient.putBytes("/night/records/$nightRecordId/voice", bytes, "audio/mp4", ApiConfig.TOKEN_TIMEOUT_MS)?.ok == true
     }
 
+    /** 업로드한 한 마디를 기기에서 받아쓴 글 (다음 날 포춘의 재료). 다시 녹음·업로드하면 서버가 글을 비우므로 업로드마다 다시 보냄 */
+    suspend fun saveVoiceText(nightRecordId: String, text: String): Boolean =
+        ApiClient.patch("/night/records/$nightRecordId/voice-text", JSONObject().put("text", text))?.ok == true
+
     /** 밤 기록 (voice_url: 서명된 임시 URL) */
     suspend fun nightRecord(nightRecordId: String): JSONObject? {
         val r = ApiClient.get("/night/records/$nightRecordId") ?: return null
@@ -180,6 +190,16 @@ object RespecApi {
         }
         val r = ApiClient.post("/morning/sessions/$sessionId/briefing-token", body, ApiConfig.TOKEN_TIMEOUT_MS) ?: return null
         return if (r.ok) liveAuth(r.json()) else null
+    }
+
+    /** 포춘 단계(어젯밤 한 마디 → 포춘 → 코칭)에서 호출. 재연결해도 같은 문장 */
+    suspend fun fortuneToken(sessionId: String): FortuneToken {
+        val r = ApiClient.post("/morning/sessions/$sessionId/fortune-token", JSONObject(), ApiConfig.TOKEN_TIMEOUT_MS)
+            ?: return FortuneToken(null, null, null, null, null)
+        if (!r.ok) return FortuneToken(null, null, null, null, r.errorCode ?: if (r.code == 503) "AI_UNAVAILABLE" else null)
+        val json = r.json()
+        fun str(key: String) = json?.takeUnless { it.isNull(key) }?.optString(key)?.takeIf { it.isNotBlank() }
+        return FortuneToken(liveAuth(json), str("fortune_text"), str("fortune_style"), str("fortune_source"), null)
     }
 
     /** start_routine 뒤(재연결도) 호출. 처음이면 서버가 단계를 PENDING으로 만듦 */

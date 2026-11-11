@@ -14,6 +14,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -104,8 +105,11 @@ class LiveClient(context: Context) {
 
     // ---------------- 외부에서 쓰는 함수 ----------------
 
-    /** 통화 시작. tokenSource는 연결(재연결 포함)할 때마다 불러 새 1회용 토큰을 받음. */
-    fun start(tokenSource: suspend () -> LiveAuth?) {
+    /**
+     * 통화 시작. tokenSource는 연결(재연결 포함)할 때마다 불러 새 1회용 토큰을 받음.
+     * listen=false: 마이크를 열지 않고 AI 말만 들려줌 (포춘 읽기처럼 듣기만 하는 짧은 세션. 끊기면 재연결하지 않음)
+     */
+    fun start(listen: Boolean = true, tokenSource: suspend () -> LiveAuth?) {
         val s = _status.value
         if (s == Status.Connecting || s == Status.Live || s == Status.Reconnecting) return
 
@@ -113,8 +117,9 @@ class LiveClient(context: Context) {
         startSignal = null
         stopping = false
         micStarted = false
-        micPaused = false
+        micPaused = !listen
         dropAudio = false
+        turns.value = 0
         _transcript.value = emptyList()
         _toolLog.value = emptyList()
         _message.value = null
@@ -218,6 +223,19 @@ class LiveClient(context: Context) {
     suspend fun awaitSpeechEnd(maxWaitMs: Long = 8_000L) {
         delay(600)      // 함수 호출 직후 도착하는 마지막 음성 조각을 기다림
         withTimeoutOrNull(maxWaitMs) { _aiSpeaking.first { !it } }
+    }
+
+    /**
+     * 이번 연결에서 AI의 첫 응답이 끝날 때(turnComplete)까지 기다린 뒤 남은 음성 재생도 기다림.
+     * 연결이 실패하거나 끊기면 바로 false
+     */
+    suspend fun awaitFirstTurn(maxWaitMs: Long): Boolean {
+        val done = withTimeoutOrNull(maxWaitMs) {
+            combine(turns, _status) { t, s -> if (t > 0) true else if (s == Status.Error || s == Status.Ended) false else null }
+                .first { it != null }
+        } == true
+        if (done) awaitSpeechEnd(20_000L)
+        return done
     }
 
     /** 서버 저장용 대화 원문: [{role, text, at}] (RS_NIGHT_RAW.TRANSCRIPT 형식) */
