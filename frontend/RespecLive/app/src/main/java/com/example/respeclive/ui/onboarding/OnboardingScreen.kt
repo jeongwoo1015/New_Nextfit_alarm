@@ -197,8 +197,8 @@ fun OnboardingScreen(onDone: () -> Unit) {
             if (step > 0) {
                 OutlinedButton(
                     onClick = { step-- },
-                    modifier = Modifier.weight(1f).height(60.dp),
-                    shape = RoundedCornerShape(30.dp),
+                    modifier = Modifier.weight(1f).height(58.dp),
+                    shape = RoundedCornerShape(50),
                     border = BorderStroke(1.dp, RespecColors.CardBorder)
                 ) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = RespecColors.Text)
@@ -218,10 +218,11 @@ fun OnboardingScreen(onDone: () -> Unit) {
                     disabledContentColor = RespecColors.TextSub
                 )
             ) {
+                // 글자·아이콘은 주요 버튼 색(Button) 위의 색(OnButton). 라이트 테마에서 OnAccent는 버튼과 같은 진한 갈색이라 안 보임
                 if (submitting) {
-                    CircularProgressIndicator(Modifier.size(22.dp), color = RespecColors.OnAccent, strokeWidth = 2.dp)
+                    CircularProgressIndicator(Modifier.size(22.dp), color = RespecColors.OnButton, strokeWidth = 2.dp)
                 } else {
-                    FitText(if (step == 3) "시작하기" else "다음으로", color = if (canNext) RespecColors.OnAccent else RespecColors.TextSub,
+                    FitText(if (step == 3) "시작하기" else "다음으로", color = if (canNext) RespecColors.OnButton else RespecColors.TextSub,
                         fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.width(8.dp))
                     Icon(Icons.AutoMirrored.Filled.ArrowForward, null)
