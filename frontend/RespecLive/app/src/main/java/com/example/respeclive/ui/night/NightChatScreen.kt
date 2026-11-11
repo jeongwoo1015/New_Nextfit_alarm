@@ -353,9 +353,13 @@ fun NightChatScreen(onClose: () -> Unit) {
         client.start {
             RespecApi.nightToken(CalendarEvents.today(context), CalendarEvents.tomorrow(context)) ?: RespecApi.tokenError()
         }
-        select<Unit> {
-            toolEvents.onReceive { client.awaitSpeechEnd() }
-            endTalk.onReceive { }
+        // AI가 마무리하며 끝냈으면(end_session) 한마디 녹음 안내를 AI가 이미 함. 사용자가 버튼으로 끝냈으면 앱이 안내
+        val endedByAi = select<Boolean> {
+            toolEvents.onReceive {
+                client.awaitSpeechEnd()
+                true
+            }
+            endTalk.onReceive { false }
         }
         client.pauseMic()     // 연결은 안내 문장을 읽을 때까지 유지 (같은 목소리), 마이크는 한 마디 녹음에 넘김
         val talkEndedAt = System.currentTimeMillis()
@@ -398,7 +402,11 @@ fun NightChatScreen(onClose: () -> Unit) {
 
         // ===== 3) 내일의 한 마디 녹음 =====
         saveStep = true
-        say(SAVE_QUESTION)
+        // AI가 "내일의 나에게 남길 한마디를 녹음해 볼게요"로 마무리했으면 같은 안내를 다시 읽지 않고 자막만 보여 줌.
+        // 사용자가 먼저 "잘게요" 해서 AI가 인사만 하고 끝냈거나 버튼으로 끝냈으면 앱이 안내를 읽음
+        val lastAi = turns.lastOrNull { it.role == LiveClient.Role.Assistant }?.text.orEmpty()
+        val aiAnnounced = endedByAi && ("녹음" in lastAi || "한마디" in lastAi || "한 마디" in lastAi)
+        if (aiAnnounced) subtitle = SAVE_QUESTION else say(SAVE_QUESTION)
 
         var voice: File? = null
         var attempts = 0
