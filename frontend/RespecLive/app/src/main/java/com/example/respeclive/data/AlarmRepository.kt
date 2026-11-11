@@ -22,6 +22,7 @@ object AlarmRepository {
     private var loaded = false
 
     fun init(context: Context) {
+        WakeOverrides.init(context)   // 알람 시각 계산에 하루만 바꾼 기상 시각이 필요
         if (loaded) return
         loaded = true
         val app = context.applicationContext

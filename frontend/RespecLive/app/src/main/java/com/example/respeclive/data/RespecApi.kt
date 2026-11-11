@@ -141,6 +141,12 @@ object RespecApi {
         return if (r.ok) r.json() else null
     }
 
+    /** 밤 날짜(RECORD_DATE "YYYY-MM-DD")로 밤 기록 조회. 없으면(404) null */
+    suspend fun nightRecordByDate(recordDate: String): JSONObject? {
+        val r = ApiClient.get("/night/records?record_date=$recordDate") ?: return null
+        return if (r.ok) r.json() else null
+    }
+
     // ---------------- 아침 ----------------
 
     /**

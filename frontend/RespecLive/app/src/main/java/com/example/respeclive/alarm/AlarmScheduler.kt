@@ -8,6 +8,7 @@ import com.example.respeclive.MainActivity
 import com.example.respeclive.data.Alarm
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
+import com.example.respeclive.data.WakeOverrides
 import java.util.Calendar
 
 object AlarmExtras {
@@ -30,19 +31,24 @@ object AlarmScheduler {
     private const val SNOOZE_REQUEST_BASE = 100_000   // 스누즈는 정규 알람과 다른 요청 코드 (서로 덮어쓰지 않게)
     const val SNOOZE_MINUTES = 5
 
-    /** 다음 울릴 시각 (켜진 요일 중 지금 이후 가장 가까운 시각) */
+    /**
+     * 다음 울릴 시각 (켜진 요일 중 지금 이후 가장 가까운 시각).
+     * 밤 대화로 하루만 바꾼 기상 시각(WakeOverrides)이 있으면 그날은 그 시각에 울림 (그날이 원래 쉬는 요일이어도)
+     */
     fun nextTriggerMillis(alarm: Alarm, now: Long = System.currentTimeMillis()): Long? {
-        if (alarm.days.isEmpty()) return null
+        val override = WakeOverrides.forAlarm(alarm)
+        if (alarm.days.isEmpty() && override == null) return null
         val cal = Calendar.getInstance()
         for (offset in 0..7) {
             cal.timeInMillis = now
             cal.add(Calendar.DAY_OF_YEAR, offset)
-            cal.set(Calendar.HOUR_OF_DAY, alarm.hour)
-            cal.set(Calendar.MINUTE, alarm.minute)
+            val isOverrideDay = override != null && WakeOverrides.dateKey(cal.time) == override.date
+            cal.set(Calendar.HOUR_OF_DAY, if (isOverrideDay) override!!.hour else alarm.hour)
+            cal.set(Calendar.MINUTE, if (isOverrideDay) override!!.minute else alarm.minute)
             cal.set(Calendar.SECOND, 0)
             cal.set(Calendar.MILLISECOND, 0)
             val dayIndex = (cal.get(Calendar.DAY_OF_WEEK) + 5) % 7 // 월=0 ... 일=6
-            if (dayIndex in alarm.days && cal.timeInMillis > now) return cal.timeInMillis
+            if ((isOverrideDay || dayIndex in alarm.days) && cal.timeInMillis > now) return cal.timeInMillis
         }
         return null
     }
@@ -51,7 +57,10 @@ object AlarmScheduler {
         cancel(context, alarm.id)
         if (!alarm.enabled) return
         val trigger = nextTriggerMillis(alarm) ?: return
-        setAlarm(context, alarm.id, alarm.id, alarm.type, alarm.timeLabel(), trigger)
+        // 수신 화면에 보일 시각: 하루만 바꾼 날이면 바뀐 시각
+        val cal = Calendar.getInstance().apply { timeInMillis = trigger }
+        val label = Alarm.timeLabelOf(cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+        setAlarm(context, alarm.id, alarm.id, alarm.type, label, trigger)
     }
 
     /** "5분 뒤 다시 울리기". 알람 id는 그대로라 다시 울리면 같은 서버 세션을 받음 */

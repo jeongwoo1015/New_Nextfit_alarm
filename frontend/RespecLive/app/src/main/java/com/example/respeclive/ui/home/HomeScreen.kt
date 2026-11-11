@@ -35,6 +35,7 @@ import com.example.respeclive.alarm.AlarmScheduler
 import com.example.respeclive.data.Alarm
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
+import com.example.respeclive.data.WakeOverrides
 import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.theme.AppTheme
 import com.example.respeclive.ui.theme.RespecColors
@@ -58,6 +59,8 @@ fun HomeScreen(
     // 홈을 열 때마다 서버 알람 목록으로 맞춤 (실패하면 기기에 저장된 목록 그대로)
     LaunchedEffect(Unit) {
         AlarmRepository.sync(context)
+        // 밤 대화로 하루만 바꾼 기상 시각을 다시 확인 (굿나잇콜 직후엔 추출이 안 끝났을 수 있음)
+        WakeOverrides.refresh(context)
     }
 
     Column(Modifier.fillMaxSize()) {

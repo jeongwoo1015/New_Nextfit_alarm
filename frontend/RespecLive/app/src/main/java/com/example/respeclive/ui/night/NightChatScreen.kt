@@ -48,6 +48,7 @@ import com.example.respeclive.data.CalendarEvents
 import com.example.respeclive.data.MusicStore
 import com.example.respeclive.data.NightMessageStore
 import com.example.respeclive.data.RespecApi
+import com.example.respeclive.data.WakeOverrides
 import com.example.respeclive.live.LiveClient
 import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.common.SubtitleBox
@@ -377,18 +378,21 @@ fun NightChatScreen(onClose: () -> Unit) {
             }
         }
 
-        // 컨디션 곡 전환: 밤 기록 추출이 끝나면(DONE) 오늘 컨디션 곡을 다시 받아, 곡이 다르면 서서히 바꿈.
-        // 화면을 닫아도 계속 확인. 추출 실패·시간 초과·요청 실패면 기본 곡 유지
+        // 밤 기록 추출이 끝나면(DONE): ① 대화로 하루만 바꾼 내일 기상 시각을 알람에 반영
+        // ② 오늘 컨디션 곡을 다시 받아, 곡이 다르면 서서히 바꿈.
+        // 화면을 닫아도 계속 확인. 추출 실패·시간 초과·요청 실패면 그대로 (기상 시각은 홈을 열 때 다시 확인)
         ApiClient.scope.launch {
             val id = saveJob.await()?.optString("night_record_id")?.takeIf { it.isNotBlank() } ?: return@launch
-            var status: String? = null
+            var record: JSONObject? = null
             withTimeoutOrNull(EXTRACT_WAIT_MS) {
-                while (status != "DONE" && status != "FAILED") {
+                while (record?.optString("extract_status").let { it != "DONE" && it != "FAILED" }) {
                     delay(EXTRACT_POLL_MS)
-                    status = RespecApi.nightRecord(id)?.optString("extract_status")
+                    record = RespecApi.nightRecord(id) ?: record
                 }
             }
-            if (status != "DONE" || !SleepMusic.playing.value) return@launch
+            val done = record?.takeIf { it.optString("extract_status") == "DONE" } ?: return@launch
+            WakeOverrides.applyNightRecord(appCtx, done)
+            if (!SleepMusic.playing.value) return@launch
             RespecApi.sleepMusic(null)?.let { SleepMusic.switchTo(appCtx, it) }
         }
 
