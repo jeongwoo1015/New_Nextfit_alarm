@@ -39,7 +39,7 @@ def test_short_strategy_replaces_the_length_rule_instead_of_stacking_two():
     assert p.endswith(SHORT) and p.count("[오늘의 전략]") == 1
     assert "4~6문장" not in p and LENGTH_SHORT in p and "2~3문장" in p                   # 4~6문장 규칙이 남아 AI가 긴 쪽을 따르지 않게 한다
     assert p.replace(LENGTH_SHORT, LENGTH_NORMAL).startswith(base)                       # 나머지 규칙은 그대로
-    assert "그 안에서는 질문하지 않는다" in p and "준비 확인" in p
+    assert "그 안에서는 질문하지 않는다" in p and "마무리 질문" in p
 
 
 def test_short_with_no_coaching_day_keeps_closing_rule():

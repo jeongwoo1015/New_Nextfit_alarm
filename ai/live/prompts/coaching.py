@@ -1,8 +1,10 @@
 """코칭 프롬프트. 루틴 항목과 콘텐츠 단계를 같은 방식으로 안내하고 report_step_result로 판정을 기록한다.
 
-알람은 루틴 또는 콘텐츠 중 하나라 이 세션 뒤에 이어지는 세션은 없다."""
+순서표(morning_plan)에서 앞 단계와 뒤 단계를 보고 첫 연결 문장과 마무리를 정한다(뒤에 포춘이 있으면 작별 대신 포춘으로 넘긴다)."""
 from ..inputs import CoachingInput, Step, content_kind
-from .common import MORNING_FLOW, MORNING_RULE, SAFETY_RULES, VOICE_RULES, clean, join_blocks, night_record_block, persona_block
+from ...tasks.morning_plan import BRIEFING, COACHING, FORTUNE, ONE_LINER, neighbors
+from .common import (MORNING_RULE, SAFETY_RULES, VOICE_RULES, clean, eul, join_blocks, morning_flow, night_record_block, persona_block,
+                     resolve_plan, stage_name)
 
 COACH_INTRO = "당신은 사용자의 아침 루틴을 옆에서 코칭해 주는 친근한 모닝 코치입니다."
 CONTENT_INTRO = "당신은 사용자의 아침 콘텐츠(스트레칭·퀴즈 게임·영어 따라 읽기 등)를 함께 진행해 주는 친근한 진행자입니다."
@@ -46,10 +48,32 @@ ENCOURAGE_RULES = """중간 독려(루틴 단계 사이):
 - 같은 독려 표현을 연달아 쓰지 않는다. 못 했거나 건너뛴 단계 뒤에는 탓하지 않고 "괜찮아요, 다음은 할 수 있어요"처럼 부담 없는 격려만 한다.
 - 마지막 단계 뒤의 마무리는 아래 [마무리] 규칙을 따른다(여기서는 독려를 덧붙이지 않는다)."""
 
-COACH_CLOSING = """마무리: 모든 단계를 판정했으면 단계별 결과 전체를 반영해 최대 2문장으로 마무리한다(대부분 했으면 한 일을 칭찬하고, 일부만 했으면 한 단계를 짚어 격려하고, 거의 못 했어도 탓하지 않고 일어나 시작한 것을 격려한다). 하지 않은 단계를 한 것처럼 말하지 않는다. 하루를 응원한 뒤에는 대화를 스스로 끝내지 않고 사용자가 이어서 말하면 짧게 받아 준다.
+# 마지막 단계 판정 응답: 말을 먼저 하고 판정 함수는 그 응답 끝에서 부른다. 앱은 마지막 판정이 오면 AI가 말하는 중일 때만 기다렸다가 넘어가므로,
+# 함수를 먼저 부르고 말을 나중에 하면 마무리 말이 시작 전이나 중간에 끊긴다(11/12 시연 영상의 "오늘 하루도…" 끊김).
+LAST_STEP_ORDER = "마지막 단계를 판정하는 응답에서는 마무리 말을 먼저 끝까지 하고, 그 응답의 맨 끝에서 report_step_result를 호출한다. 판정 함수를 먼저 부르고 말을 나중에 하지 않는다."
+
+# 코칭 뒤에 이어지는 단계가 있으면(새 순서: 코칭 → 포춘) 작별 대신 다음 단계로 넘긴다
+COACH_HANDOFF = """마무리(다음 순서로 넘기기): {last_order} 마무리 말은 두 문장이다: ① 단계별 결과 전체를 반영한 짧은 한 문장(대부분 했으면 한 일을 칭찬하고, 일부만 했으면 한 단계를 짚어 격려하고, 거의 못 했어도 탓하지 않고 일어나 시작한 것을 격려한다) ② "{handoff}"처럼 다음 순서로 넘기는 한 문장. 하지 않은 단계를 한 것처럼 말하지 않는다. 이 두 문장이 이 대화의 마지막 말이다. 작별 인사나 하루 응원은 하지 않고 end_session도 호출하지 않는다(앱이 바로 {next}로 넘어간다).
+
+대화는 사용자가 끝낸다. 사용자가 중간에 그만하겠다고 분명히 말하면(예: 이만 끝낼게요, 끝) 아직 판정하지 않은 단계는 판정 없이 두고 짧은 한마디 뒤 end_session을 호출한다. AI가 먼저 끝내거나 호출하지 않는다."""
+HANDOFF_EXAMPLE = {"FORMAL": "마지막으로 {what}{josa} 들어 볼게요.", "CASUAL": "마지막으로 {what}{josa} 들어 보자."}
+
+# 코칭이 아침의 마지막 단계일 때(지금 앱 순서)
+COACH_CLOSING = """마무리: 모든 단계를 판정했으면 단계별 결과 전체를 반영해 최대 2문장으로 마무리한다(대부분 했으면 한 일을 칭찬하고, 일부만 했으면 한 단계를 짚어 격려하고, 거의 못 했어도 탓하지 않고 일어나 시작한 것을 격려한다). {last_order} 하지 않은 단계를 한 것처럼 말하지 않는다. 하루를 응원한 뒤에는 대화를 스스로 끝내지 않고 사용자가 이어서 말하면 짧게 받아 준다.
 
 대화는 사용자가 끝낸다. 사용자가 끝내겠다고 분명히 말하면(예: 이만 끝낼게요, 고마워요 안녕, 끝) 짧은 작별 인사 뒤 end_session을 호출한다. AI가 먼저 끝내거나 호출하지 않으며, 아직 판정하지 않은 단계가 있을 때 사용자가 끝내겠다고 해도 그 단계를 판정 없이 두고 작별 인사만 한다.
 모든 단계를 판정하고 마무리 응원까지 한 뒤에는 사용자가 새 요청이나 질문 없이 '없어', '괜찮아', '그래', '응', '알겠어', '고마워', '됐어'처럼 짧게 받거나 사양하는 말도 끝내겠다는 뜻이다. 이때는 새 이야기를 꺼내지 않고 한 문장으로 작별 인사를 한 뒤 같은 응답에서 end_session을 호출한다. 이 말들 뒤에 또 격려나 '더 필요하신가요?' 같은 질문을 하지 않는다. 사용자가 새 요청이나 질문을 하면 그것만 짧게 받아 준다."""
+
+
+def closing_rules(inp: CoachingInput, plan: tuple[str, ...]) -> str:
+    _, nxt = neighbors(plan, COACHING)
+    if not nxt:
+        return COACH_CLOSING.format(last_order=LAST_STEP_ORDER)
+    what = stage_name(nxt)
+    tone = inp.persona.tone if inp.persona.tone in HANDOFF_EXAMPLE else "FORMAL"
+    handoff = HANDOFF_EXAMPLE[tone].format(what=what, josa=eul(what)[len(what):])
+    return COACH_HANDOFF.format(last_order=LAST_STEP_ORDER, handoff=handoff, next=what)
+
 
 RESUME_LINE = "이번 대화는 이어서 하는 중이므로 전체 안내는 이미 했다. 첫 안내부터 짧은 안내만 하고 \"이어서 할게요\"처럼 한마디 먼저 한다."
 
@@ -72,16 +96,29 @@ WORDCHAIN_RULES = """끝말잇기([고정 스크립트]의 '게임: 끝말잇기
 - 사용자가 단어를 말하면 그 단어의 마지막 글자로 시작하는 쉬운 일상 단어 하나만 말한다. 반응은 한마디 이내로 하고, 두음법칙(예: '리'→'이')은 받아 준다. 이미 나온 단어, 한 글자 단어, 어려운 단어는 쓰지 않는다.
 - 사용자의 단어가 이어지지 않거나 이미 나왔으면 한 번만 부드럽게 알리고 다시 말해 보게 한다. 따지거나 점수를 매기지 않는다.
 - 사용자가 막혔다고 하거나 '패스', '그만'이라고 하거나, 주고받은 지 대략 다섯 번쯤 됐으면 한 문장으로 칭찬하며 마무리하고 그 응답에서 report_step_result(step_order, done)를 한 번 호출한다. 횟수를 정확히 세는 데 매달리지 않는다.
-- '패스', '그만'은 이 게임을 그만하겠다는 뜻이지 대화를 끝내겠다는 뜻이 아니다. 마무리 응답에서도 작별 인사를 하거나 end_session을 호출하지 않는다. 사용자가 대화를 끝내겠다고 말할 때까지 기다린다."""
+- '패스', '그만'은 이 게임을 그만하겠다는 뜻이지 대화를 끝내겠다는 뜻이 아니다. 마무리 응답에서도 작별 인사를 하거나 end_session을 호출하지 않는다. 그 뒤는 [마무리] 규칙을 따른다."""
 
 QUIZ_RULES = """퀴즈 진행([고정 스크립트]에 '문제:'와 '정답:' 줄이 있는 단계):
 - 사용자가 답하거나 모르겠다고 하면 그 응답에서 report_step_result를 한 번 호출하며 answer_correct에 맞고 틀림을 넣는다. 정답 줄과 뜻이 같으면 표현이 달라도 true, 틀렸거나 모르겠다고 했으면 false다. verdict는 답을 말했으면 done이다.
 - 같은 응답에서 결과를 먼저 짧게 말한다. 맞으면 "맞았어요!"처럼, 틀리면 "아쉬워요, 정답은 ○○예요."처럼 정답을 알려 준다. 앱이 이 말을 듣고 넥스티의 O/X를 보여 주므로 '맞았어요', '아쉬워요'를 이 표현대로 쓴다. 그 뒤 다음 문제를 낸다."""
 
-# 콘텐츠 시작: 앞 단계(오늘의 포춘)에서 바로 이어 말하도록 연결 한 문장으로 연다
+# 시작 연결 문장: 순서표의 바로 앞 단계(브리핑·한마디·포춘)에서 이어 말한다(지금까지 앱이 덧붙이던 bridgeNote의 역할)
 CONTENT_NAMES = {"STRETCH": "스트레칭", "ENGLISH": "영어 따라 읽기", "WORDCHAIN": "끝말잇기", "QUIZ": "퀴즈"}
 QUIZ_OPTION_NAMES = {"PERSON": "인물 퀴즈", "GENERAL": "상식 퀴즈"}
-CONTENT_OPEN = """콘텐츠 시작(이 세션의 첫 안내): 오늘의 포춘에 이어서 시작하므로 첫 안내는 연결 문장 한 문장으로 연다. 예) "이어서 {name} 시간이에요." 콘텐츠 이름은 반드시 "{name}" 그대로 쓰고 다른 이름(예: 역사 퀴즈, 운동)으로 바꿔 부르지 않는다. 이 문장은 인사가 아니며, 포춘 내용을 되풀이하거나 평가하지 않는다. 연결 문장 다음에 바로 첫 단계 안내를 한다(연결 문장은 첫 안내의 문장 수에 넣지 않는다). 이어서 하는 중이면 이 연결 문장 대신 "이어서 할게요"만 말한다."""
+OPEN_EXAMPLE = {
+    "FORMAL": {FORTUNE: "이어서 {name} 시간이에요.", ONE_LINER: "어젯밤 한마디 잘 들었죠? 이어서 {name} 시간이에요.", BRIEFING: "그럼 {name} 시작해 볼게요."},
+    "CASUAL": {FORTUNE: "이어서 {name} 시간이야.", ONE_LINER: "어젯밤 한마디 잘 들었지? 이어서 {name} 시간이야.", BRIEFING: "그럼 {name} 시작해 보자."},
+}
+OPEN_RULE = """시작(이 세션의 첫 안내): 바로 앞 단계({prev})에서 이어서 시작하므로 첫 안내는 연결 문장 한 문장으로 연다. 예) "{example}" {name_rule}이 문장은 인사가 아니며, 앞 단계의 내용을 되풀이하거나 평가하지 않는다. 연결 문장 다음에 바로 첫 단계 안내를 한다(연결 문장은 첫 안내의 문장 수에 넣지 않는다). 이어서 하는 중이면 이 연결 문장 대신 "이어서 할게요"만 말한다."""
+CONTENT_NAME_RULE = '콘텐츠 이름은 반드시 "{name}" 그대로 쓰고 다른 이름(예: 역사 퀴즈, 운동)으로 바꿔 부르지 않는다. '
+
+
+def open_rule(inp: CoachingInput, plan: tuple[str, ...], name: str, content: bool) -> str:
+    prev, _ = neighbors(plan, COACHING)
+    prev = prev or BRIEFING
+    tone = inp.persona.tone if inp.persona.tone in OPEN_EXAMPLE else "FORMAL"
+    example = OPEN_EXAMPLE[tone].get(prev, OPEN_EXAMPLE[tone][BRIEFING]).format(name=name)
+    return OPEN_RULE.format(prev=stage_name(prev), example=example, name_rule=CONTENT_NAME_RULE.format(name=name) if content else "")
 
 
 def content_label(inp: CoachingInput) -> str:
@@ -117,12 +154,14 @@ def coaching_prompt(inp: CoachingInput) -> str:
     content = inp.morning_call_type == "CONTENT"
     label = "오늘 콘텐츠 단계" if content else "오늘 코칭 단계"
     steps = steps_block(label, inp.steps)
+    plan = resolve_plan(inp, COACHING)
+    name = (content_label(inp) or "오늘의 콘텐츠") if content else "아침 루틴"
     return join_blocks(
         CONTENT_INTRO if content else COACH_INTRO, STEP_RULES.format(label=label, resume_line=RESUME_LINE if inp.resumed else ""),
-        "" if content else TIME_RULES, "" if content else ENCOURAGE_RULES, COACH_CLOSING,
+        "" if content else TIME_RULES, "" if content else ENCOURAGE_RULES, closing_rules(inp, plan),
         CONTENT_RULES.get(content_kind(inp), ""),
-        (CONTENT_OPEN.format(name=content_label(inp) or "오늘의 콘텐츠") if content else ""),
-        MORNING_FLOW if content else "", MORNING_RULE, SAFETY_RULES, VOICE_RULES, persona_block(inp.persona), steps,
+        open_rule(inp, plan, name, content),
+        morning_flow(plan, COACHING, name), MORNING_RULE, SAFETY_RULES, VOICE_RULES, persona_block(inp.persona), steps,
         night_record_block(inp.night) if inp.night else "",
         inp.strategy_block,
     )

@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 
+from ..tasks.morning_plan import BRIEFING, COACHING
 from .inputs import content_kind
 
 VERDICTS = ("done", "not_done", "skipped", "ambiguous", "other")
@@ -63,11 +64,12 @@ _BY_KIND = {
 def tools_for(kind: str, inp=None) -> list[dict]:
     """kind: night / briefing / fortune / coaching → Live setup의 tools 값.
 
-    입력에 따라 다르다: 브리핑은 코칭을 하는 날에만 start_routine을 넣는다(코칭 안 하는 날은 브리핑만 한다).
+    입력에 따라 다르다: 브리핑은 순서표에 코칭이 있는 날에만 start_routine을 넣는다(코칭 안 하는 날·이미 다 마친 날은 end_session으로 다음 순서에 넘긴다).
     adjust_step_time은 루틴 세션에만 넣는다(콘텐츠는 고정 시간).
     """
     if kind == "briefing" and inp is not None:
-        follows = not getattr(inp, "coaching_skipped", False)
+        from .prompts.common import resolve_plan      # 순서표에 코칭이 있는 날에만 start_routine (코칭 안 하는 날·이미 다 마친 날은 end_session으로 넘긴다)
+        follows = COACHING in resolve_plan(inp, BRIEFING)
         return [{"functionDeclarations": ([START_ROUTINE] if follows else []) + [END_SESSION]}]
     if kind == "coaching" and getattr(inp, "morning_call_type", "ROUTINE") == "CONTENT":
         report = REPORT_STEP_RESULT_QUIZ if content_kind(inp) == "QUIZ" else REPORT_STEP_RESULT

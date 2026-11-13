@@ -1,6 +1,7 @@
 """밤·브리핑·코칭이 함께 쓰는 지시문 조각."""
 import re
 
+from ...tasks.morning_plan import BRIEFING, FORTUNE, LEGACY_ORDER, ONE_LINER, morning_plan, normalize_plan
 from ..inputs import CalendarEvent, Persona, Weather
 
 TONE_RULES = {
@@ -34,6 +35,49 @@ MORNING_FLOW = ("아침은 여러 대화가 차례로 이어진다: 아침 브�
                 "앞 단계에서 한 말(날씨, 일정, 포춘 문장)을 되풀이하지 않는다. 앞 단계에서 바로 이어 말하듯 자연스럽게 시작한다.")
 
 MORNING_RULE = "이 대화는 아침이다. 작별 인사에 '안녕히 주무세요', '잘 자요', '편안한 밤' 같은 밤 인사를 쓰지 않는다(예: '좋은 하루 보내세요')."
+
+
+# ---------- 모닝콜 순서표 (ai.tasks.morning_plan) ----------
+STAGE_NAMES = {BRIEFING: "아침 브리핑", ONE_LINER: "어젯밤 남긴 한마디", FORTUNE: "오늘의 포춘"}
+
+
+def stage_name(stage: str, coaching_name: str = "오늘의 루틴·콘텐츠") -> str:
+    return STAGE_NAMES.get(stage, coaching_name)
+
+
+def resolve_plan(inp, stage: str) -> tuple[str, ...]:
+    """세션 입력의 순서표. 서버가 넘긴 plan에 이 단계가 있으면 그대로 쓰고, 없으면 지금 앱이 고정해 둔 순서(LEGACY_ORDER)로 만든다.
+    브리핑은 one_liner_follows·coaching_skipped·already_done으로, 포춘·코칭은 '브리핑 → 포춘 → 코칭'으로 본다(그 세션에는 한마디 여부가 없다)."""
+    plan = normalize_plan(getattr(inp, "plan", ()))
+    if stage in plan:
+        return plan
+    if stage == BRIEFING:
+        coaching = not (getattr(inp, "coaching_skipped", False) or getattr(inp, "already_done", False))
+        return morning_plan(getattr(inp, "one_liner_follows", False), coaching, LEGACY_ORDER)
+    return morning_plan(False, True, LEGACY_ORDER)
+
+
+def morning_flow(plan: tuple[str, ...], current: str, coaching_name: str = "오늘의 루틴·콘텐츠") -> str:
+    """브리핑 뒤의 세션(한마디·포춘·코칭)이 첫인사를 또 하거나 앞 내용을 되풀이하지 않게 하는 안내. 실제 순서표를 그대로 보여 준다."""
+    names = " → ".join(stage_name(s, coaching_name) for s in plan)
+    return (f"아침은 여러 대화가 차례로 이어진다: {names}. 이 대화는 그중 '{stage_name(current, coaching_name)}' 부분이다. "
+            "이미 아침 인사를 했으므로 '좋은 아침', '안녕하세요' 같은 첫인사나 자기소개를 하지 않고, "
+            "앞 단계에서 한 말(날씨, 일정, 포춘 문장)을 되풀이하지 않는다. 앞 단계에서 바로 이어 말하듯 자연스럽게 시작한다.")
+
+
+def _has_batchim(word: str) -> bool:
+    ch = (word or " ").strip()[-1:] or " "
+    return "가" <= ch <= "힣" and (ord(ch) - 0xAC00) % 28 != 0
+
+
+def eul(word: str) -> str:
+    """목적격 조사: 스트레칭을 / 아침 루틴을 / 퀴즈를"""
+    return word + ("을" if _has_batchim(word) else "를")
+
+
+def wa(word: str) -> str:
+    """접속 조사: 한마디와 / 포춘과"""
+    return word + ("과" if _has_batchim(word) else "와")
 
 
 def clean(value, limit: int = 60) -> str:

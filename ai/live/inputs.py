@@ -87,6 +87,8 @@ class BriefingInput:
     weather: Weather | None = None
     night: NightRecordView | None = None
     strategy_block: str = ""           # 개인화 Agent가 만든 [오늘의 전략] 문장(AgentDecision.briefing_block). 비어 있으면 프롬프트가 달라지지 않는다
+    plan: tuple[str, ...] = ()         # 모닝콜 순서표(ai.tasks.morning_plan). 비어 있으면 지금 앱 순서(LEGACY_ORDER)를 one_liner_follows·coaching_skipped·already_done으로 만든다
+    already_done: bool = False         # 오늘 루틴·콘텐츠를 이미 모두 마친 날(앱 재진입 등). 브리핑에서 루틴 안내·시작 질문 없이 짧게 칭찬만 한다
 
 
 @dataclass(frozen=True)
@@ -95,6 +97,7 @@ class FortuneInput:
     persona: Persona = Persona()
     fortune_text: str = ""             # 읽을 포춘 문장 (비어 있으면 읽을 것이 없다고만 말한다)
     style: str = ""                    # COOKIE / HOROSCOPE (참고용, 지시문 동작은 같다)
+    plan: tuple[str, ...] = ()         # 모닝콜 순서표. 포춘이 마지막이면 읽은 뒤 작별 인사 한 문장으로 아침 대화를 끝낸다. 비어 있으면 지금 앱 순서(포춘 다음 코칭)
     based_on: str = ""                 # 문장을 만든 재료: ONE_LINER(어젯밤 한마디) / DIARY(한 줄 일기). compose_fortune 결과의 used_input(voice / diary / none)을 그대로 넘겨도 된다. 소개 문장이 "어젯밤 한마디로 만든 …"으로 바뀐다
 
 
@@ -109,6 +112,7 @@ class CoachingInput:
     strategy_block: str = ""           # 개인화 Agent가 만든 [오늘의 전략] 문장(AgentDecision.coaching_block). 비어 있으면 프롬프트가 달라지지 않는다
     content_type: str = ""             # CONTENT 세션의 콘텐츠 종류(EXERCISE/QUIZ/LANGUAGE 등, 알람의 content_type). 비어 있으면 단계 내용으로 추정한다
     content_option: str = ""           # 콘텐츠 세부(알람의 content_option 또는 compose_content_steps 결과의 option)
+    plan: tuple[str, ...] = ()         # 모닝콜 순서표. 첫 연결 문장(앞 단계)과 마무리(다음이 포춘이면 포춘으로 넘김)에 쓴다. 비어 있으면 지금 앱 순서(포춘 다음 코칭, 코칭이 마지막)
 
 
 def content_kind(inp) -> str:
