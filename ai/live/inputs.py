@@ -8,11 +8,15 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Persona:
-    """RS_USER_SETTING: USER_CALL_NAME, TONE(FORMAL/CASUAL), SPEECH_STYLE(KIND/FRIENDLY/FIRM), VOICE_TYPE(FEMALE/MALE/NEUTRAL)."""
+    """RS_USER_SETTING: USER_CALL_NAME, TONE(FORMAL/CASUAL), SPEECH_STYLE(KIND/FRIENDLY/FIRM), VOICE_TYPE(FEMALE/MALE/NEUTRAL)
+    + 11/13 성격·강도(DB 새 칸 제안: PERSONALITY, INTENSITY, AUTO_INTENSITY). 서버가 앞의 4칸을 순서대로 넣으므로 새 칸은 맨 뒤에만 둔다."""
     call_name: str = ""
     tone: str = "FORMAL"
-    speech_style: str = "KIND"
+    speech_style: str = "KIND"         # 예전 값. personality가 비어 있으면 이 값으로 성격을 정한다(FIRM → STRICT)
     voice_type: str = "FEMALE"
+    personality: str = ""              # KIND 다정한 / FRIENDLY 친근한 / STRICT 엄격한(화면 이름 "무서운"도 가능) / CHEERFUL 유쾌한
+    intensity: int = 2                 # 깨우는 말의 강도 1 약 / 2 중 / 3 강. 서버가 자동 강도 올리기를 반영한 그날 값(ai.personalization.intensity)을 넣는다
+    auto_intensity: bool = True        # 자동 강도 올리기. False면 통화 중 재기상 알림에도 강도를 올리지 않는다
 
 
 @dataclass(frozen=True)
@@ -113,6 +117,7 @@ class CoachingInput:
     content_type: str = ""             # CONTENT 세션의 콘텐츠 종류(EXERCISE/QUIZ/LANGUAGE 등, 알람의 content_type). 비어 있으면 단계 내용으로 추정한다
     content_option: str = ""           # 콘텐츠 세부(알람의 content_option 또는 compose_content_steps 결과의 option)
     plan: tuple[str, ...] = ()         # 모닝콜 순서표. 첫 연결 문장(앞 단계)과 마무리(다음이 포춘이면 포춘으로 넘김)에 쓴다. 비어 있으면 지금 앱 순서(포춘 다음 코칭, 코칭이 마지막)
+    stretch_routines: tuple = ()       # 스트레칭 부위별 루틴 ((부위, (Step, ...)), ...) = ai.tasks.stretch_sets.all_area_steps(). 있으면 AI가 "오늘 어디가 불편하세요?"로 부위를 묻고 select_stretch_area를 부른다. 없으면 steps 그대로 진행
 
 
 def content_kind(inp) -> str:

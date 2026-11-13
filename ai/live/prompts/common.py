@@ -15,6 +15,63 @@ STYLE_RULES = {
 }
 CONDITION_WORDS = {"GOOD": "좋음", "NORMAL": "보통", "TIRED": "피곤함", "STRESSED": "스트레스"}
 
+# ---------- 성격 4종 × 강도 3단계 (11/13 설계, 공유 페이지 "AI 성격과 스트레칭 루틴") ----------
+PERSONALITIES = ("KIND", "FRIENDLY", "STRICT", "CHEERFUL")
+LEGACY_STYLE = {"KIND": "KIND", "FRIENDLY": "FRIENDLY", "FIRM": "STRICT"}       # 예전 SPEECH_STYLE 값 → 성격
+PERSONALITY_RULES = {
+    "KIND": "다정한 성격. 공감을 먼저 하고 부드럽게 권유한다.",
+    "FRIENDLY": "친근한 성격. 친구처럼 편하고 밝게 말한다.",
+    "STRICT": "엄격한 성격. 코치처럼 짧고 단호하게 말한다. 단호하되 비난하거나 몰아붙이지 않는다.",
+    "CHEERFUL": "유쾌한 성격. 재치 있는 농담으로 웃게 만들며 말한다. 농담은 한 응답에 하나까지만 하고, 사용자를 놀리거나 깎아내리지 않는다.",
+}
+BAN_RULE = "어떤 성격·강도에서도 욕설, 인격 모독, 외모·체중 언급, 사고·건강 위험으로 겁주기, 과한 죄책감 유발은 하지 않는다."
+INTENSITY_NAMES = {1: "약", 2: "중", 3: "강"}
+INTENSITY_RULES = {
+    1: "재촉하지 않고 기다려 주며 권유한다. 졸리다고 하면 공감을 먼저 한다. 대답이 없으면 이름을 불러 본다. 문장은 길고 부드럽게.",
+    2: "분명하게 권유한다. 졸리다고 하면 공감 한마디 뒤 행동을 요청한다. 대답이 없으면 이름과 일어날 시간을 짚는다. 문장 길이는 보통.",
+    3: "짧고 단호하게 요청한다. 졸리다고 하면 행동 요청을 먼저 한다. 대답이 없으면 이름과 오늘 일정·목표를 짚는다. 문장은 짧게, 한 번에 하나만.",
+}
+# "아직 졸려요"에 대한 기준 문장 (존댓말, 공유 페이지의 예시 표)
+SLEEPY_EXAMPLES = {
+    "KIND": {1: "아직 졸리죠. 괜찮아요, 눈만 살짝 떠 볼까요?", 2: "많이 졸리죠. 그래도 이제 천천히 눈을 떠 봐요.", 3: "졸린 거 알아요. 그래도 지금은 눈을 떠야 해요."},
+    "FRIENDLY": {1: "아직 비몽사몽이죠? 기지개 한 번만 켜 봐요.", 2: "자, 일어날 시간이에요! 이불 살짝만 걷어 볼까요?", 3: "오늘 약속 있잖아요! 지금 바로 일어나요!"},
+    "STRICT": {1: "일어날 시간입니다. 천천히 몸을 일으켜 보세요.", 2: "지금 일어나셔야 합니다. 눈부터 떠 주세요.", 3: "지금 일어나세요. 미루면 오늘 계획이 밀립니다."},
+    "CHEERFUL": {1: "이불이랑 아직 협상 중이에요? 5초만 더 드릴게요.", 2: "이불이 이제 그만 놓아 달래요. 일어나 볼까요?", 3: "이불은 오늘 휴가예요! 지금 일어나요!"},
+}
+REWAKE_NOTICE = "(앱 알림: 재기상 음악 재생)"
+
+
+def personality_of(p: Persona) -> str:
+    v = str(getattr(p, "personality", "") or "").strip().upper()
+    if v == "SCARY":                       # 화면 이름 "무서운"을 그대로 보낸 경우
+        v = "STRICT"
+    return v if v in PERSONALITIES else LEGACY_STYLE.get(str(p.speech_style or "").strip().upper(), "KIND")
+
+
+def intensity_of(p: Persona) -> int:
+    try:
+        n = int(getattr(p, "intensity", 2))
+    except (TypeError, ValueError):
+        n = 2
+    return min(3, max(1, n))
+
+
+def wake_intensity_block(p: Persona) -> str:
+    """브리핑(깨우는 단계)에만 붙는 강도 규칙. 기상 확인 뒤와 다른 세션은 성격 말투만 쓴다."""
+    kind, n = personality_of(p), intensity_of(p)
+    ex = SLEEPY_EXAMPLES[kind]
+    up_n = min(3, n + 1)
+    if getattr(p, "auto_intensity", True):
+        up = (f"- 앱이 '{REWAKE_NOTICE}'을 보내면 사용자가 대답하지 않은 것이다. 그 알림에는 이름을 부르며 깨우는 한 문장으로만 답한다. "
+              f"그 뒤로 이 통화의 깨우는 말은 강도 {up_n}({INTENSITY_NAMES[up_n]})로 말한다: {INTENSITY_RULES[up_n]} 기준 문장도 {up_n}번의 결을 따른다.")
+    else:
+        up = f"- 앱이 '{REWAKE_NOTICE}'을 보내면 사용자가 대답하지 않은 것이다. 그 알림에는 이름을 부르며 깨우는 한 문장으로만 답한다(강도는 그대로)."
+    return (f"[깨우는 말의 강도]\n- 지금 강도: {n} ({INTENSITY_NAMES[n]}). {INTENSITY_RULES[n]}\n"
+            "- 적용 범위: 컨디션 질문의 대답에 대한 반응, 잠든 시각 질문, 수면 시간 안내와 기상 유도, 대답이 없을 때. 브리핑(날씨·일정)부터는 성격 말투만 유지한다.\n"
+            f"- \"아직 졸려요\"에 대한 기준 문장(이 성격): 강도 1 \"{ex[1]}\" / 강도 2 \"{ex[2]}\" / 강도 3 \"{ex[3]}\".\n"
+            f"- 사용자가 졸리다고 하면 잠든 시각을 묻기 전에 반드시 강도 {n} 기준 문장의 결로 반응하는 한 문장을 먼저 한다(반응을 건너뛰지 않는다). 다른 강도의 문장을 쓰지 않는다. 문장은 그때그때 만든다.\n"
+            + up + "\n- " + BAN_RULE + " 강도 3도 단호함까지다.")
+
 VOICE_RULES = """공통 규칙:
 - 한국어 음성으로 말한다. 마크다운, 기호, 이모지를 쓰지 않는다.
 - 시각과 시간은 숫자와 단위로 말한다. "7시 15분", "15분", "30초"처럼 말하고, 분과 초를 "열다섯 분", "서른 초"처럼 우리말 수로 풀어 말하지 않는다.
@@ -91,7 +148,8 @@ def persona_block(p: Persona) -> str:
     if name:
         lines.append(f"- 호칭: {name} (가끔 이름을 불러 주되 매 문장에 넣지 않는다)")
     lines.append(f"- 어조: {TONE_RULES.get(p.tone, TONE_RULES['FORMAL'])}")
-    lines.append(f"- 말투: {STYLE_RULES.get(p.speech_style, STYLE_RULES['KIND'])}")
+    lines.append(f"- 성격: {PERSONALITY_RULES[personality_of(p)]}")
+    lines.append(f"- 금지: {BAN_RULE}")
     return ("[사용자 설정]\n" + "\n".join(lines) +
             "\n아래 예시 문장은 존댓말로 적혀 있어도 위 어조와 말투에 맞게 바꿔 말한다. 어조 설정이 문체 규칙보다 우선하지만 안전 규칙은 언제나 가장 우선한다.")
 

@@ -1,4 +1,4 @@
-"""콘텐츠 3종 테스트 (Gemini 호출 없음): 스트레칭 4세트, 영어 따라 읽기+대답, 퀴즈·게임(인물·상식·끝말잇기), 정답 신호, 콘텐츠별 코칭 규칙."""
+"""콘텐츠 3종 테스트 (Gemini 호출 없음): 스트레칭 부위 5개 루틴, 영어 따라 읽기+대답, 퀴즈·게임(인물·상식·끝말잇기), 정답 신호, 콘텐츠별 코칭 규칙."""
 import re
 from datetime import date, timedelta
 
@@ -12,7 +12,8 @@ from ai.tasks.content_steps import (CONTENT_OPTIONS, CONTENT_TOTAL_SEC, ENGLISH_
                                     WORDCHAIN_START_WORDS, compose_content_steps, english_fallback, fallback_steps, resolve_option,
                                     validate_english, wordchain_steps)
 from ai.tasks.llm import LLMError
-from ai.tasks.stretch_sets import SETS, pick_stretch_set, stretch_steps
+from ai.tasks.stretch_sets import (AREA_NAMES, AREAS, LIE, MOVE_NAMES, MOVES, POSTURE_ORDER, ROUTINES, SIDE, STAND, all_area_steps, area_steps,
+                                   stretch_steps)
 
 D0 = date(2026, 11, 9)           # 월요일
 
@@ -30,51 +31,42 @@ class FakeLLM:
         return r
 
 
-# ---------- 스트레칭 4세트 ----------
-def app_motion_groups(name: str) -> list[str]:
-    """앱 넥스티(MorningChatScreen.stretchMotionFor)가 단계 이름에서 키워드로 시범 동작을 고르는 규칙. 몇 종류의 키워드가 걸리는지 센다."""
-    groups = {"옆구리": "RAINBOW", "허리": "WAIST", "가슴": "CHEST_W", "어깨": "CHEST_W", "기지개": "STRETCH", "팔": "STRETCH", "만세": "STRETCH", "목": "NECK"}
-    return sorted({m for k, m in groups.items() if k in name})
+# ---------- 스트레칭 부위 5개 루틴 (11/13) ----------
+def test_five_areas_five_minutes_each():
+    assert AREAS == ("FULL", "NECK_SHOULDER", "ARM_WRIST", "BACK_HIP", "LEG") and set(ROUTINES) == set(AREAS) == set(AREA_NAMES)
+    for area, steps in all_area_steps().items():
+        secs = [s.planned_sec for s in steps]
+        assert sum(secs) == CONTENT_TOTAL_SEC == 300 and len(steps) == 5 and secs[0] == 40, area
+        assert [s.order for s in steps] == [1, 2, 3, 4, 5] and all(s.response_type == "PLAY" and s.script for s in steps), area
 
 
-def test_four_sets_five_minutes_each():
-    assert len(SETS) == 4 and {s.key for s in SETS} == {"A", "B", "C", "D"}
-    for st in SETS:
-        secs = [x[1] for x in st.steps]
-        assert sum(secs) == CONTENT_TOTAL_SEC == 300 and len(st.steps) == 5 and all(x % 30 == 0 and x >= 30 for x in secs), st.key
+def test_moves_are_shared_by_exact_name():
+    """앱은 단계 이름 전체로 넥스티 시범 동작을 고른다: 23개 이름, 같은 이름은 어느 루틴에서나 같은 안내."""
+    used = {n for names in ROUTINES.values() for n in names}
+    assert used == set(MOVE_NAMES) and len(MOVE_NAMES) == 23
+    assert ROUTINES["FULL"][3] == ROUTINES["NECK_SHOULDER"][3] == "목 옆으로 기울이기" and ROUTINES["BACK_HIP"][3] == ROUTINES["LEG"][3] == "4자 스트레칭"
 
 
-def test_every_step_name_maps_to_exactly_one_app_motion():
-    for st in SETS:
-        for name, _, _ in st.steps:
-            assert len(app_motion_groups(name)) == 1, f"{st.key} {name}: {app_motion_groups(name)}"     # 한 이름에 한 종류만 (여러 개면 앞선 것이 우선해 시범이 어긋난다)
-    assert not any("손목" in n for st in SETS for n, _, _ in st.steps)                                 # '손목'은 '목'에 걸려 목 시범이 나온다
-
-
-def test_sets_follow_safety_design():
-    for st in SETS:
-        for name, sec, script in st.steps:
-            assert 15 <= len(script) <= 190 and script.endswith("."), (st.key, name)
+def test_routines_follow_safety_design():
+    for area, names in ROUTINES.items():
+        postures = [MOVES[n].posture for n in names]
+        assert postures[0] in (LIE, SIDE), area                                                            # 막 깬 직후라 누워서 시작
+        assert [POSTURE_ORDER[p] for p in postures] == sorted(POSTURE_ORDER[p] for p in postures), area     # 누워서 → 앉아서 → 서서로만 올라간다
+        for n in names:
+            script = MOVES[n].script
+            assert 15 <= len(script) <= 190 and script.endswith("."), (area, n)
             holds = [int(x) for x in re.findall(r"(\d+)초", script)]
-            assert all(h <= 30 for h in holds) and sec >= max(holds, default=0), (st.key, name, holds)      # 한 번에 30초 이하(Harvard 15~30초, ACSM 10~30초)
-            assert not re.search(r"숙|굽혀|젖혀(?!지)|(?<!손)바닥|엎드|누워|뛰|점프|반동|세게 (당|누)", script), (st.key, name, script)   # 깊게 숙이기·바닥 동작·반동 없음, 목은 뒤로 젖히지 않음
-            assert "병" not in script and "치료" not in script and "효과" not in script                    # 의학적 표현 없음
-    neck = [s for st in SETS for n, _, s in st.steps if n.startswith("목")]
-    assert neck and all("젖히지 않아요" in s or "손으로 당기지 말고" in s for s in neck)                    # 목 동작에는 무리하지 않는 안내가 들어 있다
+            assert all(h <= 30 for h in holds), (area, n, holds)                                            # 한 번에 30초 이하 (ACSM 10~30초)
+            assert not re.search(r"숙|젖혀|엎드|뛰|점프|반동|세게 (당|누)", script), (area, n, script)         # 깊게 숙이기·반동 없음
+            assert "병" not in script and "치료" not in script and "효과" not in script                      # 의학적 표현 없음
+        assert "깊은 숨" in MOVES[names[-1]].script, area                                                  # 호흡으로 마무리
+    assert "손으로 당기지 말고" in MOVES["목 옆으로 기울이기"].script
+    assert MOVES["만세 기지개"].posture == STAND and MOVES["종아리 늘이기"].posture == STAND
 
 
-def test_each_set_warms_up_stretches_and_ends_calmly():
-    for st in SETS:
-        first, last = st.steps[0], st.steps[-1]
-        assert re.search(r"걷|으쓱|기지개", first[0]) and re.search(r"깊은 숨|마쳐요", last[2]), st.key       # 가벼운 동작으로 시작, 호흡으로 마무리
-        assert sum(1 for _, _, sc in st.steps if re.search(r"\d+초 (머물러|유지|동안)", sc)) >= 1
-
-
-def test_set_rotation_is_stable_per_day_and_covers_all_four():
-    assert pick_stretch_set(D0) is pick_stretch_set(D0)
-    assert {pick_stretch_set(D0 + timedelta(days=i)).key for i in range(4)} == {"A", "B", "C", "D"}
-    steps = stretch_steps(D0)
-    assert [s.order for s in steps] == [1, 2, 3, 4, 5] and all(s.response_type == "PLAY" and s.script for s in steps)
+def test_default_and_unknown_area_is_full_body():
+    assert [s.name for s in stretch_steps(D0)] == list(ROUTINES["FULL"]) == [s.name for s in area_steps("모름")]
+    assert [s.name for s in area_steps("neck_shoulder")] == list(ROUTINES["NECK_SHOULDER"])
 
 
 def test_stretch_compose_needs_no_ai_and_reports_option():

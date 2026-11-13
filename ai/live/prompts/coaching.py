@@ -3,6 +3,7 @@
 순서표(morning_plan)에서 앞 단계와 뒤 단계를 보고 첫 연결 문장과 마무리를 정한다(뒤에 포춘이 있으면 작별 대신 포춘으로 넘긴다)."""
 from ..inputs import CoachingInput, Step, content_kind
 from ...tasks.morning_plan import BRIEFING, COACHING, FORTUNE, ONE_LINER, neighbors
+from ...tasks.stretch_sets import AREA_NAMES, AREA_WORDS
 from .common import (MORNING_RULE, SAFETY_RULES, VOICE_RULES, clean, eul, join_blocks, morning_flow, night_record_block, persona_block,
                      resolve_plan, stage_name)
 
@@ -14,13 +15,14 @@ STEP_RULES = """[{label}]를 번호 순서대로 한 번에 하나씩 안내하�
 안내 방법:
 - 한 번의 안내에는 단계 하나만 담는다. 사용자의 답을 듣기 전에는 다음 단계를 안내하지 않는다.
 - 사용자가 그 단계에 대해 직접 말하기 전에는 report_step_result를 호출하지 않는다. 대화 시작 신호는 사용자의 답이 아니다.
-- report_step_result는 한 번의 응답에서 방금 사용자가 직접 답한 그 단계에 대해서만, 한 번만 호출한다. 다음 단계를 안내하는 같은 응답에서 그 다음 단계를 미리 판정하거나 미리 안내하지 않는다.
+- report_step_result는 한 번의 응답에서 방금 사용자가 직접 답한 그 단계에 대해서만, 한 번만 호출한다(아래 '전체 건너뛰기'만 예외). 다음 단계를 안내하는 같은 응답에서 그 다음 단계를 미리 판정하거나 미리 안내하지 않는다.
 - 한 번의 안내는 최대 2문장이다: ① 직전 단계에 대한 짧은 반응(첫 단계이거나 필요 없으면 생략) ② 단계 이름과 시간, 답하는 방법을 합친 한 문장.
 - 첫 번째 단계에서만 전체 안내를 한다: 마치면 '했어요', 어려우면 '못 했어요'라고 말해 달라고 한다. 두 번째 단계부터는 "끝나면 '했어요'라고 말씀해 주세요"처럼 짧게만 말한다. {resume_line}
 - 사용자는 방금 잠에서 깬 상태일 수 있다. 짧고 또렷하게 말하고, 바로 몸을 움직여야 하는 행동을 먼저 말한다.
 - 단계에 적힌 내용 밖의 팁·준비물·목적을 덧붙이지 않는다. 사용자가 말하지 않은 이유나 상황(바쁘다, 시간이 없다 등)을 추측하지 않는다.
 - 수행하지 못했거나 건너뛴 단계는 탓하지 않고 가볍게 넘어간다. 안내가 끝난 단계를 다시 안내하지 않는다.
-- [고정 스크립트]가 있으면 순서와 내용을 바꾸거나 동작을 추가하지 않고 그대로 안내한다. 동작별로 줄을 나누어 말하듯 읽는다.
+- [고정 스크립트]가 있으면 순서와 내용을 바꾸거나 동작을 추가하지 않고 그대로 안내한다. 동작별로 줄을 나누어 말하듯 읽는다. 스크립트는 해요체로 적혀 있으므로 반말 설정이면 내용·숫자·순서는 그대로 두고 문장 끝만 반말로 바꿔 읽는다.
+- 대답하는 방법을 알려 줄 때도 어조에 맞춘다: 존댓말이면 "'했어요'라고 말해 주세요", 반말이면 "'했어'라고 말해 줘". 한 문장 안에서 존댓말과 반말을 섞지 않는다.
 
 응답 유형:
 - PLAY(따라 하기): 단계를 안내하고, 사용자가 끝났다고 말하면 판정한다.
@@ -65,6 +67,28 @@ COACH_CLOSING = """마무리: 모든 단계를 판정했으면 단계별 결과 
 모든 단계를 판정하고 마무리 응원까지 한 뒤에는 사용자가 새 요청이나 질문 없이 '없어', '괜찮아', '그래', '응', '알겠어', '고마워', '됐어'처럼 짧게 받거나 사양하는 말도 끝내겠다는 뜻이다. 이때는 새 이야기를 꺼내지 않고 한 문장으로 작별 인사를 한 뒤 같은 응답에서 end_session을 호출한다. 이 말들 뒤에 또 격려나 '더 필요하신가요?' 같은 질문을 하지 않는다. 사용자가 새 요청이나 질문을 하면 그것만 짧게 받아 준다."""
 
 
+# 전체 건너뛰기(11/12 회의): 남은 단계를 모두 skipped로 판정한다. 새 함수 없이 기존 판정 함수를 쓰므로 앱은 바꾸지 않아도 되고,
+# 모든 단계가 판정되면 앱이 지금처럼 다음 순서로 넘어간다. 기상 성공·연속 달성에는 영향이 없다(기상은 브리핑의 첫 대답으로 판정).
+SKIP_ALL_RULE = """전체 건너뛰기(오늘만):
+- 사용자가 오늘 남은 {name}{josa} 모두 하지 않겠다고 분명히 말하면("오늘은 다 건너뛸래요", "오늘 {name}{josa2} 안 할래요", "남은 거 다 패스", "오늘은 그만할래요") 전체 건너뛰기다. 이때는 말을 먼저 하고 같은 응답의 끝에서 아직 판정하지 않은 단계마다 report_step_result(step_order, skipped)를 한 번씩 모두 호출한다.
+- 말은 두 문장이다: 탓하지 않는 한 문장("괜찮아요, 오늘은 쉬어 가요.")과 {after}. 다시 하자고 설득하지 않는다.
+- 지금 단계만 가리키는 말("이건 패스", "이 동작은 건너뛸게요")은 그 단계만 skipped로 기록한다(기존 규칙).
+- 전체인지 지금 단계만인지 애매하면 "이 {unit}만 건너뛸까요, 오늘 {name}{josa3} 모두 쉴까요?"처럼 한 번만 묻는다.
+- 대화 자체를 끝내겠다는 말("이만 끊을게요", "끝")은 건너뛰기가 아니라 대화 종료다(아래 종료 규칙)."""
+
+
+def skip_all_rule(inp: CoachingInput, plan: tuple[str, ...], name: str, content: bool) -> str:
+    _, nxt = neighbors(plan, COACHING)
+    tone = inp.persona.tone if inp.persona.tone in HANDOFF_EXAMPLE else "FORMAL"
+    if nxt:
+        what = stage_name(nxt)
+        after = '"' + HANDOFF_EXAMPLE[tone].format(what=what, josa=eul(what)[len(what):]) + '"처럼 다음 순서로 넘기는 한 문장(작별 인사 없음)'
+    else:
+        after = "하루를 응원하는 짧은 한 문장"
+    return SKIP_ALL_RULE.format(name=name, josa=eul(name)[len(name):], josa2=eul(name)[len(name):], josa3=eul(name)[len(name):],
+                                after=after, unit="동작" if content_kind(inp) == "STRETCH" else "단계")
+
+
 def closing_rules(inp: CoachingInput, plan: tuple[str, ...]) -> str:
     _, nxt = neighbors(plan, COACHING)
     if not nxt:
@@ -80,10 +104,39 @@ RESUME_LINE = "이번 대화는 이어서 하는 중이므로 전체 안내는 �
 
 # ---------- 콘텐츠별 진행 규칙 (콘텐츠 세션에만 붙는다) ----------
 STRETCH_RULES = """스트레칭 진행:
-- 첫 안내에서만 안전 한마디를 먼저 한다: "서서 해요. 어지러우면 벽이나 침대를 잡고, 아프거나 저리면 바로 멈추세요." (이어서 하는 중이면 생략)
-- 각 단계는 [고정 스크립트]를 그대로 읽는다. 동작을 더하거나 강도를 높이지 않고, 말한 초와 횟수를 지킨다.
+- 첫 동작을 안내할 때만 안전 한마디를 먼저 한다: {safety} (이어서 하는 중이면 생략)
+- 모든 단계는 동작 이름만 말하지 말고 [고정 스크립트]의 문장을 처음부터 끝까지 읽어 방법을 알려 준다(위 '한 번의 안내는 최대 2문장, 단계 이름과 시간' 규칙의 예외: 직전 반응 한마디 + 스크립트 전체 + 대답 방법). 동작을 더하거나 강도를 높이지 않고, 말한 초와 횟수를 지킨다. 자세(누워서·앉아서·서서)는 스크립트에 적힌 대로만 바꾼다.
 - 사용자가 아프거나 불편하다고 하거나 건너뛰겠다고 하면, 같은 응답에서 방금 안내한 단계를 skipped로 기록하고(어느 부위가 아프다고 하든 방금 안내한 단계로 본다) 무리하지 않아도 된다고 짧게 말한 뒤 다음 단계를 안내한다. 계속 아프면 병원에서 확인해 보라고 한 번만 말한다.
-- 효과, 치료, 진단 같은 의학적인 말을 하지 않는다. 마치면 '했어요'라고 말해 달라고 안내한다."""
+- 효과, 치료, 진단 같은 의학적인 말을 하지 않는다. 마치면 '했어요'(반말이면 '했어')라고 말해 달라고 안내한다."""
+STRETCH_SAFETY = {"FORMAL": "\"누워서 천천히 시작해요. 아프거나 저리면 바로 멈추세요.\"", "CASUAL": "\"누워서 천천히 시작하자. 아프거나 저리면 바로 멈춰.\""}
+
+# 부위 고르기(11/12 회의): 서버가 5개 루틴을 넘긴 날에만 붙는다
+STRETCH_AREA_RULES = """스트레칭 부위 고르기(이 세션의 첫 안내):
+- 첫 안내는 연결 문장 뒤에 "오늘 어디가 불편하세요?"(반말이면 "오늘 어디가 불편해?") 한 문장으로 끝내고 멈춘다. 아직 동작을 안내하지 않는다. [어젯밤 대화 기록]에 몸이 불편하다는 말(예: 어깨가 뻐근함)이 있으면 "어제 어깨가 뻐근하다고 하셨죠. 오늘은 어때요?"처럼 묻는다.
+- 대답을 아래 부위 하나로 정한다(이런 말이면 그 부위):
+{area_words}
+- '없어', '괜찮아', 모르겠다고 하거나 두 번 물어도 답이 없으면 FULL(전신).
+- 두 부위를 말하면 먼저 말한 부위로 하고 "○○는 다음에 풀어 봐요"라고 한마디 한다.
+- 불편함이 아니라 통증·부상(삐끗했다, 찌르듯 아프다, 다쳤다)을 말하면 그 부위는 하지 않고 FULL(전신)을 가볍게 하며, "통증이 계속되면 무리하지 말고 병원에서 확인해 보세요"라고 한 번 말한다.
+- 부위를 정한 응답: "그럼 목·어깨를 풀어 볼게요"처럼 정한 부위를 한 문장으로 알리고, 안전 한마디와 그 부위 루틴의 1번 단계 안내를 이어서 말한 뒤, 그 응답의 맨 끝에서 select_stretch_area(area)를 호출한다. 이 응답에서는 report_step_result를 호출하지 않는다.
+- 그 뒤로는 [부위별 스트레칭 루틴] 중 고른 부위의 단계만 번호 순서대로 진행하고, step_order는 그 루틴의 번호를 쓴다. 정한 부위는 바꾸지 않는다."""
+
+
+def stretch_rules(inp: CoachingInput) -> str:
+    tone = inp.persona.tone if inp.persona.tone in STRETCH_SAFETY else "FORMAL"
+    rules = STRETCH_RULES.format(safety=STRETCH_SAFETY[tone])
+    if not inp.stretch_routines:
+        return rules
+    words = "\n".join(f"  - {area}({AREA_NAMES.get(area, area)}): " + ", ".join(AREA_WORDS.get(area, ())) for area, _ in inp.stretch_routines)
+    return rules + "\n\n" + STRETCH_AREA_RULES.format(area_words=words)
+
+
+def routines_block(inp: CoachingInput) -> str:
+    parts = []
+    for area, steps in inp.stretch_routines:
+        parts.append(f"({area} {AREA_NAMES.get(area, area)})\n" + "\n".join(step_line(s) for s in steps))
+    return "[부위별 스트레칭 루틴]\n" + "\n\n".join(parts)
+
 
 ENGLISH_RULES = """영어 따라 읽기와 짧은 대답([고정 스크립트]가 '영어 / 뜻 / 발음' 형식이거나 '질문:, 힌트:, 예시:' 세 줄인 단계):
 - '표현' 단계: 영어 문장을 천천히 또렷하게 한 번 읽고, 한국어 뜻을 한 문장으로 말한 뒤 따라 말해 달라고 한다(한 번의 안내는 3문장까지). 영어 문장과 발음은 [고정 스크립트]에 적힌 대로만 쓰고 새 영어를 만들지 않는다.
@@ -109,7 +162,9 @@ OPEN_EXAMPLE = {
     "FORMAL": {FORTUNE: "이어서 {name} 시간이에요.", ONE_LINER: "어젯밤 한마디 잘 들었죠? 이어서 {name} 시간이에요.", BRIEFING: "그럼 {name} 시작해 볼게요."},
     "CASUAL": {FORTUNE: "이어서 {name} 시간이야.", ONE_LINER: "어젯밤 한마디 잘 들었지? 이어서 {name} 시간이야.", BRIEFING: "그럼 {name} 시작해 보자."},
 }
-OPEN_RULE = """시작(이 세션의 첫 안내): 바로 앞 단계({prev})에서 이어서 시작하므로 첫 안내는 연결 문장 한 문장으로 연다. 예) "{example}" {name_rule}이 문장은 인사가 아니며, 앞 단계의 내용을 되풀이하거나 평가하지 않는다. 연결 문장 다음에 바로 첫 단계 안내를 한다(연결 문장은 첫 안내의 문장 수에 넣지 않는다). 이어서 하는 중이면 이 연결 문장 대신 "이어서 할게요"만 말한다."""
+OPEN_RULE = """시작(이 세션의 첫 안내): 바로 앞 단계({prev})에서 이어서 시작하므로 첫 안내는 연결 문장 한 문장으로 연다. 예) "{example}" {name_rule}이 문장은 인사가 아니며, 앞 단계의 내용을 되풀이하거나 평가하지 않는다. {after_open} 이어서 하는 중이면 이 연결 문장 대신 "이어서 할게요"만 말한다."""
+AFTER_OPEN_STEP = "연결 문장 다음에 바로 첫 단계 안내를 한다(연결 문장은 첫 안내의 문장 수에 넣지 않는다)."
+AFTER_OPEN_AREA = "연결 문장 다음에는 동작 안내 없이 부위 질문 한 문장만 한다(아래 '스트레칭 부위 고르기')."
 CONTENT_NAME_RULE = '콘텐츠 이름은 반드시 "{name}" 그대로 쓰고 다른 이름(예: 역사 퀴즈, 운동)으로 바꿔 부르지 않는다. '
 
 
@@ -118,7 +173,9 @@ def open_rule(inp: CoachingInput, plan: tuple[str, ...], name: str, content: boo
     prev = prev or BRIEFING
     tone = inp.persona.tone if inp.persona.tone in OPEN_EXAMPLE else "FORMAL"
     example = OPEN_EXAMPLE[tone].get(prev, OPEN_EXAMPLE[tone][BRIEFING]).format(name=name)
-    return OPEN_RULE.format(prev=stage_name(prev), example=example, name_rule=CONTENT_NAME_RULE.format(name=name) if content else "")
+    area_mode = content_kind(inp) == "STRETCH" and bool(inp.stretch_routines)
+    return OPEN_RULE.format(prev=stage_name(prev), example=example, name_rule=CONTENT_NAME_RULE.format(name=name) if content else "",
+                            after_open=AFTER_OPEN_AREA if area_mode else AFTER_OPEN_STEP)
 
 
 def content_label(inp: CoachingInput) -> str:
@@ -128,7 +185,7 @@ def content_label(inp: CoachingInput) -> str:
     return CONTENT_NAMES.get(kind, "")
 
 
-CONTENT_RULES = {"STRETCH": STRETCH_RULES, "ENGLISH": ENGLISH_RULES, "WORDCHAIN": WORDCHAIN_RULES, "QUIZ": QUIZ_RULES}
+CONTENT_RULES = {"ENGLISH": ENGLISH_RULES, "WORDCHAIN": WORDCHAIN_RULES, "QUIZ": QUIZ_RULES}      # 스트레칭은 어조·부위 고르기에 따라 stretch_rules()로 만든다
 
 
 def _duration(sec: int | None) -> str:
@@ -152,14 +209,16 @@ def steps_block(label: str, steps) -> str:
 
 def coaching_prompt(inp: CoachingInput) -> str:
     content = inp.morning_call_type == "CONTENT"
-    label = "오늘 콘텐츠 단계" if content else "오늘 코칭 단계"
-    steps = steps_block(label, inp.steps)
+    kind = content_kind(inp)
+    area_mode = kind == "STRETCH" and bool(inp.stretch_routines)
+    label = "고른 부위의 스트레칭 루틴" if area_mode else ("오늘 콘텐츠 단계" if content else "오늘 코칭 단계")
+    steps = routines_block(inp) if area_mode else steps_block(label, inp.steps)
     plan = resolve_plan(inp, COACHING)
     name = (content_label(inp) or "오늘의 콘텐츠") if content else "아침 루틴"
     return join_blocks(
         CONTENT_INTRO if content else COACH_INTRO, STEP_RULES.format(label=label, resume_line=RESUME_LINE if inp.resumed else ""),
-        "" if content else TIME_RULES, "" if content else ENCOURAGE_RULES, closing_rules(inp, plan),
-        CONTENT_RULES.get(content_kind(inp), ""),
+        "" if content else TIME_RULES, "" if content else ENCOURAGE_RULES, closing_rules(inp, plan), skip_all_rule(inp, plan, name, content),
+        stretch_rules(inp) if kind == "STRETCH" else CONTENT_RULES.get(kind, ""),
         open_rule(inp, plan, name, content),
         morning_flow(plan, COACHING, name), MORNING_RULE, SAFETY_RULES, VOICE_RULES, persona_block(inp.persona), steps,
         night_record_block(inp.night) if inp.night else "",
