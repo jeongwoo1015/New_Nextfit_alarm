@@ -3,6 +3,7 @@ package com.example.respeclive.ui.morning
 import android.Manifest
 import android.content.pm.PackageManager
 import android.media.AudioManager
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -64,6 +65,7 @@ import com.example.respeclive.live.LiveAuth
 import com.example.respeclive.live.LiveClient
 import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.common.SubtitleBox
+import com.example.respeclive.ui.common.SubtitleNumbers
 import com.example.respeclive.ui.common.rememberHeldUserLine
 import com.example.respeclive.ui.common.rememberScreenScale
 import com.example.respeclive.ui.common.rememberSpokenPage
@@ -101,28 +103,38 @@ private const val QUIZ_REACTION_MS = 2800L
 /** 앱이 보내는 이벤트: 코칭 중 모든 단계를 판정함 */
 private const val ROUTINE_OVER = "routine_over"
 
-/** 이미 루틴을 다 마친 날 브리핑 시작 신호에 덧붙임: 루틴 안내·시작 질문을 하지 않게 함 */
+/**
+ * 이미 루틴을 다 마친 날 브리핑 시작 신호에 덧붙임: 루틴 안내·시작 질문을 하지 않게 함.
+ * AI 쪽에서 서버 입력 값(BriefingInput.already_done)으로 바꾸는 중이라, 반영됐다는 알림을 받으면 뺌
+ */
 private const val ALREADY_DONE_NOTE = "\n(앱 안내: 사용자는 오늘 루틴을 이미 모두 마쳤습니다. 브리핑에서 루틴이나 콘텐츠를 안내하거나 " +
         "시작할 준비가 됐는지 묻지 말고, start_routine도 호출하지 마세요. 브리핑 마지막에는 오늘 루틴을 이미 다 마쳤다고 짧게 칭찬하고, " +
         "사용자가 끝내겠다고 하면 작별 인사 뒤 end_session을 호출해 주세요.)"
 
-/**
- * 브리핑 마무리 질문을 '한마디·포춘부터 들어 볼까요?'로 바꿈. 브리핑 뒤에는 루틴이 아니라 한마디 → 포춘이 먼저 나오므로,
- * 여기서 루틴 준비를 묻고 "시작할게요"라고 하면 바로 한마디·포춘으로 넘어가 어색함. 루틴·콘텐츠 안내는 코칭 세션의 첫 말이 맡음.
- * what: "어젯밤 남긴 한마디와 오늘의 포춘" 또는 "오늘의 포춘"
- */
-private fun listenFirstNote(what: String) = "\n(앱 안내: 브리핑 다음에는 ${what}을 먼저 듣고, 그 뒤에 루틴이나 콘텐츠를 시작합니다. " +
-        "그래서 브리핑 마지막 질문은 루틴이나 콘텐츠를 시작할 준비가 됐는지가 아니라, ${what}부터 들어 볼지 묻는 한 문장으로 " +
-        "말투 설정에 맞춰 해 주세요(예: \"그럼 먼저 ${what}부터 들어 볼까요?\"). 사용자가 좋다고 하면 \"같이 들어 봐요\"처럼 한마디로만 반응한 뒤 " +
-        "start_routine을 호출하고, '시작할게요'처럼 루틴을 바로 시작하는 말이나 루틴 안내는 하지 마세요.)"
+// 모닝콜 순서표의 단계 (ai/tasks/morning_plan.py, AI CONTRACTS B15)
+private const val STAGE_BRIEFING = "BRIEFING"
+private const val STAGE_ONE_LINER = "ONE_LINER"
+private const val STAGE_COACHING = "COACHING"
+private const val STAGE_FORTUNE = "FORTUNE"
+private val PLAN_STAGES = setOf(STAGE_BRIEFING, STAGE_ONE_LINER, STAGE_COACHING, STAGE_FORTUNE)
+/** 서버가 순서표를 주지 않을 때의 순서. AI 프롬프트도 순서표가 없으면 이 순서(LEGACY_ORDER)로 안내함 */
+private val LEGACY_PLAN = listOf(STAGE_BRIEFING, STAGE_ONE_LINER, STAGE_FORTUNE, STAGE_COACHING)
 
 /**
- * 한마디·포춘 뒤 코칭 세션의 첫 연결 시작 신호에 덧붙임: 들은 것에서 루틴·콘텐츠로 넘어가는 한 문장을 먼저 하게 함
- * (없으면 포춘이 끝나자마자 1단계 안내가 나와 어색함). heard: "오늘의 포춘을" / "어젯밤 남긴 한마디를"
+ * 세션 시작 응답의 morning_plan (예: ["BRIEFING", "ONE_LINER", "COACHING", "FORTUNE"]).
+ * 모르는 값·중복은 버림. 없거나 브리핑이 없으면 null
  */
-private fun bridgeNote(heard: String) = "\n(앱 안내: 사용자는 방금 ${heard} 들었습니다. 첫 단계를 안내하기 전에 " +
-        "\"잘 들었죠? 그럼 이제 시작해 볼게요\"처럼 방금 들은 것에서 오늘의 루틴이나 콘텐츠로 넘어가는 짧은 한 문장을 말투 설정에 맞춰 먼저 해 주세요. " +
-        "들은 내용은 되풀이하지 말고, 이 첫 응답은 3문장까지 괜찮습니다.)"
+private fun morningPlan(view: JSONObject): List<String>? {
+    val arr = view.optJSONArray("morning_plan") ?: view.optJSONObject("session")?.optJSONArray("morning_plan") ?: return null
+    val plan = (0 until arr.length()).map { arr.optString(it).trim().uppercase(Locale.ROOT) }.filter { it in PLAN_STAGES }.distinct()
+    return plan.takeIf { it.firstOrNull() == STAGE_BRIEFING }
+}
+
+/** 재기상 음악을 틀 때 AI에게 보내는 알림: 이름을 불러 깨우고 깨우는 말을 한 단계 강하게 함 (AI CONTRACTS B17) */
+private const val REWAKE_NOTICE = "(앱 알림: 재기상 음악 재생)"
+
+/** 판정 보고가 사용자 말 받아쓰기보다 먼저 올 때, 받아쓰기를 기다리는 시간 (B19) */
+private const val REPORT_SPEECH_WAIT_MS = 1_500L
 
 /** 마무리 안내 자막을 보여 주는 시간 (앱은 읽지 않음) */
 private const val NOTE_SHOW_MS = 2_500L
@@ -140,8 +152,9 @@ private const val REWAKE_LEVEL = 3
 
 /**
  * 아침 대화 (Gemini Live). 지시문·함수는 서버가 토큰에 고정한다 (ai/live, AI CONTRACTS 2절).
- * 세션 시작 → 브리핑 세션(시작 질문에 대답) → 안내 후 어젯밤 한 마디 → 오늘의 포춘(포춘 세션, AI가 문장을 읽음)
- * → start_routine이면 코칭 세션(새 토큰) → 종료
+ * 세션 시작 → 순서표(morning_plan)대로 진행 → 종료. 단계: 브리핑 세션 / 어젯밤 한 마디 재생 / 코칭 세션(브리핑이 start_routine을 부른 날만)
+ * / 오늘의 포춘(포춘 세션, AI가 문장을 읽음). 순서표가 없으면 브리핑 → 한마디 → 포춘 → 코칭
+ * 단계를 잇는 말(다음 순서 안내, 앞 단계와 이어 말하기, 작별 인사)은 AI 프롬프트가 순서표를 보고 함
  * 이미 다 마친 날 다시 열면 브리핑에서 루틴을 안내하지 않음
  * initialSession: 알람 수신 화면에서 이미 만든 세션 (없으면 여기서 만듦)
  * onFinish: 통화가 끝나면 세션 id(세션을 만들지 못했으면 null)와 통화 길이(초)를 넘김
@@ -273,7 +286,10 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
         scope.launch {
             // 밤에 받아 둔 파일 → 서버 URL → (둘 다 없으면) 기기 기본 알람음
             val source = MusicStore.rewakeFile(context)?.absolutePath ?: RespecApi.musicUrl("rewake")
-            if (rewaking) rewakePlayer.start(level = REWAKE_LEVEL, soundUrl = source)
+            if (rewaking) {
+                rewakePlayer.start(level = REWAKE_LEVEL, soundUrl = source)
+                client.sendNotice(REWAKE_NOTICE)      // AI가 이름을 불러 깨움 (대화 원문·자막에는 안 남음)
+            }
             RespecApi.rewake(sid)
         }
     }
@@ -286,6 +302,8 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
 
     // ---- 아침 대화 진행 ----
     LaunchedEffect(Unit) {
+        var acceptedUserTurns = 0       // 마지막으로 받아들인 판정 보고 때의 사용자 말 횟수 (B19)
+        var skipUserTurns = -1          // 건너뛰기 보고를 받아들인 사용자 말 (같은 말에 이어 오는 skipped는 받음)
 
         // 판정 결과 반영: 새로 완료된 단계가 있으면 배너
         fun applyStepView(v: JSONObject) {
@@ -295,23 +313,51 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             if (newly != null) banner = Banner("${items.count { it.done }}번째 스텝 완료!", newly.title)
         }
 
+        // 판정 보고 검사 (AI CONTRACTS B19): AI가 사용자 대답 전에 미리 판정하거나 한 응답에서 두 단계를 보내는 일이 있어,
+        // ① 지금 진행 중인 단계이고 ② 직전에 받아들인 보고 뒤에 사용자가 말했을 때만 기록함.
+        // 예외: 건너뛰기(skipped)는 사용자가 말했으면 순서와 관계없이, 같은 말에 이어 온 skipped도 받음(전체 건너뛰기)
+        suspend fun acceptReport(order: Int, verdict: String): Boolean {
+            val current = items.firstOrNull { !it.done && !it.skipped }?.stepOrder
+            val skip = verdict == "skipped"
+            // 판정이 사용자 말 받아쓰기보다 먼저 도착하기도 해서, 지금 단계 보고면 받아쓰기를 잠깐 기다림
+            if (order == current && client.userTurns <= acceptedUserTurns) {
+                withTimeoutOrNull(REPORT_SPEECH_WAIT_MS) {
+                    while (client.userTurns <= acceptedUserTurns) delay(100)
+                }
+            }
+            val turns = client.userTurns
+            val spoke = turns > acceptedUserTurns
+            val ok = (spoke && (order == current || skip)) || (skip && turns == skipUserTurns)
+            if (ok) {
+                acceptedUserTurns = turns
+                if (skip) skipUserTurns = turns
+            } else {
+                Log.w("Morning", "판정 보고 무시: step=$order verdict=$verdict current=$current spoke=$spoke")
+            }
+            return ok
+        }
+
         client.onToolCall = { call ->
             when (call.name) {
                 "report_step_result" -> {
                     val sid = RoutineRepository.sessionId
                     val order = call.args.optInt("step_order", -1)
                     val verdict = call.args.optString("verdict")
-                    // 퀴즈 콘텐츠: AI가 정답 여부를 함께 보냄 → 넥스티가 바로 O / X
-                    if (call.args.has("answer_correct")) {
-                        val correct = call.args.optBoolean("answer_correct")
-                        withContext(Dispatchers.Main) {
-                            quizByTool = true
-                            reaction = if (correct) NextyMotion.QUIZ_O else NextyMotion.QUIZ_X
+                    // 받아들이지 않은 보고는 기록·화면 갱신을 건너뛰고, AI에게는 똑같이 ok만 돌려줌
+                    // (에러로 답하면 AI가 이유를 설명하려고 또 말함)
+                    if (withContext(Dispatchers.Main) { acceptReport(order, verdict) }) {
+                        // 퀴즈 콘텐츠: AI가 정답 여부를 함께 보냄 → 넥스티가 바로 O / X
+                        if (call.args.has("answer_correct")) {
+                            val correct = call.args.optBoolean("answer_correct")
+                            withContext(Dispatchers.Main) {
+                                quizByTool = true
+                                reaction = if (correct) NextyMotion.QUIZ_O else NextyMotion.QUIZ_X
+                            }
                         }
-                    }
-                    if (sid != null && order > 0 && verdict.isNotBlank()) {
-                        RespecApi.reportVerdict(sid, order, verdict)
-                            ?.let { v -> withContext(Dispatchers.Main) { applyStepView(v) } }
+                        if (sid != null && order > 0 && verdict.isNotBlank()) {
+                            RespecApi.reportVerdict(sid, order, verdict)
+                                ?.let { v -> withContext(Dispatchers.Main) { applyStepView(v) } }
+                        }
                     }
                     JSONObject().put("result", "ok")
                 }
@@ -385,9 +431,10 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             delay(NOTE_SHOW_MS)
         }
 
-        // 오늘의 포춘: 포춘 토큰으로 짧은 세션을 열어 AI가 문장을 읽고, 첫 응답이 끝나면(turnComplete) 다음 단계로.
+        // 오늘의 포춘: 포춘 토큰으로 짧은 세션을 열어 AI가 문장을 읽고, 첫 응답과 남은 음성이 끝나면 다음 단계로.
+        // 포춘이 마지막 순서면 AI가 작별 인사까지 하고 끝남(AI CONTRACTS B15).
         // 토큰을 못 받으면(503 AI_UNAVAILABLE 등) 건너뜀. 듣기만 하는 단계라 마이크는 열지 않음
-        // tokenJob: 어젯밤 한 마디를 듣는 동안 미리 요청해 둔 포춘 토큰. 포춘을 들려줬으면 true
+        // tokenJob: 미리 요청해 둔 포춘 토큰. 포춘을 들려줬으면 true
         suspend fun playFortune(tokenJob: Deferred<FortuneToken>): Boolean {
             stage = Stage.Fortune
             fortune = null
@@ -408,9 +455,52 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             val read = client.awaitFirstTurn(FORTUNE_MAX_MS)
             fortuneOpen = true
             if (read || t.text != null) delay(FORTUNE_HOLD_MS)
-            // 포춘 세션에서 온 함수 호출은 쓰지 않음 (다음 단계는 앞 세션의 start_routine / end_session대로)
+            // 포춘 세션에서 온 함수 호출은 쓰지 않음
             while (toolEvents.tryReceive().isSuccess) Unit
             return true
+        }
+
+        // 코칭(루틴·콘텐츠) 세션: 새 토큰으로 연결하고, 모든 단계를 판정하거나(routine_over) end_session이 오면
+        // AI의 마무리 말을 끝까지 들려준 뒤 끝냄. 앞 단계와 이어 말하기, 다음 단계(포춘)로 넘기는 말은 AI가 함(B15)
+        // tokenJob: 미리 요청해 둔 코칭 토큰(없으면 지금 요청), hasNext: 코칭 뒤에 이어지는 단계가 있음
+        suspend fun runCoaching(sid: String, tokenJob: Deferred<CoachingToken>?, hasNext: Boolean) {
+            while (toolEvents.tryReceive().isSuccess) Unit      // 앞 세션에서 남은 이벤트
+            stage = Stage.Coaching
+            notice = if (RoutineRepository.session?.isContent == true) "콘텐츠를 준비하는 중…" else "루틴을 준비하는 중…"
+            val first = tokenJob?.await() ?: RespecApi.coachingToken(sid)
+            val firstAuth = first.auth
+            if (firstAuth == null) {
+                first.steps?.let { RoutineRepository.applySteps(it) }
+                if (first.code != "ALL_STEPS_CHECKED") {      // 다 마친 날은 안내 없이 다음 단계로
+                    showNote(
+                        if (first.code == "COACHING_SKIPPED") {
+                            if (hasNext) "오늘은 루틴을 쉬어 가는 날이에요." else "오늘은 루틴을 쉬어 가는 날이에요. 좋은 하루 보내세요!"
+                        } else "루틴을 시작하지 못했어요. 루틴 탭에서 직접 체크해 주세요."
+                    )
+                }
+                return
+            }
+            client.stop()
+            first.steps?.let { RoutineRepository.applySteps(it) }
+            acceptedUserTurns = client.userTurns       // 판정 보고 검사(B19)는 코칭을 시작한 뒤의 사용자 말부터 셈
+            skipUserTurns = -1
+            coachingStarted = true
+
+            // 첫 연결은 받아 둔 토큰, 재연결은 서버가 남은 단계만 넣은 새 토큰
+            var pending: LiveAuth? = firstAuth
+            client.start {
+                pending?.also { pending = null } ?: RespecApi.coachingToken(sid).let { r ->
+                    r.steps?.let { steps -> withContext(Dispatchers.Main) { RoutineRepository.applySteps(steps) } }
+                    r.auth ?: RespecApi.tokenError()
+                }
+            }
+            while (true) {
+                val event = toolEvents.receive()
+                if (event == "end_session" || event == ROUTINE_OVER) break
+            }
+            // 마지막 판정 뒤 AI는 마무리 말을 이어서 함: 그 응답이 끝나고 음성 재생까지 마친 뒤 다음 단계로
+            client.awaitReplyEnd()
+            client.pauseMic()
         }
 
         // 1) 오늘 세션 (수신 화면에서 만들었으면 그대로, 아니면 지금 만듦)
@@ -429,80 +519,64 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
         val sid = RoutineRepository.sessionId ?: return@LaunchedEffect
         sessionId = sid
         val messageJob = async { findLastNightMessage() }
+        // 그날 순서표: 서버가 준 morning_plan, 없으면 예전 순서 (AI도 순서표가 없으면 예전 순서로 말함)
+        val plan = morningPlan(started) ?: LEGACY_PLAN
 
         // 2) 브리핑 세션. 이미 루틴을 다 마친 날이면 루틴 안내를 하지 않도록 시작 신호에 덧붙임
         // 이번 세션의 서버 단계로만 판단 (단계가 아직 없으면 처음 시작)
+        // 다음 단계를 묻는 마무리 질문과 단계 연결 말은 AI 프롬프트가 순서표를 보고 함 (앱은 덧붙이지 않음)
         val sessionSteps = items.filter { it.stepOrder != null }
         val doneAtStart = sessionSteps.isNotEmpty() && sessionSteps.all { it.done }
         micReady.await()
         val placeJob = async { DeviceLocation.lastKnown(context) }   // 재연결 때마다 다시 찾지 않도록 한 번만
         stage = Stage.Briefing
         notice = "리스펙과 연결하는 중…"
-        val coachingSkipped = RoutineRepository.session?.coachingSkipped == true
         client.start {
             // 오늘 일정은 폰 캘린더에서 (권한은 밤 대화에서 받음. 없으면 빈 일정), 날씨용 위치는 마지막으로 알던 위치
             val auth = RespecApi.briefingToken(sid, CalendarEvents.today(context), placeJob.await())
                 ?: RespecApi.tokenError()
-            val note = when {
-                doneAtStart -> ALREADY_DONE_NOTE
-                coachingSkipped -> ""          // 코칭이 없는 날은 마무리 질문 자체가 없음
-                else -> listenFirstNote(if (messageJob.await() != null) "어젯밤 남긴 한마디와 오늘의 포춘" else "오늘의 포춘")
-            }
-            if (note.isEmpty()) auth else LiveAuth(auth.token, auth.wsUrl, auth.model, auth.startSignal + note)
+            if (doneAtStart) LiveAuth(auth.token, auth.wsUrl, auth.model, auth.startSignal + ALREADY_DONE_NOTE) else auth
         }
 
-        // 3) 함수 호출에 따라 다음 세션으로 넘어가거나 종료
+        // 브리핑은 start_routine(코칭으로) 또는 end_session(코칭 없이 다음 단계로, 또는 사용자가 끝내자고 함)으로 끝남
+        val briefingEvent = toolEvents.receive()
+        client.awaitReplyEnd()      // AI의 마지막 말을 끝까지 들려줌
+        client.pauseMic()
         val message = messageJob.await()
-        var messageHeard = false
-        var heard: String? = null                              // 코칭 첫 말에서 이어받을 것 (bridgeNote)
-        var coachJob: Deferred<CoachingToken>? = null          // 포춘을 듣는 동안 미리 요청한 코칭 토큰
-        for (event in toolEvents) {
-            client.awaitSpeechEnd()      // AI의 마지막 말을 끝까지 들려줌. 연결은 마무리 안내까지 유지
-            client.pauseMic()
 
-            // 브리핑이 끝나면(루틴을 시작하든 통화를 끝내든) 어젯밤 한 마디 → 오늘의 포춘을 먼저 들려줌
-            // (브리핑 마무리에서 AI가 "먼저 한마디와 포춘부터 들어 볼까요?"라고 묻고 답을 들었음: listenFirstNote)
-            if (!messageHeard) {
-                messageHeard = true
-                val fortuneJob = async { RespecApi.fortuneToken(sid) }
-                if (message != null && playLastNightMessage(message)) heard = "어젯밤 남긴 한마디를"
-                // 루틴으로 넘어갈 거면 포춘을 듣는 동안 코칭 토큰을 미리 받아 둠 (콘텐츠는 단계를 만드느라 오래 걸림).
-                // 토큰은 받은 뒤 2분 안에 연결해야 하는데 포춘 단계는 그보다 짧음
-                if (event == "start_routine") coachJob = async { RespecApi.coachingToken(sid) }
-                if (playFortune(fortuneJob)) heard = "오늘의 포춘을"
+        // 3) 순서표의 나머지 단계를 차례로. 한마디는 재생할 녹음이 있을 때만, 코칭은 브리핑이 start_routine을 불렀을 때만
+        val rest = plan.drop(plan.indexOf(STAGE_BRIEFING) + 1).filter {
+            when (it) {
+                STAGE_ONE_LINER -> message != null
+                STAGE_COACHING -> briefingEvent == "start_routine"
+                else -> true
             }
-
-            // end_session, 또는 루틴의 모든 단계를 판정함(routine_over): 바로 마무리
-            if (event == "end_session" || event == ROUTINE_OVER) break
-
-            // start_routine: 코칭 토큰을 받으면 지금 세션을 닫고 새 토큰으로 코칭(콘텐츠 → 기본 루틴 순) 세션 시작
-            stage = Stage.Coaching
-            notice = if (RoutineRepository.session?.isContent == true) "콘텐츠를 준비하는 중…" else "루틴을 준비하는 중…"
-            val first = coachJob?.await() ?: RespecApi.coachingToken(sid)
-            coachJob = null
-            val firstAuth = first.auth
-            if (firstAuth == null) {
-                first.steps?.let { RoutineRepository.applySteps(it) }
-                if (first.code != "ALL_STEPS_CHECKED") {      // 다 마친 날은 아래에서 완수 안내
-                    showNote(
-                        if (first.code == "COACHING_SKIPPED") "오늘은 루틴을 쉬어 가는 날이에요. 좋은 하루 보내세요!"
-                        else "루틴을 시작하지 못했어요. 루틴 탭에서 직접 체크해 주세요."
-                    )
+        }
+        // 토큰은 받은 뒤 2분 안에 연결해야 하므로, 듣기만 하는 짧은 단계(한마디·포춘) 동안 바로 다음 단계의 토큰만 미리 받아 둠
+        var fortuneJob: Deferred<FortuneToken>? = null
+        var coachJob: Deferred<CoachingToken>? = null
+        fun prefetch(next: String?) {
+            when (next) {
+                STAGE_FORTUNE -> if (fortuneJob == null) fortuneJob = async { RespecApi.fortuneToken(sid) }
+                STAGE_COACHING -> if (coachJob == null) coachJob = async { RespecApi.coachingToken(sid) }
+            }
+        }
+        for ((i, step) in rest.withIndex()) {
+            val next = rest.getOrNull(i + 1)
+            when (step) {
+                STAGE_ONE_LINER -> {
+                    prefetch(next)
+                    message?.let { playLastNightMessage(it) }
                 }
-                break
-            }
-            client.stop()
-            first.steps?.let { RoutineRepository.applySteps(it) }
-            coachingStarted = true
-
-            // 첫 연결은 받아 둔 토큰(한마디·포춘에서 넘어가는 말을 덧붙임), 재연결은 서버가 남은 단계만 넣은 새 토큰
-            var pending: LiveAuth? = heard?.let { h ->
-                LiveAuth(firstAuth.token, firstAuth.wsUrl, firstAuth.model, firstAuth.startSignal + bridgeNote(h))
-            } ?: firstAuth
-            client.start {
-                pending?.also { pending = null } ?: RespecApi.coachingToken(sid).let { r ->
-                    r.steps?.let { steps -> withContext(Dispatchers.Main) { RoutineRepository.applySteps(steps) } }
-                    r.auth ?: RespecApi.tokenError()
+                STAGE_FORTUNE -> {
+                    prefetch(STAGE_FORTUNE)
+                    prefetch(next)
+                    fortuneJob?.let { playFortune(it) }
+                    fortuneJob = null
+                }
+                STAGE_COACHING -> {
+                    runCoaching(sid, coachJob, hasNext = next != null)
+                    coachJob = null
                 }
             }
         }
@@ -631,7 +705,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                 FortuneScene(
                     fortune = fortune,
                     opened = fortuneOpen,
-                    aiLine = lines.lastOrNull { it.role == LiveClient.Role.Assistant }?.text ?: notice,
+                    aiLine = lines.lastOrNull { it.role == LiveClient.Role.Assistant }?.text?.let(SubtitleNumbers::apply) ?: notice,
                     speaking = aiSpeaking,
                     onOpen = { if (fortune != null) fortuneOpen = true },
                     modifier = Modifier.weight(1f).fillMaxWidth()
@@ -845,32 +919,17 @@ private fun TimerRing(
 }
 
 /**
- * 스트레칭 단계 이름에 맞는 넥스티 시범 동작 (단계 이름·안내 문장은 ai/tasks/stretch_sets.py).
- * 이름에 여러 낱말이 겹치므로(예: "팔 흔들며 제자리 걷기"의 '팔') 더 구체적인 이름부터 확인함.
- * 맞는 것이 없으면 단계 순서대로 돌아가며 보여 줌
+ * 스트레칭 단계 이름에 맞는 넥스티 시범 동작. 넥스티 동작 이름이 AI 동작 이름(ai/tasks/stretch_sets.py MOVE_NAMES 23개)과
+ * 같아서 단계 이름 전체로 찾음. 모르는 이름이면 전신 루틴 동작을 단계 순서대로 돌아가며 보여 줌
  */
-private fun stretchMotionFor(name: String, order: Int): NextyMotion = when {
-    "걷기" in name -> NextyMotion.MARCH
-    "목" in name && ("돌리" in name || "턱" in name) -> NextyMotion.NECK_TURN
-    "목" in name -> NextyMotion.NECK
-    "으쓱" in name -> NextyMotion.SHRUG
-    "교차" in name -> NextyMotion.CROSS_PULL
-    "어깨뼈" in name -> NextyMotion.CHEST_W
-    "어깨" in name && "돌리" in name -> NextyMotion.SHOULDER_ROLL
-    "깍지" in name && "가슴" in name -> NextyMotion.BACK_CLASP
-    "벽" in name && "가슴" in name -> NextyMotion.WALL_CHEST
-    "가슴" in name -> NextyMotion.CHEST_W
-    "옆구리" in name && "한쪽" in name -> NextyMotion.RAINBOW_HOLD
-    "옆구리" in name -> NextyMotion.RAINBOW
-    "비틀" in name -> NextyMotion.TWIST
-    "허리" in name || "골반" in name -> NextyMotion.WAIST
-    "기지개" in name || "만세" in name || "팔" in name -> NextyMotion.OVERHEAD
-    "어깨" in name -> NextyMotion.SHOULDER_ROLL
-    else -> STRETCH_CYCLE[(order - 1).mod(STRETCH_CYCLE.size)]
+private fun stretchMotionFor(name: String, order: Int): NextyMotion {
+    val key = name.trim()
+    return NextyMotion.entries.firstOrNull { it.label == key }
+        ?: STRETCH_CYCLE[(order - 1).mod(STRETCH_CYCLE.size)]
 }
 
 private val STRETCH_CYCLE = listOf(
-    NextyMotion.OVERHEAD, NextyMotion.RAINBOW, NextyMotion.CHEST_W, NextyMotion.NECK, NextyMotion.WAIST
+    NextyMotion.LIE_REACH, NextyMotion.KNEE_ROCK, NextyMotion.KNEE_HUG, NextyMotion.NECK_TILT, NextyMotion.OVERHEAD
 )
 
 /** 포춘 문장 비교용: 공백·문장부호를 뺀 글자 */

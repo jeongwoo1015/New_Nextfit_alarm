@@ -32,7 +32,6 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.QuestionMark
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.*
@@ -77,8 +76,7 @@ private data class ContentKind(val code: String, val label: String, val desc: St
 
 private val CONTENTS = listOf(
     ContentKind("EXERCISE", "스트레칭", "넥스티와 함께 몸을 깨우며 건강한 아침을 시작해요", Icons.Filled.Accessibility),
-    ContentKind("LANGUAGE", "외국어", "매일 다른 영어 문장을 듣고 소리 내어 따라 읽어요", Icons.Filled.Translate),
-    ContentKind("QUIZ", "퀴즈", "인물 · 끝말잇기 · 음악 · 상식 퀴즈로 머리를 깨워요", Icons.Filled.QuestionMark),
+    ContentKind("LANGUAGE", "영어", "매일 다른 영어 문장을 듣고 소리 내어 따라 읽어요", Icons.Filled.Translate),
 )
 
 private val STEP_TITLES = listOf("기본 정보", "페르소나 설정", "아침 콘텐츠", "시작하기")

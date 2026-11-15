@@ -76,11 +76,27 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-// 대화(Live)가 끝난 뒤 앱이 읽는 고정 안내 문장
-private const val SAVE_QUESTION = "내일 아침의 나에게 들려줄 한 마디를 남겨 볼까요?"
-// 마무리 인사: 한 마디를 저장했으면 아침에 들려준다는 말을 앞에 붙임
-private const val CLOSING = "오늘 하루도 정말 수고했어요."
-private const val CLOSING_SAVED = "내일 아침 모닝콜에서 오늘 남긴 한 마디를 들려 드릴게요. 오늘 하루도 정말 수고했어요."
+/**
+ * 대화(Live)가 끝난 뒤 앱이 읽는 고정 안내 문장. 사용자 설정의 어조(RS_USER_SETTING.TONE)에 맞춰 존댓말 / 반말.
+ * closing: 마무리 인사, closingSaved: 한 마디를 저장했으면 아침에 들려준다는 말을 앞에 붙인 마무리 인사
+ */
+private class NightLines(val saveQuestion: String, val retry: String, val closing: String, val closingSaved: String)
+
+private val FORMAL_LINES = NightLines(
+    saveQuestion = "내일 아침의 나에게 들려줄 한 마디를 남겨 볼까요?",
+    retry = "잘 못 들었어요. 한 마디를 다시 들려주세요.",
+    closing = "오늘 하루도 정말 수고했어요.",
+    closingSaved = "내일 아침 모닝콜에서 오늘 남긴 한 마디를 들려 드릴게요. 오늘 하루도 정말 수고했어요."
+)
+private val CASUAL_LINES = NightLines(
+    saveQuestion = "내일 아침의 나에게 들려줄 한 마디를 남겨 볼까?",
+    retry = "잘 못 들었어. 한 마디를 다시 들려줘.",
+    closing = "오늘 하루도 정말 수고했어.",
+    closingSaved = "내일 아침 모닝콜에서 오늘 남긴 한 마디를 들려줄게. 오늘 하루도 정말 수고했어."
+)
+
+/** tone: FORMAL 존댓말 / CASUAL 반말. 모르거나 못 받았으면 존댓말 */
+private fun nightLines(tone: String?): NightLines = if (tone == "CASUAL") CASUAL_LINES else FORMAL_LINES
 
 // 말 감지 설정 (한 마디 녹음용)
 private const val MIN_THRESHOLD = 2500
@@ -235,6 +251,10 @@ fun NightChatScreen(onClose: () -> Unit) {
 
     // ---- 굿나잇콜 전체 진행 ----
     LaunchedEffect(Unit) {
+        // 앱이 읽는 고정 문장의 어조. 대화하는 동안 받아 둠 (못 받으면 존댓말)
+        val toneJob = async {
+            withTimeoutOrNull(8_000) { RespecApi.profile() }?.optJSONObject("setting")?.optString("tone")
+        }
 
         // 고정 안내 문장: 자막(페이지별) + 음성. 대화와 같은 AI 목소리로 읽고, 연결이 끊겼으면 기기 TTS
         suspend fun say(text: String) {
@@ -356,7 +376,7 @@ fun NightChatScreen(onClose: () -> Unit) {
         // AI가 마무리하며 끝냈으면(end_session) 한마디 녹음 안내를 AI가 이미 함. 사용자가 버튼으로 끝냈으면 앱이 안내
         val endedByAi = select<Boolean> {
             toolEvents.onReceive {
-                client.awaitSpeechEnd()
+                client.awaitReplyEnd()      // end_session 뒤에 이어지는 녹음 안내 말까지 끝까지 들려줌
                 true
             }
             endTalk.onReceive { false }
@@ -406,7 +426,8 @@ fun NightChatScreen(onClose: () -> Unit) {
         // 사용자가 먼저 "잘게요" 해서 AI가 인사만 하고 끝냈거나 버튼으로 끝냈으면 앱이 안내를 읽음
         val lastAi = turns.lastOrNull { it.role == LiveClient.Role.Assistant }?.text.orEmpty()
         val aiAnnounced = endedByAi && ("녹음" in lastAi || "한마디" in lastAi || "한 마디" in lastAi)
-        if (aiAnnounced) subtitle = SAVE_QUESTION else say(SAVE_QUESTION)
+        val texts = nightLines(withTimeoutOrNull(3_000) { toneJob.await() })
+        if (aiAnnounced) subtitle = texts.saveQuestion else say(texts.saveQuestion)
 
         var voice: File? = null
         var voiceText: String? = null      // 저장한 한 마디를 받아쓴 글 (업로드 뒤 서버에 보냄)
@@ -417,7 +438,7 @@ fun NightChatScreen(onClose: () -> Unit) {
             if (rec == null) {
                 if (skipSave) break
                 attempts += 1
-                if (attempts < 2) say("잘 못 들었어요. 한 마디를 다시 들려주세요.")
+                if (attempts < 2) say(texts.retry)
                 continue
             }
             pendingFile = rec
@@ -463,7 +484,7 @@ fun NightChatScreen(onClose: () -> Unit) {
             uploaded
         }
 
-        say(if (voice != null) CLOSING_SAVED else CLOSING)
+        say(if (voice != null) texts.closingSaved else texts.closing)
         client.stop()
 
         val saved = withTimeoutOrNull(SAVE_WAIT_MS) { uploadJob.await() } == true

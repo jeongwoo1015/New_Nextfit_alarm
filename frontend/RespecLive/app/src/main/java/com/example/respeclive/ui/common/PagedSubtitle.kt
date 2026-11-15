@@ -41,8 +41,9 @@ private const val PAGE_MAX_CHARS = 64     // 한 페이지 최대 글자 수 (�
 private const val CHAR_TYPE_MS = 60L       // 글자가 나오는 속도
 private const val HOLD_PER_CHAR_MS = 90L   // 페이지를 유지하는 시간. 음성보다 빠르면 키우고, 느리면 줄이기
 
+/** 자막 한 줄을 박스(페이지)로 나눔. 받아쓰기의 수 읽기("오 초")는 숫자 표기("5초")로 바꿔 보여 줌 (SubtitleNumbers) */
 fun splitSubtitlePages(text: String, maxChars: Int = PAGE_MAX_CHARS): List<String> {
-    val clean = text.trim().replace("\n", " ")
+    val clean = SubtitleNumbers.apply(text.trim().replace("\n", " "))
     if (clean.isEmpty()) return listOf("")
 
     val sentences = Regex("(?<=[.!?…])\\s+").split(clean)
@@ -156,7 +157,7 @@ fun rememberSpokenPage(lineKey: Any, text: String, fraction: Float): SpokenPage 
     val pages = splitSubtitlePages(text)
     val shown = remember(lineKey) { intArrayOf(0) }
     val target = if (fraction >= 1f) pages.lastIndex else {
-        val pos = ceil(text.length * fraction).toInt()
+        val pos = ceil(pages.sumOf { it.length + 1 } * fraction).toInt()     // 숫자 표기로 바뀐 글자 기준
         var end = 0
         pages.indexOfFirst { p -> end += p.length + 1; pos < end }.takeIf { it >= 0 } ?: pages.lastIndex
     }

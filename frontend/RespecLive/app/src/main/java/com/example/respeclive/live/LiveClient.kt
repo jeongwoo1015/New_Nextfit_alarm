@@ -29,6 +29,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "Live"
 
+/** 함수 호출 뒤 이 시간 안에 AI 말이 시작되지 않으면 마무리 말이 없는 것으로 봄 */
+private const val REPLY_START_WAIT_MS = 5_000L
+/** AI 음성이 끝난 뒤 이 시간 동안 새 응답이 없으면 말을 다 한 것으로 봄 */
+private const val QUIET_MS = 1_200L
+
 /**
  * Gemini Live 통화 한 건을 관리: 연결, 마이크 송신, AI 음성 재생, 자막, 끼어들기, 함수 호출, 재연결.
  *
@@ -90,10 +95,22 @@ class LiveClient(context: Context) {
     @Volatile private var micPaused = false        // 대화는 끝났고 안내 문장만 읽는 중 (재연결하지 않음)
     @Volatile private var dropAudio = false        // 건너뛴 안내 문장의 남은 음성을 버림
     private val turns = MutableStateFlow(0)        // AI 응답(turn)이 끝난 횟수
-    @Volatile private var turnOpen = false         // AI 응답이 진행 중 (음성·글자가 오는 중)
+    private val voicedTurns = MutableStateFlow(0)  // 그중 음성이 있었던 응답 수 (마무리 말이 끝났는지 볼 때 씀)
+    private val turnOpenFlow = MutableStateFlow(false)
+    private var turnOpen: Boolean                  // AI 응답이 진행 중 (음성·글자가 오는 중)
+        get() = turnOpenFlow.value
+        set(v) { turnOpenFlow.value = v }
+    @Volatile private var toolMark = 0             // 마지막 함수 호출이 왔을 때의 voicedTurns (awaitReplyEnd 기준)
+    private val userTurnCount = java.util.concurrent.atomic.AtomicInteger(0)
     @Volatile private var turnAudioMs = 0L         // 이번 응답에서 받은 음성 길이
     @Volatile private var newAssistantLine = false // 다음 AI 글자는 새 줄로 (응답마다 한 줄)
     @Volatile private var lastUserAt = 0L          // 사용자 말(받아쓰기·버튼)이 마지막으로 들어온 시각 (elapsedRealtime)
+
+    /**
+     * 사용자가 말한 횟수 (받아쓰기 새 줄 + 버튼 대답). start()로 초기화하지 않고 계속 늘어남.
+     * 판정 보고 검사(AI CONTRACTS B19)에서 "직전 보고 뒤에 사용자가 말했는가"를 볼 때 씀
+     */
+    val userTurns: Int get() = userTurnCount.get()
 
     /** speakExact로 읽게 한 문장의 받아쓰기 줄 번호 (화면이 이 줄을 보여 줌) */
     @Volatile var exactLineIndex = -1
@@ -219,10 +236,33 @@ class LiveClient(context: Context) {
         if (session.sendText(text)) appendLine(Role.User, text)
     }
 
+    /**
+     * 사용자 말이 아닌 앱 알림을 AI에게 글자로 보냄 (예: "(앱 알림: 재기상 음악 재생)").
+     * 받아쓰기(대화 원문·자막)에 넣지 않고 사용자 말 횟수에도 세지 않음
+     */
+    fun sendNotice(text: String): Boolean = _status.value == Status.Live && session.sendText(text)
+
     /** AI가 하던 말(남은 음성)을 다 재생할 때까지 기다림. end_session 뒤 작별 인사를 끝까지 들려주기 위함. */
     suspend fun awaitSpeechEnd(maxWaitMs: Long = 8_000L) {
         delay(600)      // 함수 호출 직후 도착하는 마지막 음성 조각을 기다림
         withTimeoutOrNull(maxWaitMs) { _aiSpeaking.first { !it } }
+    }
+
+    /**
+     * 마지막 함수 호출(판정 보고, end_session 등) 뒤 AI의 마무리 말을 끝까지 들려줌.
+     * AI는 함수를 먼저 보내고 마무리 말을 그다음에 하기도 해서, 시간만 잠깐 기다리면 말이 시작되기 전이나 중간에 끊김.
+     * 순서: 함수 호출 뒤 음성이 있는 응답의 turnComplete → 남은 음성 재생 → 잠깐 조용한지 확인(이어지는 응답이 있으면 그것까지).
+     * 함수 호출 뒤 REPLY_START_WAIT_MS 동안 말이 시작되지 않으면 할 말이 없는 것으로 봄. 연결이 끊기면 바로 끝냄
+     */
+    suspend fun awaitReplyEnd(maxWaitMs: Long = 25_000L) {
+        val since = toolMark
+        withTimeoutOrNull(maxWaitMs) {
+            val started = withTimeoutOrNull(REPLY_START_WAIT_MS) {
+                combine(voicedTurns, turnOpenFlow, _aiSpeaking) { v, open, speaking -> v > since || open || speaking }.first { it }
+            } != null
+            if (started && !awaitVoicedTurn(since)) return@withTimeoutOrNull
+            drainSpeech()
+        }
     }
 
     /**
@@ -234,8 +274,26 @@ class LiveClient(context: Context) {
             combine(turns, _status) { t, s -> if (t > 0) true else if (s == Status.Error || s == Status.Ended) false else null }
                 .first { it != null }
         } == true
-        if (done) awaitSpeechEnd(20_000L)
+        if (done) withTimeoutOrNull(25_000L) { drainSpeech() }
         return done
+    }
+
+    /** 음성이 있는 응답이 since보다 하나 더 끝날 때까지. 연결이 끊기면 false */
+    private suspend fun awaitVoicedTurn(since: Int): Boolean =
+        combine(voicedTurns, _status) { v, s -> if (v > since) true else if (s == Status.Error || s == Status.Ended) false else null }
+            .first { it != null } == true
+
+    /** 남은 음성 재생이 끝난 뒤 QUIET_MS 동안 새 응답이 시작되지 않을 때까지 (이어서 시작되면 그 응답이 끝날 때까지 다시) */
+    private suspend fun drainSpeech() {
+        while (true) {
+            _aiSpeaking.first { !it }
+            if (_status.value != Status.Live) return
+            val t = turns.value
+            withTimeoutOrNull(QUIET_MS) { turnOpenFlow.first { it } } ?: return
+            val ok = combine(turns, _status) { n, s -> if (n > t) true else if (s == Status.Error || s == Status.Ended) false else null }
+                .first { it != null } == true
+            if (!ok) return
+        }
     }
 
     /** 서버 저장용 대화 원문: [{role, text, at}] (RS_NIGHT_RAW.TRANSCRIPT 형식) */
@@ -342,9 +400,11 @@ class LiveClient(context: Context) {
                 newAssistantLine = true
             }
             LiveEvent.TurnComplete -> {
+                val voiced = turnAudioMs > 0
                 turnOpen = false
                 newAssistantLine = true
                 dropAudio = false
+                if (voiced) voicedTurns.update { it + 1 }
                 turns.update { it + 1 }
             }
             is LiveEvent.GoAway -> if (!micPaused) reconnect(maxOf(e.timeLeftMs - 8_000L, 0L))
@@ -356,24 +416,34 @@ class LiveClient(context: Context) {
                 else -> Unit
             }
 
-            is LiveEvent.ToolCall -> scope.launch {
-                val results = e.calls.mapNotNull { call ->
-                    _toolLog.update { it + "${call.name}(${call.args})" }
-                    val out = try {
-                        onToolCall(call)
-                    } catch (ex: Exception) {
-                        JSONObject().put("error", ex.message ?: "error")
-                    }
-                    out?.let { ToolResult(call.id, call.name, it) }
-                }
-                if (results.isNotEmpty() && !stopping) session.sendToolResponse(results)
+            is LiveEvent.ToolCall -> {
+                toolMark = voicedTurns.value      // 이벤트 순서대로 기록 (뒤따르는 turnComplete보다 먼저)
+                handleToolCall(e)
             }
+        }
+    }
+
+    private fun handleToolCall(e: LiveEvent.ToolCall) {
+        scope.launch {
+            val results = e.calls.mapNotNull { call ->
+                _toolLog.update { it + "${call.name}(${call.args})" }
+                val out = try {
+                    onToolCall(call)
+                } catch (ex: Exception) {
+                    JSONObject().put("error", ex.message ?: "error")
+                }
+                out?.let { ToolResult(call.id, call.name, it) }
+            }
+            if (results.isNotEmpty() && !stopping) session.sendToolResponse(results)
         }
     }
 
     /** 버튼 대답처럼 따로 들어온 말은 앞 줄에 이어 붙이지 않고 새 줄로 넣음 */
     private fun appendLine(role: Role, text: String) {
-        if (role == Role.User) lastUserAt = SystemClock.elapsedRealtime()
+        if (role == Role.User) {
+            lastUserAt = SystemClock.elapsedRealtime()
+            userTurnCount.incrementAndGet()
+        }
         _transcript.update { it + Line(role, text, System.currentTimeMillis()) }
     }
 
@@ -390,6 +460,8 @@ class LiveClient(context: Context) {
     private fun append(role: Role, text: String) {
         val split = role == Role.Assistant && newAssistantLine
         if (role == Role.Assistant) newAssistantLine = false
+        // 사용자 말이 새 줄로 시작하면 한 번으로 셈 (이어 붙는 받아쓰기 조각은 세지 않음)
+        if (role == Role.User && _transcript.value.lastOrNull()?.role != Role.User) userTurnCount.incrementAndGet()
         _transcript.update { list ->
             val last = list.lastOrNull()
             if (last != null && last.role == role && !split) {

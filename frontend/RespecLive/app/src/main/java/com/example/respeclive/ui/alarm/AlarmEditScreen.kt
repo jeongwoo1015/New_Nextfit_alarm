@@ -36,6 +36,7 @@ import com.example.respeclive.data.Alarm
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.data.MORNING_CONTENTS
+import com.example.respeclive.data.fixedContentOption
 import com.example.respeclive.ui.common.SubScreenHeaderTop
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.launch
@@ -47,7 +48,7 @@ private const val NAME_MAX = 20
 
 /**
  * 알람 만들기·고치기 (alarmId == -1 이면 새 알람): 시간 → 요일 → 이름 → 모닝콜 / 굿나잇콜.
- * 모닝콜이면 아침 콘텐츠(운동·외국어·퀴즈)를 고르고, 굿나잇콜은 더 고를 것이 없음.
+ * 모닝콜이면 아침 콘텐츠(스트레칭·영어)를 고르고, 굿나잇콜은 더 고를 것이 없음.
  * 모닝콜은 서버에, 굿나잇콜은 기기에만 저장. 종류를 바꾸면 저장할 때 AlarmRepository가 옮김.
  */
 @Composable
@@ -106,8 +107,8 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
             enabled = true,
             templateId = null,
             contentType = if (isBedtime) null else contentType,
-            // 세부 주제는 고르지 않음. 같은 콘텐츠면 이전 값 유지
-            contentOption = if (isBedtime) null else existing?.contentOption?.takeIf { existing.contentType == contentType }
+            // 세부는 고르지 않음: 스트레칭 STRETCH, 영어 ENGLISH로 고정 (예전 마사지·일본어 등도 저장하면 이 값으로 바뀜)
+            contentOption = if (isBedtime) null else fixedContentOption(contentType)
         )
         saving = true
         scope.launch {

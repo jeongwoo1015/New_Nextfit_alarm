@@ -5,22 +5,34 @@ enum class AlarmType(val route: String) {
     BEDTIME("nightCall")     // 굿나잇콜 수신 화면
 }
 
-/** 테마 = 콘텐츠 종류 (서버 content_type → 화면 이름). 고르면 콘텐츠 알람, 안 고르면 루틴 알람 */
-val THEMES = listOf("EXERCISE" to "운동", "LANGUAGE" to "외국어", "MEDITATION" to "명상", "QUIZ" to "퀴즈")
+/** 테마 = 콘텐츠 종류 (서버 content_type → 화면 이름). 고르면 콘텐츠 알람, 안 고르면 루틴 알람. 명상·퀴즈는 예전에 만든 알람 표시용 */
+val THEMES = listOf("EXERCISE" to "스트레칭", "LANGUAGE" to "영어", "MEDITATION" to "명상", "QUIZ" to "퀴즈")
 
 fun themeLabel(code: String?): String? = THEMES.firstOrNull { it.first == code }?.second
 
-/** 알람을 만들 때 고를 수 있는 아침 콘텐츠 (루틴·명상은 고르지 않기로 함) */
-val MORNING_CONTENTS = listOf("EXERCISE" to "운동", "LANGUAGE" to "외국어", "QUIZ" to "퀴즈")
+/**
+ * 알람을 만들 때 고를 수 있는 아침 콘텐츠: 스트레칭·영어 (11/12 회의, AI CONTRACTS B17).
+ * 명상·마사지·일본어·중국어는 새 알람에서 뺐고 퀴즈는 보류. 이미 만든 알람은 그대로 동작함
+ */
+val MORNING_CONTENTS = listOf("EXERCISE" to "스트레칭", "LANGUAGE" to "영어")
 
 /**
- * 콘텐츠 세부 (서버 CONTENT_OPTIONS, backend/domain/codes.py 11/10 기준).
- * 퀴즈·게임은 인물·상식·끝말잇기 3종이 기본(세부를 안 고르면 AI가 날짜별로 번갈아 정함), 과학·역사·넌센스는 예전 값
+ * 고를 수 있는 콘텐츠의 세부는 하나로 고정 (세부 선택 없음). 스트레칭 부위는 통화 중에 AI가 물어 정함
+ */
+fun fixedContentOption(type: String?): String? = when (type) {
+    "EXERCISE" -> "STRETCH"
+    "LANGUAGE" -> "ENGLISH"
+    else -> null
+}
+
+/**
+ * 콘텐츠 세부 (서버 CONTENT_OPTIONS, backend/domain/codes.py 11/10 기준). 예전에 만든 알람의 표시용.
+ * 스트레칭·영어는 테마 이름과 같아서 세부 이름을 따로 붙이지 않음 ("스트레칭 · 스트레칭" 방지)
  */
 val CONTENT_OPTIONS = mapOf(
     "MEDITATION" to listOf("BREATH" to "호흡", "BODY_SCAN" to "바디스캔"),
-    "EXERCISE" to listOf("STRETCH" to "스트레칭", "MASSAGE" to "마사지"),
-    "LANGUAGE" to listOf("ENGLISH" to "영어", "JAPANESE" to "일본어", "CHINESE" to "중국어"),
+    "EXERCISE" to listOf("MASSAGE" to "마사지"),
+    "LANGUAGE" to listOf("JAPANESE" to "일본어", "CHINESE" to "중국어"),
     "QUIZ" to listOf(
         "PERSON" to "인물", "GENERAL" to "상식", "WORDCHAIN" to "끝말잇기",
         "SCIENCE" to "과학", "HISTORY" to "역사", "NONSENSE" to "넌센스"

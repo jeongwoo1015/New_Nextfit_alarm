@@ -46,7 +46,7 @@ internal fun AlarmKindToggle(isBedtime: Boolean, onChange: (Boolean) -> Unit) {
     }
 }
 
-/** 모닝콜에서 함께 할 아침 콘텐츠 (CONTENT_TYPE): 운동 / 외국어 / 퀴즈 중 하나 */
+/** 모닝콜에서 함께 할 아침 콘텐츠 (CONTENT_TYPE): 스트레칭 / 영어 중 하나 */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun MorningContentPicker(selected: String?, onSelect: (String) -> Unit) {
