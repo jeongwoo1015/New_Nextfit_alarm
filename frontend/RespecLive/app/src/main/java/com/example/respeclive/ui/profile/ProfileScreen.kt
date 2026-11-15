@@ -34,7 +34,14 @@ import com.example.respeclive.ui.onboarding.Choice
 import com.example.respeclive.ui.onboarding.GENDERS
 import com.example.respeclive.ui.onboarding.GENRES
 import com.example.respeclive.ui.onboarding.InputField
-import com.example.respeclive.ui.onboarding.SPEECH_STYLES
+import com.example.respeclive.ui.onboarding.AUTO_INTENSITY_DESC
+import com.example.respeclive.ui.onboarding.DEFAULT_ENGLISH_LEVEL
+import com.example.respeclive.ui.onboarding.DEFAULT_INTENSITY
+import com.example.respeclive.ui.onboarding.DEFAULT_PERSONALITY
+import com.example.respeclive.ui.onboarding.ENGLISH_LEVELS
+import com.example.respeclive.ui.onboarding.INTENSITIES
+import com.example.respeclive.ui.onboarding.ToggleRow
+import com.example.respeclive.ui.onboarding.PERSONALITIES
 import com.example.respeclive.ui.onboarding.TONES
 import com.example.respeclive.ui.onboarding.VOICES
 import com.example.respeclive.ui.onboarding.VoicePreview
@@ -48,7 +55,10 @@ import org.json.JSONObject
 
 private const val FIELD_BIRTH = "birth_date"
 private const val FIELD_TONE = "tone"
-private const val FIELD_STYLE = "speech_style"
+private const val FIELD_PERSONALITY = "personality"
+private const val FIELD_INTENSITY = "intensity"
+private const val FIELD_AUTO_INTENSITY = "auto_intensity"
+private const val FIELD_ENGLISH_LEVEL = "english_level"
 private const val FIELD_VOICE = "voice_type"
 
 /** 기본 정보(PATCH /users/me)에 저장하는 항목. 나머지는 페르소나(PATCH /settings) */
@@ -89,9 +99,13 @@ fun ProfileScreen() {
         }
     }
 
-    // 서버가 돌려준 값으로 화면을 바꿈. 실패하면 false
+    // 서버가 돌려준 값으로 화면을 바꿈. 실패하면 false. 강도는 숫자, 자동 강도 올리기는 참·거짓으로 보냄
     suspend fun save(key: String, value: String): Boolean {
-        val body = JSONObject().put(key, value)
+        val body = when (key) {
+            FIELD_INTENSITY -> JSONObject().put(key, value.toInt())
+            FIELD_AUTO_INTENSITY -> JSONObject().put(key, value.toBoolean())
+            else -> JSONObject().put(key, value)
+        }
         return if (key in USER_FIELDS) RespecApi.updateUser(body)?.also { user = it } != null
         else RespecApi.updateSetting(body)?.also { setting = it } != null
     }
@@ -101,7 +115,10 @@ fun ProfileScreen() {
     when {
         shownUser != null && shownSetting != null -> {
             val tone = shownSetting.optString(FIELD_TONE)
-            val style = shownSetting.optString(FIELD_STYLE)
+            val personality = shownSetting.optString(FIELD_PERSONALITY).ifBlank { DEFAULT_PERSONALITY }
+            val intensity = shownSetting.optInt(FIELD_INTENSITY, DEFAULT_INTENSITY).toString()
+            val autoIntensity = shownSetting.optBoolean(FIELD_AUTO_INTENSITY, true)
+            val englishLevel = shownSetting.optString(FIELD_ENGLISH_LEVEL).ifBlank { DEFAULT_ENGLISH_LEVEL }
             Column(
                 Modifier
                     .fillMaxSize()
@@ -125,9 +142,32 @@ fun ProfileScreen() {
                     val genre = shownSetting.optString("music_genre")
                     InfoRow("호칭", callName, first = true) { editing = EditField("user_call_name", "호칭", callName, maxLen = 30) }
                     InfoRow("어조", labelOf(TONES, tone)) { editing = EditField(FIELD_TONE, "어조", tone, TONES) }
-                    InfoRow("말투", labelOf(SPEECH_STYLES, style)) { editing = EditField(FIELD_STYLE, "말투", style, SPEECH_STYLES) }
+                    InfoRow("성격", labelOf(PERSONALITIES, personality)) {
+                        editing = EditField(FIELD_PERSONALITY, "성격", personality, PERSONALITIES)
+                    }
+                    InfoRow("강도", labelOf(INTENSITIES, intensity)) {
+                        editing = EditField(FIELD_INTENSITY, "강도", intensity, INTENSITIES)
+                    }
+                    HorizontalDivider(Modifier.padding(horizontal = 18.dp), color = RespecColors.CardBorder)
+                    // 누르면 바로 저장 (실패하면 알림)
+                    Box(Modifier.padding(start = 18.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)) {
+                        ToggleRow("자동 강도 올리기", AUTO_INTENSITY_DESC, autoIntensity) { on ->
+                            scope.launch {
+                                if (!save(FIELD_AUTO_INTENSITY, on.toString())) {
+                                    Toast.makeText(context, ApiClient.lastError ?: "저장하지 못했어요", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    }
                     InfoRow("목소리", labelOf(VOICES, voice)) { editing = EditField(FIELD_VOICE, "목소리", voice, VOICES) }
                     InfoRow("음악 장르", labelOf(GENRES, genre)) { editing = EditField("music_genre", "음악 장르", genre, GENRES) }
+                }
+
+                SectionTitle("아침 콘텐츠")
+                InfoCard {
+                    InfoRow("영어 수준", labelOf(ENGLISH_LEVELS, englishLevel), first = true) {
+                        editing = EditField(FIELD_ENGLISH_LEVEL, "영어 수준", englishLevel, ENGLISH_LEVELS)
+                    }
                 }
 
                 SectionTitle("화면 테마")
@@ -148,7 +188,7 @@ fun ProfileScreen() {
             }
 
             editing?.let { field ->
-                EditDialog(field, tone, style, save = { save(field.key, it) }, onDismiss = { editing = null })
+                EditDialog(field, tone, personality, intensity, save = { save(field.key, it) }, onDismiss = { editing = null })
             }
             if (pickingBirth) {
                 BirthDatePicker(
@@ -178,12 +218,13 @@ fun ProfileScreen() {
     }
 }
 
-/** 항목 하나 수정. 어조·말투는 문장 미리보기, 목소리는 미리 듣기를 함께 보여 줌. 저장에 실패하면 창을 닫지 않고 오류를 보여 줌 */
+/** 항목 하나 수정. 어조·성격·강도는 문장 미리보기, 목소리는 미리 듣기를 함께 보여 줌. 저장에 실패하면 창을 닫지 않고 오류를 보여 줌 */
 @Composable
 private fun EditDialog(
     field: EditField,
     tone: String,
-    style: String,
+    personality: String,
+    intensity: String,
     save: suspend (String) -> Boolean,
     onDismiss: () -> Unit
 ) {
@@ -191,7 +232,11 @@ private fun EditDialog(
     var value by remember { mutableStateOf(field.current) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    val line = previewLine(if (field.key == FIELD_TONE) value else tone, if (field.key == FIELD_STYLE) value else style)
+    val line = previewLine(
+        if (field.key == FIELD_TONE) value else tone,
+        if (field.key == FIELD_PERSONALITY) value else personality,
+        if (field.key == FIELD_INTENSITY) value else intensity
+    )
 
     AlertDialog(
         onDismissRequest = { if (!saving) onDismiss() },
@@ -205,7 +250,7 @@ private fun EditDialog(
                 } else {
                     InputField(value, { value = it }, "${field.title}을 입력해 주세요", field.maxLen)
                 }
-                if (field.key == FIELD_TONE || field.key == FIELD_STYLE) {
+                if (field.key == FIELD_TONE || field.key == FIELD_PERSONALITY || field.key == FIELD_INTENSITY) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("예시", color = RespecColors.TextSub, fontSize = 12.sp)
                         Text("“$line”", color = RespecColors.Text, fontSize = 14.sp)

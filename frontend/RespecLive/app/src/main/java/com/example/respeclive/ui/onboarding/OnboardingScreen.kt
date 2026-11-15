@@ -66,7 +66,21 @@ internal data class Choice(val code: String, val label: String)
 
 internal val GENDERS = listOf(Choice("MALE", "남성"), Choice("FEMALE", "여성"), Choice("NONE", "선택 안 함"))
 internal val TONES = listOf(Choice("FORMAL", "존댓말"), Choice("CASUAL", "반말"))
-internal val SPEECH_STYLES = listOf(Choice("KIND", "다정한 말투"), Choice("FRIENDLY", "친근한 말투"), Choice("FIRM", "단호한 말투"))
+/** 성격 (RS_USER_SETTING.PERSONALITY). 예전 말투(SPEECH_STYLE)를 대신함 */
+internal val PERSONALITIES = listOf(
+    Choice("KIND", "다정한"), Choice("FRIENDLY", "친근한"), Choice("STRICT", "엄격한"), Choice("CHEERFUL", "유쾌한")
+)
+/** 깨우는 말의 강도 (RS_USER_SETTING.INTENSITY 1~3) */
+internal val INTENSITIES = listOf(Choice("1", "약하게"), Choice("2", "보통"), Choice("3", "강하게"))
+/** 영어 콘텐츠 수준 (RS_USER_SETTING.ENGLISH_LEVEL) */
+internal val ENGLISH_LEVELS = listOf(Choice("BEGINNER", "초급"), Choice("INTERMEDIATE", "중급"))
+
+internal const val DEFAULT_PERSONALITY = "KIND"
+internal const val DEFAULT_INTENSITY = 2
+internal const val DEFAULT_ENGLISH_LEVEL = "BEGINNER"
+
+/** 자동 강도 올리기 설명 (온보딩·내 정보) */
+internal const val AUTO_INTENSITY_DESC = "잘 일어나지 못한 날이 이어지면 깨우는 강도를 알아서 한 단계씩 올려요"
 internal val VOICES = listOf(Choice("FEMALE", "여성 목소리"), Choice("MALE", "남성 목소리"), Choice("NEUTRAL", "중성적인 목소리"))
 internal val GENRES = listOf(
     Choice("POP", "팝"), Choice("JAZZ", "재즈"), Choice("CLASSIC", "클래식"), Choice("DANCE", "댄스"), Choice("ACOUSTIC", "어쿠스틱")
@@ -81,14 +95,35 @@ private val CONTENTS = listOf(
 
 private val STEP_TITLES = listOf("기본 정보", "페르소나 설정", "아침 콘텐츠", "시작하기")
 
-/** 말투 미리보기 문장 (어조 × 말투) */
-internal fun previewLine(tone: String, style: String): String = when (tone to style) {
-    "FORMAL" to "FRIENDLY" -> "좋은 아침이에요~ 오늘 하루도 신나게 시작해 봐요!"
-    "FORMAL" to "FIRM" -> "일어날 시간입니다. 오늘 할 일을 바로 시작하세요."
-    "CASUAL" to "KIND" -> "좋은 아침이야! 오늘도 함께 시작해 볼까?"
-    "CASUAL" to "FRIENDLY" -> "좋은 아침~ 오늘 하루도 신나게 시작해 보자!"
-    "CASUAL" to "FIRM" -> "일어날 시간이야. 오늘 할 일 바로 시작하자."
-    else -> "좋은 아침이에요! 오늘도 함께 시작해 볼까요?"
+/** 미리보기 문장: 성격 → 강도(1~3) → (존댓말, 반말) */
+private val PREVIEW_LINES = mapOf(
+    "KIND" to listOf(
+        "좋은 아침이에요. 천천히 일어나도 괜찮아요." to "좋은 아침이야. 천천히 일어나도 괜찮아.",
+        "좋은 아침이에요! 오늘도 함께 시작해 볼까요?" to "좋은 아침이야! 오늘도 함께 시작해 볼까?",
+        "좋은 아침이에요! 이제 일어날 시간이에요, 같이 힘내 봐요!" to "좋은 아침이야! 이제 일어날 시간이야, 같이 힘내 보자!"
+    ),
+    "FRIENDLY" to listOf(
+        "좋은 아침이에요~ 기지개 한번 켜 볼까요?" to "좋은 아침~ 기지개 한번 켜 볼까?",
+        "좋은 아침이에요~ 오늘 하루도 신나게 시작해 봐요!" to "좋은 아침~ 오늘 하루도 신나게 시작해 보자!",
+        "일어나요, 일어나요~ 벌써 아침이에요! 얼른 시작해요!" to "일어나, 일어나~ 벌써 아침이야! 얼른 시작하자!"
+    ),
+    "STRICT" to listOf(
+        "일어날 시간이에요. 준비되면 시작해요." to "일어날 시간이야. 준비되면 시작하자.",
+        "일어날 시간입니다. 오늘 할 일을 바로 시작하세요." to "일어날 시간이야. 오늘 할 일 바로 시작하자.",
+        "지금 바로 일어나세요. 더 미룰 시간 없습니다." to "지금 바로 일어나. 더 미룰 시간 없어."
+    ),
+    "CHEERFUL" to listOf(
+        "굿모닝이에요! 오늘은 어떤 재밌는 일이 있을까요?" to "굿모닝! 오늘은 어떤 재밌는 일이 있을까?",
+        "짜잔, 아침이 왔어요! 오늘도 즐겁게 출발해 봐요!" to "짜잔, 아침이 왔어! 오늘도 즐겁게 출발하자!",
+        "기상 나팔 빰빠밤! 이불 밖으로 탈출할 시간이에요!" to "기상 나팔 빰빠밤! 이불 밖으로 탈출할 시간이야!"
+    )
+)
+
+/** 미리보기 문장 (어조 × 성격 × 강도) */
+internal fun previewLine(tone: String, personality: String, intensity: String): String {
+    val lines = PREVIEW_LINES[personality] ?: PREVIEW_LINES.getValue("KIND")
+    val pair = lines[((intensity.toIntOrNull() ?: 2) - 1).coerceIn(0, lines.lastIndex)]
+    return if (tone == "CASUAL") pair.second else pair.first
 }
 
 internal fun labelOf(list: List<Choice>, code: String) = list.firstOrNull { it.code == code }?.label ?: code
@@ -111,11 +146,14 @@ fun OnboardingScreen(onDone: () -> Unit) {
     // 2단계
     var callName by rememberSaveable { mutableStateOf("") }
     var tone by rememberSaveable { mutableStateOf("FORMAL") }
-    var style by rememberSaveable { mutableStateOf("KIND") }
+    var personality by rememberSaveable { mutableStateOf(DEFAULT_PERSONALITY) }
+    var intensity by rememberSaveable { mutableStateOf(DEFAULT_INTENSITY.toString()) }
+    var autoIntensity by rememberSaveable { mutableStateOf(true) }
     var voice by rememberSaveable { mutableStateOf("FEMALE") }
     var genre by rememberSaveable { mutableStateOf("POP") }
     // 3단계
     var contentType by rememberSaveable { mutableStateOf<String?>(null) }
+    var englishLevel by rememberSaveable { mutableStateOf(DEFAULT_ENGLISH_LEVEL) }
 
     var submitting by remember { mutableStateOf(false) }
     var submitError by remember { mutableStateOf<String?>(null) }
@@ -134,7 +172,10 @@ fun OnboardingScreen(onDone: () -> Unit) {
             .put("gender", gender)
             .put("user_call_name", callName.trim())
             .put("tone", tone)
-            .put("speech_style", style)
+            .put("personality", personality)
+            .put("intensity", intensity.toInt())
+            .put("auto_intensity", autoIntensity)
+            .put("english_level", englishLevel)
             .put("voice_type", voice)
             .put("music_genre", genre)
             .put("morning_call_type", "CONTENT")
@@ -177,13 +218,15 @@ fun OnboardingScreen(onDone: () -> Unit) {
             when (step) {
                 0 -> BasicInfoStep(name, { name = it }, birth, { birth = it }, gender, { gender = it })
                 1 -> PersonaStep(
-                    callName, { callName = it }, tone, { tone = it }, style, { style = it },
+                    callName, { callName = it }, tone, { tone = it }, personality, { personality = it },
+                    intensity, { intensity = it }, autoIntensity, { autoIntensity = it },
                     voice, { voice = it }, genre, { genre = it }
                 )
-                2 -> ContentStep(contentType) { contentType = it }
+                2 -> ContentStep(contentType, { contentType = it }, englishLevel, { englishLevel = it })
                 else -> SummaryStep(
-                    callName = callName, tone = tone, style = style, voice = voice, genre = genre,
-                    contentType = contentType,
+                    callName = callName, tone = tone, personality = personality, intensity = intensity,
+                    autoIntensity = autoIntensity, voice = voice, genre = genre,
+                    contentType = contentType, englishLevel = englishLevel,
                     error = submitError,
                     onEdit = { step = it }
                 )
@@ -338,6 +381,33 @@ private fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
+/** 켜기·끄기 한 줄: 제목 · 설명 · 스위치 */
+@Composable
+internal fun ToggleRow(title: String, desc: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = RespecColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(2.dp))
+            Text(desc, color = RespecColors.TextSub, fontSize = 13.sp, lineHeight = 18.sp)
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = RespecColors.OnAccent,
+                checkedTrackColor = RespecColors.Lime,
+                uncheckedThumbColor = RespecColors.TextSub,
+                uncheckedTrackColor = RespecColors.Background,
+                uncheckedBorderColor = RespecColors.CardBorder
+            )
+        )
+    }
+}
+
 @Composable
 internal fun InputField(value: String, onChange: (String) -> Unit, placeholder: String, maxLen: Int) {
     OutlinedTextField(
@@ -432,11 +502,13 @@ internal fun BirthDatePicker(birth: String?, onPick: (String) -> Unit, onDismiss
 private fun PersonaStep(
     callName: String, onCallName: (String) -> Unit,
     tone: String, onTone: (String) -> Unit,
-    style: String, onStyle: (String) -> Unit,
+    personality: String, onPersonality: (String) -> Unit,
+    intensity: String, onIntensity: (String) -> Unit,
+    autoIntensity: Boolean, onAutoIntensity: (Boolean) -> Unit,
     voice: String, onVoice: (String) -> Unit,
     genre: String, onGenre: (String) -> Unit
 ) {
-    val line = previewLine(tone, style)
+    val line = previewLine(tone, personality, intensity)
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         StepTitle("페르소나를 설정해 주세요")
@@ -445,8 +517,11 @@ private fun PersonaStep(
             InputField(callName, onCallName, "AI가 나를 부를 이름", 30)
             FieldLabel("어조")
             ChipRow(TONES, tone, onTone)
-            FieldLabel("말투")
-            ChipRow(SPEECH_STYLES, style, onStyle)
+            FieldLabel("성격")
+            ChipRow(PERSONALITIES, personality, onPersonality)
+            FieldLabel("강도")
+            ChipRow(INTENSITIES, intensity, onIntensity)
+            ToggleRow("자동 강도 올리기", AUTO_INTENSITY_DESC, autoIntensity, onAutoIntensity)
 
             val shape = RoundedCornerShape(18.dp)
             Row(
@@ -567,7 +642,10 @@ private fun Waveform(active: Boolean) {
 // ---------------- 3. 아침 콘텐츠 선택 ----------------
 
 @Composable
-private fun ContentStep(selected: String?, onSelect: (String) -> Unit) {
+private fun ContentStep(
+    selected: String?, onSelect: (String) -> Unit,
+    englishLevel: String, onEnglishLevel: (String) -> Unit
+) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Column {
             StepTitle("모닝콜 끝에\n무엇을 함께 할까요?", "브리핑이 끝나면 넥스티가 하나를 같이 해요.")
@@ -614,6 +692,13 @@ private fun ContentStep(selected: String?, onSelect: (String) -> Unit) {
                 }
             }
         }
+        // 영어를 고르면 수준도 고름
+        if (selected == "LANGUAGE") {
+            FormCard {
+                FieldLabel("영어 수준")
+                ChipRow(ENGLISH_LEVELS, englishLevel, onEnglishLevel)
+            }
+        }
         Spacer(Modifier.height(4.dp))
         Text(
             "나중에 알람 설정에서 언제든 바꿀 수 있어요.",
@@ -629,8 +714,9 @@ private fun ContentStep(selected: String?, onSelect: (String) -> Unit) {
 
 @Composable
 private fun SummaryStep(
-    callName: String, tone: String, style: String, voice: String, genre: String,
-    contentType: String?,
+    callName: String, tone: String, personality: String, intensity: String, autoIntensity: Boolean,
+    voice: String, genre: String,
+    contentType: String?, englishLevel: String,
     error: String?,
     onEdit: (Int) -> Unit
 ) {
@@ -647,10 +733,20 @@ private fun SummaryStep(
                 .border(1.dp, RespecColors.CardBorder, shape)
         ) {
             SummaryRow(Icons.Filled.PersonOutline, "호칭", callName) { onEdit(1) }
-            SummaryRow(Icons.Filled.ChatBubbleOutline, "말투", labelOf(SPEECH_STYLES, style), badge = labelOf(TONES, tone)) { onEdit(1) }
+            SummaryRow(
+                Icons.Filled.ChatBubbleOutline, "성격",
+                "${labelOf(PERSONALITIES, personality)} · ${labelOf(INTENSITIES, intensity)}" +
+                    if (autoIntensity) " · 자동 강도 올리기" else "",
+                badge = labelOf(TONES, tone)
+            ) { onEdit(1) }
             SummaryRow(Icons.Filled.GraphicEq, "목소리", labelOf(VOICES, voice)) { onEdit(1) }
             SummaryRow(Icons.Filled.MusicNote, "음악 장르", labelOf(GENRES, genre)) { onEdit(1) }
-            SummaryRow(Icons.Filled.ChecklistRtl, "아침 콘텐츠", content?.label ?: "-", last = true) { onEdit(2) }
+            val contentText = when {
+                content == null -> "-"
+                content.code == "LANGUAGE" -> "${content.label} · ${labelOf(ENGLISH_LEVELS, englishLevel)}"
+                else -> content.label
+            }
+            SummaryRow(Icons.Filled.ChecklistRtl, "아침 콘텐츠", contentText, last = true) { onEdit(2) }
         }
         if (error != null) {
             Spacer(Modifier.height(12.dp))
