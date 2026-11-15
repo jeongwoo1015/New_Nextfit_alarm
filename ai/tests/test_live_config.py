@@ -85,7 +85,7 @@ def test_briefing_contents():
     assert "[현재 시각]\n- 07:02" in p and "- 09:30~10:30 주간 회의" in p
     assert "[기상 알람]" not in p and "알람 시각이나 알람이 울렸다는 말은 하지 않는다" in p     # 이미 일어난 뒤라 알람 시각은 말하지 않는다
     assert "컨디션: 피곤함, 지침" in p
-    assert "'현실 모닝루틴' 시작할 준비가 됐는지 묻는" in p and "start_routine" in p
+    assert "그럼 먼저 오늘의 포춘부터 들어 볼까요?" in p and "start_routine" in p          # 순서표: 브리핑 다음은 포춘(지금 앱 순서), 루틴은 그 뒤
     assert "확인 질문 한 개를 한 문장으로 하고 멈춘다" in p and "사용자가 답하기 전에는 브리핑으로 넘어가지 않는다" in p
     assert "wake_check_done" not in p                     # 기상 확인은 앱이 사용자의 첫 대답으로 판단한다(함수 호출 없음)
 
@@ -97,10 +97,11 @@ def test_briefing_without_weather_or_night():
 
 def test_briefing_content_alarm_and_no_coaching():
     c = briefing_prompt(BriefingInput(content_name="퀴즈"))
-    assert "이어질 순서(오늘의 포춘 → 퀴즈)를 알리면서 시작할 준비가 됐는지 묻는" in c and "start_routine" in c
-    assert "한마디·포춘·콘텐츠의 진행은 이 대화에서 하지 않는다(다음 단계에서 한다)" in c
+    assert "다음 순서로 넘어갈지 묻는 질문 한 문장" in c and "start_routine" in c
+    assert "오늘의 포춘·퀴즈의 진행은 이 대화에서 하지 않는다(다음 단계에서 한다)" in c
     z = briefing_prompt(BriefingInput(coaching_skipped=True))
-    assert "코칭을 하지 않는 날" in z and "시작할 준비가 됐는지 묻는 질문도 하지 않는다" in z and "준비가 됐는지 묻는 질문 한 문장을 한다" not in z
+    assert "코칭을 하지 않는 날" in z and "시작하자는 말은 하지 않는다" in z and "start_routine" not in z
+    assert "그 턴에서 end_session을 호출한다" in z and "작별 인사를 하지 않는다" in z         # 코칭 없는 날은 end_session으로 다음 순서(듣기)에 넘긴다
 
 
 def test_tone_and_style():
@@ -116,7 +117,7 @@ def test_coaching_steps_and_script():
     p = coaching_prompt(CoachingInput(steps=STEPS, night=NIGHT))
     assert "1. 물 한 잔 (QA, 1분)" in p and "3. 오늘 할 일 3개 말하기 (SPEECH, 2분)" in p
     assert "[고정 스크립트] 목 돌리기\n어깨 돌리기" in p
-    assert "이어서 하는 중" not in p
+    assert "이번 대화는 이어서 하는 중이므로" not in p
     assert "직접 말하기 전에는 report_step_result를 호출하지 않는다" in p   # 시작 신호만으로 단계를 완료 처리하지 않는다
     assert "방금 사용자가 직접 답한 그 단계에 대해서만, 한 번만" in p       # 한 응답에서 다음 단계를 미리 판정하지 않는다
     assert "이어서 하는 중" in coaching_prompt(CoachingInput(steps=STEPS[1:], resumed=True))
@@ -200,7 +201,7 @@ def test_night_flow_new_design():
 
 def test_briefing_flow_new_design():
     p = briefing_prompt(BriefingInput(program_name="현실 모닝루틴", now_hhmm="07:02", events_today=EVENTS))
-    assert p.index("확인 질문 한 개를 한 문장으로") < p.index("준비가 됐는지 묻는 질문")
+    assert p.index("확인 질문 한 개를 한 문장으로") < p.index("다음 순서로 넘어갈지 묻는 질문")
     assert "start_routine을 호출하지 않는다" in p and "4~6문장" in p
     assert "대화는 사용자가 끝낸다" in p
 
@@ -211,7 +212,7 @@ def test_start_signals_updated():
 
 def test_briefing_ready_question_and_start_are_separate_turns():
     p = briefing_prompt(BriefingInput(program_name="현실 모닝루틴"))
-    assert "같은 응답에서 start_routine을 호출하지 않는다" in p and "사용자가 다음 말에서 준비됐다고 분명히 답하면" in p   # 질문과 시작을 한 턴에 하던 문제
+    assert "같은 응답에서 start_routine을 호출하지 않는다" in p and "사용자가 다음 말에서 좋다고 분명히 답하면" in p   # 질문과 시작을 한 턴에 하던 문제
     desc = tools_for("briefing")[0]["functionDeclarations"][0]["description"]
     assert "질문을 한 같은 응답에서는 호출하지 않는다" in desc
 
@@ -270,7 +271,7 @@ def test_adjust_step_time_declaration_and_rules():
 
 def test_briefing_asks_about_content_when_content_alarm_and_does_not_run_it():
     p = briefing_prompt(BriefingInput(program_name="현실 모닝루틴", content_name="퀴즈"))
-    assert "먼저 오늘의 포춘을 듣고 퀴즈 시간으로 넘어갈 건데, 준비됐어요?" in p and "'현실 모닝루틴' 시작할 준비가 됐는지 묻는" not in p     # 콘텐츠가 있으면 콘텐츠가 먼저
+    assert "그럼 먼저 오늘의 포춘부터 들어 볼까요?" in p and "'현실 모닝루틴' 루틴의 진행" not in p and "오늘의 포춘·퀴즈의 진행" in p     # 콘텐츠가 있으면 콘텐츠가 먼저
     assert "report_step_result" not in p.split("[현재 시각]")[0] or "콘텐츠 진행 규칙" not in p                     # 브리핑 세션은 단계를 진행하지 않는다
 
 
