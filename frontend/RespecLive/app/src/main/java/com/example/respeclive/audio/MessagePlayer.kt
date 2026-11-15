@@ -42,7 +42,7 @@ class MessagePlayer(private val baseUrl: String = "") {
             setSource(mp)
             mp.setOnCompletionListener { onComplete() }
             mp.prepare()
-            mp.setVolume(CallAudio.VOICE_GAIN, CallAudio.VOICE_GAIN)
+            mp.setVolume(CallAudio.MESSAGE_GAIN, CallAudio.MESSAGE_GAIN)
             player = mp
             true
         } catch (e: Exception) {

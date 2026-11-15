@@ -515,14 +515,14 @@ fun NightChatScreen(onClose: () -> Unit) {
         try {
             previewHolder[0]?.release()
             previewHolder[0] = MediaPlayer().apply {
-                setAudioAttributes(CallAudio.VOICE_ATTRIBUTES)   // AI 음성과 같은 통화 볼륨
+                setAudioAttributes(CallAudio.VOICE_ATTRIBUTES)   // AI 음성과 같은 통화 볼륨 (녹음 소리가 작아 비율은 더 크게)
                 setDataSource(file.absolutePath)
                 setOnCompletionListener {
                     it.release()
                     previewHolder[0] = null
                 }
                 prepare()
-                setVolume(CallAudio.VOICE_GAIN, CallAudio.VOICE_GAIN)
+                setVolume(CallAudio.MESSAGE_GAIN, CallAudio.MESSAGE_GAIN)
                 start()
             }
         } catch (e: Exception) {

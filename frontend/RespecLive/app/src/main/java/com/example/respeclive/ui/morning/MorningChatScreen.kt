@@ -146,7 +146,7 @@ private const val FORTUNE_HOLD_MS = 2_500L
 /** AI 말에서 포춘 문장의 앞 글자가 이만큼 나오면 쿠키를 엶 (공백·문장부호 빼고) */
 private const val FORTUNE_MATCH_CHARS = 6
 
-/** AI 질문 뒤 이 시간 동안 대답이 없으면 재기상 음악 (브리핑의 기상 확인 전까지만) */
+/** AI가 말을 마친 뒤 이 시간 동안 대답이 없으면 재기상 음악 (브리핑·코칭 내내, 스트레칭은 단계 타이머가 끝난 뒤부터) */
 private const val REWAKE_SILENCE_MS = 8_000L
 private const val REWAKE_LEVEL = 3
 
@@ -186,7 +186,6 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     var banner by remember { mutableStateOf<Banner?>(null) }
     var elapsed by remember { mutableIntStateOf(0) }
     var muted by remember { mutableStateOf(false) }
-    var wakeChecked by remember { mutableStateOf(false) }   // 확인 질문에 대답함 → 재기상 음악 더 이상 안 틂
     var rewaking by remember { mutableStateOf(false) }
     var messageText by remember { mutableStateOf<String?>(null) }   // 어젯밤 한 마디를 받아쓴 글자
     var wrapText by remember { mutableStateOf("") }        // 마무리 안내 문장
@@ -264,39 +263,13 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     }
 
     // 브리핑 확인 질문("잘 주무셨어요?")에 대한 첫 대답(말 또는 버튼): 첫 응답 기록 → 기상 확인 (AI CONTRACTS 6-1).
-    // AI는 wake_check_done을 부르지 않으므로 앱이 판정 시점을 알린다. 그 뒤로는 재기상 음악을 틀지 않는다.
+    // AI는 wake_check_done을 부르지 않으므로 앱이 판정 시점을 알린다.
     LaunchedEffect(lines, sessionId) {
         val sid = sessionId ?: return@LaunchedEffect
         if (!responded && lines.any { it.role == LiveClient.Role.User }) {
             responded = true
-            wakeChecked = true
             RespecApi.firstResponse(sid)
             RespecApi.wakeCheck(sid)?.let { RoutineRepository.applyView(it) }
-        }
-    }
-
-    // ---- 재기상: AI가 말을 마친 뒤 8초 무응답이면 음악 + POST /rewake. 사용자가 말하면(버튼 포함) 멈춤 ----
-    val lastRole = lines.lastOrNull()?.role
-    LaunchedEffect(stage, status, aiSpeaking, lastRole, wakeChecked, rewaking, sessionId) {
-        val sid = sessionId ?: return@LaunchedEffect
-        if (stage != Stage.Briefing || status != LiveClient.Status.Live || aiSpeaking || wakeChecked || rewaking) return@LaunchedEffect
-        if (lastRole != LiveClient.Role.Assistant) return@LaunchedEffect
-        delay(REWAKE_SILENCE_MS)
-        rewaking = true
-        scope.launch {
-            // 밤에 받아 둔 파일 → 서버 URL → (둘 다 없으면) 기기 기본 알람음
-            val source = MusicStore.rewakeFile(context)?.absolutePath ?: RespecApi.musicUrl("rewake")
-            if (rewaking) {
-                rewakePlayer.start(level = REWAKE_LEVEL, soundUrl = source)
-                client.sendNotice(REWAKE_NOTICE)      // AI가 이름을 불러 깨움 (대화 원문·자막에는 안 남음)
-            }
-            RespecApi.rewake(sid)
-        }
-    }
-    LaunchedEffect(lastRole, stage, rewaking) {
-        if (rewaking && (lastRole == LiveClient.Role.User || stage != Stage.Briefing)) {
-            rewakePlayer.stop()
-            rewaking = false
         }
     }
 
@@ -656,6 +629,35 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     val stepTotalMs = currentStep?.durationSec?.takeIf { it > 0 }?.times(1000L)
     val remainingMs = stepTotalMs?.takeIf { coachSpoke }?.let { (it - (nowMs - stepStartMs)).coerceIn(0L, it) }
     val timerFraction = if (remainingMs != null && stepTotalMs != null) remainingMs.toFloat() / stepTotalMs else null
+
+    // ---- 재기상: AI가 말을 마친 뒤 8초 동안 대답이 없으면 음악 + POST /rewake. 사용자가 말하면(버튼 포함) 멈춤 ----
+    // 한 번 대답한 뒤에도 브리핑·코칭 내내 다시 8초를 셈 (한 마디 재생·포춘처럼 듣기만 하는 단계는 제외).
+    // 스트레칭은 동작하는 동안 말이 없는 게 정상이라, 단계 타이머가 도는 동안은 세지 않고 타이머가 끝난 뒤부터 셈
+    val lastRole = lines.lastOrNull()?.role
+    val talkStage = stage == Stage.Briefing || (stage == Stage.Coaching && coachSpoke)
+    val stretchTimerRunning = stage == Stage.Coaching && contentType == "EXERCISE" && remainingMs != null && remainingMs > 0L
+    LaunchedEffect(talkStage, status, aiSpeaking, lastRole, stretchTimerRunning, rewaking, sessionId) {
+        val sid = sessionId ?: return@LaunchedEffect
+        if (!talkStage || status != LiveClient.Status.Live || aiSpeaking || stretchTimerRunning || rewaking) return@LaunchedEffect
+        if (lastRole != LiveClient.Role.Assistant) return@LaunchedEffect
+        delay(REWAKE_SILENCE_MS)
+        rewaking = true
+        scope.launch {
+            // 밤에 받아 둔 파일 → 서버 URL → (둘 다 없으면) 기기 기본 알람음
+            val source = MusicStore.rewakeFile(context)?.absolutePath ?: RespecApi.musicUrl("rewake")
+            if (rewaking) {
+                rewakePlayer.start(level = REWAKE_LEVEL, soundUrl = source)
+                client.sendNotice(REWAKE_NOTICE)      // AI가 이름을 불러 깨움 (대화 원문·자막에는 안 남음)
+            }
+            RespecApi.rewake(sid)
+        }
+    }
+    LaunchedEffect(lastRole, talkStage, rewaking) {
+        if (rewaking && (lastRole == LiveClient.Role.User || !talkStage)) {
+            rewakePlayer.stop()
+            rewaking = false
+        }
+    }
 
     // 퀴즈 예비 방법: AI가 정답 여부를 보내지 않는 동안만, 사용자가 답한 바로 뒤 넥스티의 말로 맞고 틀림을 추측해 O / X
     // (말이 끝나기 전에도 분명한 표현이면 바로 반응)

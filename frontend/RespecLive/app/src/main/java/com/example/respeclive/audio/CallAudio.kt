@@ -17,6 +17,12 @@ object CallAudio {
     /** 통화 볼륨은 최저가 1단계라 그보다 작게 들리도록 앱에서 줄이는 비율 (밤·아침, 모든 음성에 같은 값) */
     const val VOICE_GAIN = 0.1f
 
+    /**
+     * 사용자가 녹음한 한 마디(밤 미리듣기, 아침 재생)의 비율. 폰 마이크 녹음은 AI 음성보다 훨씬 작게 녹음되어
+     * VOICE_GAIN보다 크게 틂 (최대 1)
+     */
+    const val MESSAGE_GAIN = 0.35f
+
     val VOICE_ATTRIBUTES: AudioAttributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
