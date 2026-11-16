@@ -366,7 +366,7 @@ class SupabaseNightRepository(_Base):
 
 # ---------- 5. 모닝 세션·단계 ----------
 _SESSION_CHANGES = {"alarm_rang_at", "first_response_at", "planned_total_sec", "wake_checked_at", "wake_success", "session_end_at",
-                    "fortune_text", "fortune_style", "fortune_source", "content_option"}
+                    "fortune_text", "fortune_style", "fortune_source", "content_option", "applied_intensity", "stretch_area"}
 
 
 class SupabaseSessionRepository(_Base):
@@ -432,6 +432,19 @@ class SupabaseSessionRepository(_Base):
         except Conflict:                                  # 재연결로 동시에 만든 경우 기존 단계를 쓴다
             pass
         return self.list_steps(user_id, session_id)
+
+    def replace_pending_steps(self, user_id, session_id, plans: list[StepPlan]):
+        """통화 중 스트레칭 부위를 고를 때. 판정한 단계(DONE·SKIPPED)는 두고 PENDING 단계만 새 단계로 바꾼다.
+        새 단계 번호는 남은 단계 다음부터(아무것도 판정하지 않았으면 1번부터)라 plans의 step_order는 쓰지 않는다. 남의 세션이면 None."""
+        if not _is_uuid(session_id):
+            return None
+        steps = [{"step_name": p.step_name, "template_item_id": p.template_item_id,
+                  "planned_duration_sec": p.planned_duration_sec, "step_detail": p.step_detail} for p in plans]
+        params = {"p_user_id": user_id, "p_session_id": session_id, "p_steps": steps}
+        try:
+            return _models(SessionStep, self._run(self.db.rpc("rs_replace_pending_steps", params)))
+        except NotFound:                                  # '세션이 없습니다' = 없거나 남의 세션
+            return None
 
     def update_step_duration(self, user_id, session_id, step_order, duration_sec):
         """오늘 진행 중인 단계의 계획 시간 바꾸기(코칭 중 "오늘 스트레칭 적게 할래"). 오늘만 빼기는 save_step으로 SKIPPED.
