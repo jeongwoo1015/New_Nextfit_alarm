@@ -250,6 +250,15 @@ object RespecApi {
         return if (r.ok) r.json() else null
     }
 
+    /**
+     * 코칭 중 select_stretch_area 전달: 아직 판정하지 않은 단계를 그 부위 루틴으로 바꿈 → SessionViewOut.
+     * area: FULL / NECK_SHOULDER / ARM_WRIST / BACK_HIP / LEG. 이미 판정한 단계가 있거나 부위를 골랐으면 409 → null
+     */
+    suspend fun selectStretchArea(sessionId: String, area: String): JSONObject? {
+        val r = ApiClient.post("/morning/sessions/$sessionId/stretch-area", JSONObject().put("area", area)) ?: return null
+        return if (r.ok) r.json() else null
+    }
+
     /** 코칭 중 adjust_step_time 전달: 오늘만 단계 시간 변경 (30초 단위, 0 = 오늘만 빼기) → SessionViewOut. 거절이면 null */
     suspend fun changeStepDuration(sessionId: String, stepOrder: Int, durationSec: Int): JSONObject? {
         val r = ApiClient.patch("/morning/sessions/$sessionId/steps/$stepOrder/duration",

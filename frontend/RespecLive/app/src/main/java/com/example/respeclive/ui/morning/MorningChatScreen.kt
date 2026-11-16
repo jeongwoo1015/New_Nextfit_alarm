@@ -348,6 +348,25 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                         JSONObject().put("result", "error").put("reason", ApiClient.lastErrorCode ?: "INVALID_REQUEST")
                     }
                 }
+                // 스트레칭 부위 선택 (AI CONTRACTS B17): 아직 판정하지 않은 단계를 그 부위 루틴(1번부터)으로 바꿈.
+                // 이미 판정한 단계가 있거나 부위를 골랐으면 서버가 409(STRETCH_AREA_LOCKED) → 기존 단계로 진행.
+                // AI에게는 어느 쪽이든 ok만 돌려줌
+                "select_stretch_area" -> {
+                    val sid = RoutineRepository.sessionId
+                    val area = call.args.optString("area")
+                    val view = if (sid != null && area.isNotBlank()) RespecApi.selectStretchArea(sid, area) else null
+                    withContext(Dispatchers.Main) {
+                        if (view != null) {
+                            RoutineRepository.applyView(view)
+                            // 부위를 말한 대답은 새 1번 단계의 판정 근거가 아님 → 1번은 이 뒤의 사용자 말부터 받음 (B19)
+                            acceptedUserTurns = client.userTurns
+                            skipUserTurns = -1
+                        } else {
+                            Log.w("Morning", "스트레칭 부위 변경 안 됨: area=$area ${ApiClient.lastErrorCode ?: ""}")
+                        }
+                    }
+                    JSONObject().put("result", "ok")
+                }
                 // 응답을 보내지 않음: 앱이 세션을 닫거나 다음 세션으로 넘어감
                 "start_routine", "end_session" -> {
                     toolEvents.trySend(call.name)
@@ -619,7 +638,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     // 단계 타이머: AI가 코칭 안내를 시작한 뒤, 단계가 바뀔 때마다 그 단계의 계획 시간부터 줄어듦 (계획 시간이 없으면 없음)
     var stepStartMs by remember { mutableLongStateOf(0L) }
     var nowMs by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(currentStep?.stepOrder, coachSpoke) { stepStartMs = System.currentTimeMillis() }
+    LaunchedEffect(currentStep?.stepOrder, currentStep?.title, coachSpoke) { stepStartMs = System.currentTimeMillis() }
     LaunchedEffect(showRoutine) {
         while (showRoutine) {
             nowMs = System.currentTimeMillis()
