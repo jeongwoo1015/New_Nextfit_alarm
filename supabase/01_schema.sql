@@ -56,7 +56,13 @@ create table if not exists rs_user_setting (
   tone                 varchar(10) not null default 'FORMAL'
                        check (tone in ('FORMAL', 'CASUAL')),
   speech_style         varchar(20) not null default 'KIND'
-                       check (speech_style in ('KIND', 'FRIENDLY', 'FIRM')),
+                       check (speech_style in ('KIND', 'FRIENDLY', 'FIRM')),   -- 11/13부터 personality로 대체, 서버 전환 후 삭제 예정
+  personality          varchar(20) not null default 'KIND'
+                       check (personality in ('KIND', 'FRIENDLY', 'STRICT', 'CHEERFUL')),
+  intensity            smallint not null default 2 check (intensity between 1 and 3),   -- 깨우는 말의 강도 1 약 / 2 중 / 3 강
+  auto_intensity       boolean not null default true,     -- 잘 못 일어나는 날이 이어지면 강도를 자동으로 올림
+  english_level        varchar(20) not null default 'BEGINNER'
+                       check (english_level in ('BEGINNER', 'INTERMEDIATE')),
   voice_type           varchar(20) not null default 'FEMALE'
                        check (voice_type in ('FEMALE', 'MALE', 'NEUTRAL')),
   sleep_alarm_enabled  boolean not null default true,
@@ -306,6 +312,9 @@ create table if not exists rs_morning_session (
   fortune_text       varchar(200),                      -- 오늘의 포춘 문장 (어젯밤 한마디 기반, 없으면 한 줄 일기)
   fortune_style      varchar(10) check (fortune_style in ('COOKIE', 'HOROSCOPE')),
   fortune_source     varchar(10) check (fortune_source in ('ai', 'fallback', 'safe')),
+  applied_intensity  smallint check (applied_intensity between 1 and 3),   -- 그날 실제로 쓴 강도 (자동 강도 반영 후)
+  stretch_area       varchar(20)                        -- 그날 고른 스트레칭 부위
+                     check (stretch_area in ('FULL', 'NECK_SHOULDER', 'ARM_WRIST', 'BACK_HIP', 'LEG')),
   unique (alarm_id, session_date),
   constraint rs_session_type_fields check (
     (morning_call_type = 'ROUTINE' and template_id is not null and content_type is null)
@@ -377,6 +386,37 @@ end $$;
 drop trigger if exists trg_session_step_check on rs_session_step;
 create trigger trg_session_step_check before insert or update on rs_session_step
   for each row execute function rs_session_step_check();
+
+-- 판정하지 않은 단계만 새 단계로 교체 (서버 전용, 통화 중 스트레칭 부위를 고를 때)
+--  p_steps: [{"step_name": "...", "planned_duration_sec": 60, "step_detail": {...}}, ...] 새로 진행할 단계
+--  DONE·SKIPPED 단계는 그대로 두고, PENDING 단계를 지운 뒤 남은 단계 다음 번호부터 넣는다
+drop function if exists rs_replace_pending_steps(uuid, uuid, jsonb);
+create function rs_replace_pending_steps(p_user_id uuid, p_session_id uuid, p_steps jsonb)
+returns setof rs_session_step
+language plpgsql as $$
+declare
+  base int;
+begin
+  if not exists (select 1 from rs_morning_session s where s.session_id = p_session_id and s.user_id = p_user_id) then
+    raise exception '세션이 없습니다' using errcode = 'P0002';
+  end if;
+  if jsonb_typeof(p_steps) is distinct from 'array' or jsonb_array_length(p_steps) = 0 then
+    raise exception 'p_steps는 비어 있지 않은 JSON 배열이어야 합니다';
+  end if;
+
+  delete from rs_session_step x where x.session_id = p_session_id and x.step_status = 'PENDING';
+  select coalesce(max(x.step_order), 0) into base from rs_session_step x where x.session_id = p_session_id;
+
+  insert into rs_session_step (user_id, session_id, step_order, step_name, template_item_id, planned_duration_sec, step_detail)
+  select p_user_id, p_session_id, base + e.n::int, v.step_name, v.template_item_id, v.planned_duration_sec, v.step_detail
+  from jsonb_array_elements(p_steps) with ordinality as e(item, n),
+       jsonb_to_record(e.item) as v(step_name varchar, template_item_id uuid, planned_duration_sec int, step_detail jsonb);
+
+  return query select * from rs_session_step x where x.session_id = p_session_id order by x.step_order;
+end $$;
+
+revoke execute on function rs_replace_pending_steps(uuid, uuid, jsonb) from public, anon, authenticated;
+grant execute on function rs_replace_pending_steps(uuid, uuid, jsonb) to service_role;
 
 
 -- 9. AI 생성 음악 (공용 캐시, 사용자·알람 FK 없음)

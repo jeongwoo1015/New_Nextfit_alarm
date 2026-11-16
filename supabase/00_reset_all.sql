@@ -40,7 +40,8 @@ drop function if exists
   rs_night_routine_item_check(),
   rs_night_routine_total_check(),
   rs_night_alarm_changed(),
-  rs_replace_night_routine_items(uuid, uuid, jsonb)
+  rs_replace_night_routine_items(uuid, uuid, jsonb),
+  rs_replace_pending_steps(uuid, uuid, jsonb)
 cascade;
 
 -- 남은 rs_ 테이블 확인 (0이어야 함)
