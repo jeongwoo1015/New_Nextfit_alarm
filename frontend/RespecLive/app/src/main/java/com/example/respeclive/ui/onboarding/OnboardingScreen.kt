@@ -648,7 +648,7 @@ private fun ContentStep(
 ) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Column {
-            StepTitle("모닝콜 끝에\n무엇을 함께 할까요?", "브리핑이 끝나면 넥스티가 하나를 같이 해요.")
+            StepTitle("모닝콜에서\n무엇을 함께 할까요?", "브리핑이 끝나면 넥스티가 하나를 같이 해요.")
         }
         CONTENTS.forEach { c ->
             val on = c.code == selected
