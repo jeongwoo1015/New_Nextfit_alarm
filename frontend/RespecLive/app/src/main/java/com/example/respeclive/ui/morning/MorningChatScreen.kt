@@ -103,14 +103,6 @@ private const val QUIZ_REACTION_MS = 2800L
 /** 앱이 보내는 이벤트: 코칭 중 모든 단계를 판정함 */
 private const val ROUTINE_OVER = "routine_over"
 
-/**
- * 이미 루틴을 다 마친 날 브리핑 시작 신호에 덧붙임: 루틴 안내·시작 질문을 하지 않게 함.
- * AI 쪽에서 서버 입력 값(BriefingInput.already_done)으로 바꾸는 중이라, 반영됐다는 알림을 받으면 뺌
- */
-private const val ALREADY_DONE_NOTE = "\n(앱 안내: 사용자는 오늘 루틴을 이미 모두 마쳤습니다. 브리핑에서 루틴이나 콘텐츠를 안내하거나 " +
-        "시작할 준비가 됐는지 묻지 말고, start_routine도 호출하지 마세요. 브리핑 마지막에는 오늘 루틴을 이미 다 마쳤다고 짧게 칭찬하고, " +
-        "사용자가 끝내겠다고 하면 작별 인사 뒤 end_session을 호출해 주세요.)"
-
 // 모닝콜 순서표의 단계 (ai/tasks/morning_plan.py, AI CONTRACTS B15)
 private const val STAGE_BRIEFING = "BRIEFING"
 private const val STAGE_ONE_LINER = "ONE_LINER"
@@ -514,20 +506,16 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
         // 그날 순서표: 서버가 준 morning_plan, 없으면 예전 순서 (AI도 순서표가 없으면 예전 순서로 말함)
         val plan = morningPlan(started) ?: LEGACY_PLAN
 
-        // 2) 브리핑 세션. 이미 루틴을 다 마친 날이면 루틴 안내를 하지 않도록 시작 신호에 덧붙임
-        // 이번 세션의 서버 단계로만 판단 (단계가 아직 없으면 처음 시작)
+        // 2) 브리핑 세션. 이미 루틴을 다 마친 날은 서버가 AI 입력(already_done)으로 알려 루틴 안내를 하지 않음
         // 다음 단계를 묻는 마무리 질문과 단계 연결 말은 AI 프롬프트가 순서표를 보고 함 (앱은 덧붙이지 않음)
-        val sessionSteps = items.filter { it.stepOrder != null }
-        val doneAtStart = sessionSteps.isNotEmpty() && sessionSteps.all { it.done }
         micReady.await()
         val placeJob = async { DeviceLocation.lastKnown(context) }   // 재연결 때마다 다시 찾지 않도록 한 번만
         stage = Stage.Briefing
         notice = "리스펙과 연결하는 중…"
         client.start {
             // 오늘 일정은 폰 캘린더에서 (권한은 밤 대화에서 받음. 없으면 빈 일정), 날씨용 위치는 마지막으로 알던 위치
-            val auth = RespecApi.briefingToken(sid, CalendarEvents.today(context), placeJob.await())
+            RespecApi.briefingToken(sid, CalendarEvents.today(context), placeJob.await())
                 ?: RespecApi.tokenError()
-            if (doneAtStart) LiveAuth(auth.token, auth.wsUrl, auth.model, auth.startSignal + ALREADY_DONE_NOTE) else auth
         }
 
         // 브리핑은 start_routine(코칭으로) 또는 end_session(코칭 없이 다음 단계로, 또는 사용자가 끝내자고 함)으로 끝남
