@@ -30,6 +30,10 @@ class UserSetting:
     sleep_time: time = time(23, 0)
     theme: str = "SYSTEM"
     app_language: str = "ko"
+    personality: str = "KIND"              # 11/16 KIND / FRIENDLY / STRICT / CHEERFUL (speech_style을 대신함)
+    intensity: int = 2                     # 깨우는 말의 강도 1~3
+    auto_intensity: bool = True            # 잘 못 일어나는 날이 이어지면 강도를 자동으로 올림
+    english_level: str = "BEGINNER"        # BEGINNER / INTERMEDIATE
     updated_at: datetime | None = None
 
 
@@ -178,6 +182,8 @@ class MorningSession:
     fortune_text: str | None = None        # 오늘의 포춘 문장 (11/06). 세 칸은 모두 있거나 모두 없다
     fortune_style: str | None = None       # COOKIE / HOROSCOPE
     fortune_source: str | None = None      # ai / fallback / safe
+    applied_intensity: int | None = None   # 그날 실제로 쓴 강도 (자동 강도 반영 후, 11/16)
+    stretch_area: str | None = None        # 그날 고른 스트레칭 부위 (11/16)
 
 
 @dataclass(frozen=True)

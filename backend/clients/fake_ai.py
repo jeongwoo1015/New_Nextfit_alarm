@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from .ai_gateway import (ContentPlan, ContentStep, Fortune, LiveToken, NightContext, NightExtract, RoutineChangeRequest,
                          StrategyDecision, fit_seconds)
 
+STRETCH_AREAS = ("FULL", "NECK_SHOULDER", "ARM_WRIST", "BACK_HIP", "LEG")
 QUIZ = [ContentStep(f"퀴즈 {n}번", 120, "SPEECH", f"문제: 문제 {n}\n정답: 정답 {n}") for n in range(1, 4)]
 
 
@@ -20,7 +21,10 @@ class FakeAIGateway:
                                                     "encouragement": "high", "strategy_id": "gentle"})
     content_option: str = "PERSON"              # 세부를 고르지 않은 알람에 AI가 정해 주는 세부 흉내
     fortune_error: Exception | None = None      # 정하면 compose_fortune이 이 오류를 던진다 (AI 사용 불가 흉내)
+    intensity: int | None = None                # 정하면 자동 강도가 켜진 사용자에게 today_intensity가 이 값을 준다
     calls: list = field(default_factory=list)
+    content_extra: tuple = ()                   # 마지막 compose_content_steps의 (english_level, context)
+    fortune_plan: tuple = ()                    # 마지막 포춘 토큰의 순서표
 
     def issue_night_token(self, ctx: NightContext) -> LiveToken:
         self.calls.append(("night_token", ctx))
@@ -42,8 +46,9 @@ class FakeAIGateway:
         self.calls.append(("coaching_token", ctx))
         return _token("coaching")
 
-    def compose_content_steps(self, content_type, content_option, duration_sec, today):
+    def compose_content_steps(self, content_type, content_option, duration_sec, today, english_level="", context=""):
         self.calls.append(("content", (content_type, content_option, duration_sec)))
+        self.content_extra = (english_level, context)
         secs = fit_seconds([s.planned_sec for s in self.content], duration_sec)
         return ContentPlan([ContentStep(s.name, sec, s.response_type, s.script) for s, sec in zip(self.content, secs)],
                            content_option or self.content_option)
@@ -67,6 +72,21 @@ class FakeAIGateway:
             return Fortune("오늘은 작은 시작이 큰 하루를 만들어요.", "COOKIE", "fallback")
         return Fortune(f"포춘: {one_liner or diary_text}", "HOROSCOPE" if today.toordinal() % 2 else "COOKIE", "ai")
 
-    def issue_fortune_token(self, persona, fortune, based_on=""):
+    def issue_fortune_token(self, persona, fortune, based_on="", plan=()):
         self.calls.append(("fortune_token", (persona, fortune, based_on)))
+        self.fortune_plan = plan
         return _token("fortune")
+
+    def stretch_routines(self, duration_sec):
+        """AI stretch_sets처럼 부위마다 5단계 (이름에 부위를 붙여 구분)."""
+        secs = fit_seconds([40, 65, 65, 65, 65], duration_sec)
+        return {area: [ContentStep(f"{area} 동작 {n}", sec, "PLAY", f"{area} 안내 {n}") for n, sec in enumerate(secs, 1)]
+                for area in STRETCH_AREAS}
+
+    def morning_plan(self, has_one_liner, coaching):
+        return tuple(s for s in ("BRIEFING", "ONE_LINER", "COACHING", "FORTUNE")
+                     if (s != "ONE_LINER" or has_one_liner) and (s != "COACHING" or coaching))
+
+    def today_intensity(self, base, sessions, auto):
+        self.calls.append(("intensity", (base, len(sessions), auto)))
+        return self.intensity if (self.intensity is not None and auto) else base

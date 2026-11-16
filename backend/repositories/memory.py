@@ -16,6 +16,8 @@ _NIGHT_PROTECTED = {"night_record_id", "user_id", "record_date", "apply_date", "
 VOICE_TEXT_MAX = 500
 FORTUNE_STYLES = ("COOKIE", "HOROSCOPE")
 FORTUNE_SOURCES = ("ai", "fallback", "safe")
+INTENSITIES = (1, 2, 3)
+STRETCH_AREAS = ("FULL", "NECK_SHOULDER", "ARM_WRIST", "BACK_HIP", "LEG")
 
 _SETTING_FIELDS = {f.name for f in fields(UserSetting)} - {"user_id", "updated_at"}
 
@@ -285,6 +287,8 @@ class MemorySessionRepository:
             raise ValidationFailed("포춘 문장·스타일·출처는 함께 저장해야 해요")   # CHECK rs_session_fortune
         if updated.fortune_style not in (None, *FORTUNE_STYLES) or updated.fortune_source not in (None, *FORTUNE_SOURCES):
             raise ValidationFailed("포춘 스타일·출처 값이 올바르지 않아요")
+        if updated.applied_intensity not in (None, *INTENSITIES) or updated.stretch_area not in (None, *STRETCH_AREAS):
+            raise ValidationFailed("강도·스트레칭 부위 값이 올바르지 않아요")    # CHECK applied_intensity, stretch_area
         self.sessions[session_id] = updated
         return updated
 
@@ -306,6 +310,22 @@ class MemorySessionRepository:
             return existing
         for p in plans:
             step = SessionStep(str(uuid.uuid4()), user_id, session_id, p.step_order, p.step_name, p.template_item_id,
+                               p.planned_duration_sec, p.step_detail)
+            self.steps[step.step_id] = step
+        return self.list_steps(user_id, session_id)
+
+    def replace_pending_steps(self, user_id, session_id, plans):
+        """DB 함수 rs_replace_pending_steps와 같게: 판정한 단계는 두고 PENDING만 새 단계로, 번호는 남은 단계 다음부터."""
+        if not self._own(user_id, session_id):
+            return None
+        if not plans:
+            raise ValidationFailed("p_steps는 비어 있지 않은 JSON 배열이어야 합니다")
+        for s in self.list_steps(user_id, session_id):
+            if s.step_status == "PENDING":
+                del self.steps[s.step_id]
+        base = max((s.step_order for s in self.list_steps(user_id, session_id)), default=0)
+        for n, p in enumerate(plans, 1):
+            step = SessionStep(str(uuid.uuid4()), user_id, session_id, base + n, p.step_name, p.template_item_id,
                                p.planned_duration_sec, p.step_detail)
             self.steps[step.step_id] = step
         return self.list_steps(user_id, session_id)

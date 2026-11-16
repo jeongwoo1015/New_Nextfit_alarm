@@ -6,15 +6,16 @@
 import logging
 import threading
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 
-from backend.clients.ai_gateway import (AIGateway, BriefingContext, CalendarEvent, CoachingContext, CoachStep, Fortune,
-                                        LiveToken, Persona, night_view)
+from backend.clients.ai_gateway import (AIGateway, BriefingContext, CalendarEvent, CoachingContext, CoachStep, ContentStep,
+                                        Fortune, LiveToken, Persona, night_view, persona_of)
 from backend.clients.weather import NoWeather, WeatherClient
-from backend.core.errors import AppError, Conflict, NotFound
+from backend.core.errors import AppError, Conflict, NotFound, ValidationFailed
+from backend.domain import codes
 from backend.core.timeutil import now_kst, to_kst, today_kst
-from backend.domain.models import MorningSession, Progress, SessionStep
+from backend.domain.models import MorningSession, Progress, SessionStep, StepPlan
 from backend.domain.routine_rules import build_routine
 from backend.domain.session_rules import (content_duration_sec, content_steps, judge_wake, planned_total_sec,
                                           resolve_snapshot, routine_steps)
@@ -25,6 +26,24 @@ log = logging.getLogger(__name__)
 
 CONTENT_NAMES = {"MEDITATION": "명상", "EXERCISE": "스트레칭", "LANGUAGE": "영어 따라 읽기", "QUIZ": "퀴즈 게임"}   # B14 이름
 OPTION_NAMES = {"PERSON": "인물 퀴즈", "GENERAL": "상식 퀴즈", "WORDCHAIN": "끝말잇기", "JAPANESE": "일본어", "CHINESE": "중국어"}
+
+
+def _all_done(steps: list[SessionStep]) -> bool:
+    """오늘 단계를 이미 모두 판정·체크한 날 (단계가 없으면 아직 시작 전)."""
+    return bool(steps) and all(x.step_status != "PENDING" for x in steps)
+
+
+def _area_plans(area: str, steps: list[ContentStep]) -> list[StepPlan]:
+    """부위 루틴 → 세션 단계. 재연결 때 쓰도록 응답 유형·안내문과 부위를 step_detail에 담는다."""
+    return [replace(p, step_detail={**p.step_detail, "area": area}) for p in content_steps(steps)]
+
+
+def _today_story(night) -> str:
+    """영어 '한마디 대답' 질문에 이어 줄 오늘 이야기 (AI B17 context): 어젯밤 기록의 내일 목표·특이사항."""
+    if not night or night.extract_status != "DONE":
+        return ""
+    parts = [night.tomorrow_goal or "", *(night.tomorrow_notes or [])]
+    return " / ".join(p.strip() for p in parts if p and p.strip())
 
 
 def content_name(content_type: str | None, content_option: str | None) -> str:
@@ -42,6 +61,7 @@ def fortune_based_on(source: str | None, night) -> str:
     return "DIARY" if (night.diary_text or "").strip() else ""
 BANDIT_KEY = "global"           # AI CONTRACTS 6-4: 여러 사용자를 합쳐야 경향이 보여 전체 합산 상태를 쓴다
 RECENT_DAYS = 7
+INTENSITY_DAYS = 14             # 자동 강도: 지난 알람 결과를 이만큼 본다 (AI 규칙은 최근 3번 단위, 그날 쓴 강도를 따라감)
 
 # 같은 세션의 포춘을 백그라운드와 토큰 요청이 동시에 만들지 않게 (서버 프로세스 하나 기준, 문장은 세션에 한 번만 저장)
 _fortune_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
@@ -59,6 +79,8 @@ class Location:
 class SessionView:
     session: MorningSession
     steps: list[SessionStep]
+    morning_plan: tuple[str, ...] | None = None              # 세션 시작 응답에만 (AI B15)
+    stretch_routines: dict[str, list[StepPlan]] | None = None   # 스트레칭 알람 세션 시작 응답에만, 부위를 고를 수 있을 때 (AI B17)
 
     @property
     def progress(self) -> Progress:
@@ -81,9 +103,72 @@ class MorningService:
         today = today_kst(now)
         snapshot = resolve_snapshot(alarm, self.r.nights.get_night_for_morning(user_id, today), today)
         s = self.r.sessions.get_or_create_session(snapshot)
+        changes = {}
         if s.alarm_rang_at is None:
-            s = self.r.sessions.update_session(user_id, s.session_id, {"alarm_rang_at": now})
-        return self.view(user_id, s.session_id)
+            changes["alarm_rang_at"] = now
+        if s.applied_intensity is None and (level := self._today_intensity(user_id, s)) is not None:
+            changes["applied_intensity"] = level
+        if changes:
+            s = self.r.sessions.update_session(user_id, s.session_id, changes)
+        v = self.view(user_id, s.session_id)
+        night = self.r.nights.get_night_for_morning(user_id, s.session_date)
+        return replace(v, morning_plan=self._plan(s, v.steps, night, at_start=True),
+                       stretch_routines=self._stretch_routine_view(s, v.steps))
+
+    def _today_intensity(self, user_id: str, s: MorningSession) -> int | None:
+        """그날 깨우는 말 강도 = 설정 강도 + 자동 강도 올리기(지난 알람 결과). 계산에 실패해도 알람은 이어진다(설정 강도)."""
+        st = self.r.users.get_setting(user_id)
+        if not st:
+            return None
+        try:
+            past = self.r.sessions.recent_records(user_id, s.session_date - timedelta(days=INTENSITY_DAYS),
+                                                  s.session_date - timedelta(days=1)).sessions
+            past = sorted(past, key=lambda x: (x.session_date, x.alarm_rang_at.timestamp() if x.alarm_rang_at else 0))
+            return self.ai.today_intensity(st.intensity, past, st.auto_intensity)
+        except Exception as e:   # noqa: BLE001 — 강도는 부가 기능이라 알람 응답을 막지 않는다
+            log.warning("자동 강도 계산 실패 user=%s: %s", user_id, e)
+            return st.intensity
+
+    def _plan(self, s: MorningSession, steps: list[SessionStep], night, at_start: bool = False) -> tuple[str, ...]:
+        """모닝콜 순서표. 한마디는 녹음이 있을 때, 코칭은 건너뛰는 날이 아닐 때.
+        세션 시작·브리핑에서는 이미 다 마친 날(재진입)도 코칭을 뺀다. 코칭·포춘 토큰은 코칭을 막 마친 뒤일 수 있어 빼지 않는다."""
+        coaching = not s.coaching_skipped and not (at_start and _all_done(steps))
+        return self.ai.morning_plan(bool(night and night.voice_audio_path), coaching)
+
+    # ---------- 스트레칭 부위 (AI B17) ----------
+    def _can_choose_area(self, s: MorningSession, steps: list[SessionStep]) -> bool:
+        """부위는 스트레칭 알람에서, 아직 고르지 않았고 판정한 단계가 없을 때만 고른다
+        (판정 뒤에 바꾸면 DB 단계 번호가 AI가 아는 새 루틴 번호와 어긋나서, 11/16 팀 결정)."""
+        return (s.morning_call_type == "CONTENT" and s.content_type == "EXERCISE" and not s.coaching_skipped
+                and s.stretch_area is None and all(x.step_status == "PENDING" for x in steps))
+
+    def _routines(self) -> dict[str, list[ContentStep]]:
+        return self.ai.stretch_routines(content_duration_sec(self.r.presets.get_app_config()))
+
+    def _stretch_routine_view(self, s: MorningSession, steps: list[SessionStep]) -> dict[str, list[StepPlan]] | None:
+        if not self._can_choose_area(s, steps):
+            return None
+        return {area: _area_plans(area, cs) for area, cs in self._routines().items()} or None
+
+    def select_stretch_area(self, user_id: str, session_id: str, area: str) -> SessionView:
+        """통화 중 AI가 select_stretch_area(area)를 부르면 앱이 전달. 아직 판정하지 않은 단계를 그 부위 루틴으로 바꾼다.
+        같은 부위를 다시 보내면 그대로 돌려준다(앱 재시도)."""
+        if area not in codes.STRETCH_AREAS:
+            raise ValidationFailed(f"area는 {'/'.join(codes.STRETCH_AREAS)} 중 하나예요")
+        s = self._session(user_id, session_id)
+        if s.stretch_area == area:
+            return self.view(user_id, session_id)
+        steps = self.ensure_steps(user_id, session_id)
+        if not self._can_choose_area(s, steps):
+            raise Conflict("지금은 스트레칭 부위를 바꿀 수 없어요", "STRETCH_AREA_LOCKED")
+        routines = self._routines()
+        if area not in routines:
+            raise Conflict("스트레칭 부위 루틴을 불러오지 못했어요", "STRETCH_AREA_UNAVAILABLE")
+        plans = _area_plans(area, routines[area])
+        self.r.sessions.replace_pending_steps(user_id, session_id, plans)
+        self.r.sessions.update_session(user_id, session_id, {"stretch_area": area,
+                                                             "planned_total_sec": planned_total_sec(plans)})
+        return self.view(user_id, session_id)
 
     def _session(self, user_id: str, session_id: str) -> MorningSession:
         s = self.r.sessions.get_session(user_id, session_id)
@@ -139,18 +224,19 @@ class MorningService:
         return self.view(user_id, session_id)
 
     # ---------- 브리핑 ----------
-    def _persona(self, user_id: str) -> Persona:
+    def _persona(self, user_id: str, s: MorningSession) -> Persona:
         st = self.r.users.get_setting(user_id)
         if not st:
             raise NotFound("온보딩을 먼저 마쳐 주세요", "SETTING_NOT_FOUND")
-        return Persona(st.user_call_name, st.tone, st.speech_style, st.voice_type)
+        return persona_of(st, s.applied_intensity)
 
     def briefing_token(self, user_id: str, session_id: str, events_today: list[CalendarEvent],
                        location: Location | None = None) -> LiveToken:
         """location은 앱이 매번 보내는 현재 위치(저장하지 않음). 없거나 날씨를 못 가져오면 날씨 없이 브리핑."""
         s = self._session(user_id, session_id)
-        persona = self._persona(user_id)
+        persona = self._persona(user_id, s)
         night = self.r.nights.get_night_for_morning(user_id, s.session_date)
+        steps = self.r.sessions.list_steps(user_id, session_id)
         briefing_block, _ = self._strategy(user_id, s, night)
         program = ""
         if s.morning_call_type == "ROUTINE":
@@ -159,7 +245,8 @@ class MorningService:
         weather = self.weather.today(location.lat, location.lon, location.name) if location else None
         ctx = BriefingContext(persona, to_kst(self.clock()).strftime("%H:%M"), tuple(events_today), night_view(night),
                               program, content_name(s.content_type, s.content_option), s.coaching_skipped, briefing_block,
-                              weather, one_liner_follows=bool(night and night.voice_audio_path))
+                              weather, one_liner_follows=bool(night and night.voice_audio_path),
+                              plan=self._plan(s, steps, night, at_start=True), already_done=_all_done(steps))
         return self.ai.issue_briefing_token(ctx)
 
     def _strategy(self, user_id: str, s: MorningSession, night) -> tuple[str, str]:
@@ -174,7 +261,7 @@ class MorningService:
             records = self.r.sessions.recent_records(user_id, s.session_date - timedelta(days=RECENT_DAYS), s.session_date - timedelta(days=1))
             setting = self.r.users.get_setting(user_id)
             d = self.ai.decide_strategy(user_id, records, s.session_date, night.condition_label if night else None,
-                                        setting.speech_style if setting else None, self.mode,
+                                        setting.personality if setting else None, self.mode,   # AI B17: 성격 값을 넘겨도 된다
                                         self.r.personalization.get_bandit_state(BANDIT_KEY))
             self.r.personalization.save_strategy_log(user_id, s.session_id, d.log_row)
             return d.briefing_block, d.coaching_block
@@ -208,10 +295,11 @@ class MorningService:
     def fortune_token(self, user_id: str, session_id: str) -> tuple[LiveToken, MorningSession]:
         """포춘 단계에서 호출. 저장된 문장을 AI가 그대로 읽는 Live 토큰 (재연결도 같은 문장)."""
         s = self.prepare_fortune(user_id, session_id)        # 다른 사용자의 세션이면 여기서 404
-        persona = self._persona(user_id)
+        persona = self._persona(user_id, s)
         night = self.r.nights.get_night_for_morning(user_id, s.session_date)
         token = self.ai.issue_fortune_token(persona, Fortune(s.fortune_text, s.fortune_style, s.fortune_source),
-                                            fortune_based_on(s.fortune_source, night))
+                                            fortune_based_on(s.fortune_source, night),
+                                            self._plan(s, self.r.sessions.list_steps(user_id, session_id), night))
         return token, s
 
     # ---------- 단계·코칭 ----------
@@ -224,7 +312,10 @@ class MorningService:
             plans = routine_steps(self._routine_items(user_id, s))
         else:
             duration = content_duration_sec(self.r.presets.get_app_config())
-            plan = self.ai.compose_content_steps(s.content_type, s.content_option, duration, s.session_date)
+            setting = self.r.users.get_setting(user_id)
+            night = self.r.nights.get_night_for_morning(user_id, s.session_date)
+            plan = self.ai.compose_content_steps(s.content_type, s.content_option, duration, s.session_date,
+                                                 setting.english_level if setting else "", _today_story(night))
             plans = content_steps(plan.steps)
         steps = self.r.sessions.create_steps(user_id, session_id, plans)
         changes = {"planned_total_sec": planned_total_sec(plans)}
@@ -260,9 +351,15 @@ class MorningService:
         night = self.r.nights.get_night_for_morning(user_id, s.session_date)
         _, coaching_block = self._strategy(user_id, s, night)
         s = self._session(user_id, session_id)            # 단계를 만들며 정해진 세부(content_option)를 다시 읽는다
-        ctx = CoachingContext(self._persona(user_id), s.morning_call_type, tuple(self._coach_steps(s, pending)),
+        routines = ()
+        if self._can_choose_area(s, steps):                # 부위를 아직 안 골랐으면 AI가 먼저 묻는다
+            routines = tuple((area, tuple(CoachStep(p.step_order, p.step_name, p.planned_duration_sec, p.response_type,
+                                                    p.script or "") for p in _area_plans(area, cs)))
+                             for area, cs in self._routines().items())
+        ctx = CoachingContext(self._persona(user_id, s), s.morning_call_type, tuple(self._coach_steps(s, pending)),
                               resumed=len(pending) < len(steps), night=night_view(night), strategy_block=coaching_block,
-                              content_type=s.content_type or "", content_option=s.content_option or "")
+                              content_type=s.content_type or "", content_option=s.content_option or "",
+                              plan=self._plan(s, steps, night), stretch_routines=routines)
         return self.ai.issue_coaching_token(ctx), steps
 
     def _coach_steps(self, s: MorningSession, steps: list[SessionStep]) -> list[CoachStep]:

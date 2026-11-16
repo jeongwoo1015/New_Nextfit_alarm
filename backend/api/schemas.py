@@ -11,6 +11,10 @@ HHMM = Annotated[time, PlainSerializer(lambda t: t.strftime("%H:%M"), return_typ
 Gender = Literal[codes.GENDERS]
 Tone = Literal[codes.TONES]
 SpeechStyle = Literal[codes.SPEECH_STYLES]
+Personality = Literal[codes.PERSONALITIES]
+Intensity = Literal[codes.INTENSITIES]
+EnglishLevel = Literal[codes.ENGLISH_LEVELS]
+StretchArea = Literal[codes.STRETCH_AREAS]
 VoiceType = Literal[codes.VOICE_TYPES]
 MusicGenre = Literal[codes.MUSIC_GENRES]
 Theme = Literal[codes.THEMES]
@@ -36,7 +40,11 @@ class UserOut(Out):
 class SettingOut(Out):
     user_call_name: str
     tone: str
-    speech_style: str
+    speech_style: str                   # 11/13부터 personality로 대체 (DB가 칸을 지울 때까지 함께 준다)
+    personality: str
+    intensity: int
+    auto_intensity: bool
+    english_level: str
     voice_type: str
     sleep_alarm_enabled: bool
     sleep_time: HHMM
@@ -58,7 +66,11 @@ class OnboardingIn(BaseModel):
     gender: Gender = "NONE"
     user_call_name: str = Field(min_length=1, max_length=30)
     tone: Tone = "FORMAL"
-    speech_style: SpeechStyle = "KIND"
+    speech_style: SpeechStyle = "KIND"  # 예전 앱용. personality가 없으면 이 값으로 정한다(FIRM → STRICT)
+    personality: Personality | None = None
+    intensity: Intensity = 2
+    auto_intensity: bool = True
+    english_level: EnglishLevel = "BEGINNER"
     voice_type: VoiceType = "FEMALE"
     music_genre: MusicGenre = "POP"     # 정의서에 기본값이 없어 정한 기본안
     morning_call_type: CallType         # 온보딩: 루틴 / 콘텐츠 선택
@@ -78,6 +90,10 @@ class SettingPatch(BaseModel):
     user_call_name: str | None = Field(default=None, min_length=1, max_length=30)
     tone: Tone | None = None
     speech_style: SpeechStyle | None = None
+    personality: Personality | None = None
+    intensity: Intensity | None = None
+    auto_intensity: bool | None = None
+    english_level: EnglishLevel | None = None
     voice_type: VoiceType | None = None
     sleep_alarm_enabled: bool | None = None
     sleep_time: time | None = None
@@ -282,12 +298,29 @@ class SessionOut(Out):
     fortune_text: str | None = None     # 오늘의 포춘 문장 (아직 만들지 않았으면 null)
     fortune_style: str | None = None    # COOKIE 포춘쿠키 / HOROSCOPE 오늘의 운세
     fortune_source: str | None = None   # ai / fallback 기본 문장 / safe 위기 표현이 있어 담담한 문장
+    applied_intensity: int | None = None  # 그날 쓴 깨우는 말 강도 1~3 (자동 강도 반영 후)
+    stretch_area: str | None = None     # 그날 고른 스트레칭 부위 (아직 안 골랐으면 null)
+
+
+class StretchStepOut(Out):
+    """부위 루틴의 한 단계. 부위를 고르면 이 순서대로 세션 단계가 바뀐다(번호는 1부터)."""
+    step_order: int
+    step_name: str
+    planned_duration_sec: int | None
+    response_type: str
+    script: str | None
 
 
 class SessionViewOut(BaseModel):
     session: SessionOut
     steps: list[StepOut]
     progress: ProgressOut
+    morning_plan: list[str] | None = None   # 세션 시작 응답에만: 아침 순서표 (예: BRIEFING, ONE_LINER, COACHING, FORTUNE). 비어 있으면 예전 순서
+    stretch_routines: dict[str, list[StretchStepOut]] | None = None   # 세션 시작 응답에만: 스트레칭 알람에서 부위를 아직 고를 수 있을 때 5개 루틴
+
+
+class StretchAreaIn(BaseModel):
+    area: StretchArea
 
 
 class LocationIn(BaseModel):

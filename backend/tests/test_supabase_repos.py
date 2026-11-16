@@ -262,6 +262,49 @@ def test_content_step_detail(repos, uid):
     repos.alarms.delete_alarm(uid, a.alarm_id)
 
 
+def test_stretch_area_and_intensity(repos, uid, other):
+    """통화 중 부위를 고르면 판정하지 않은 단계만 새 루틴으로 바뀐다. 그날 강도·부위는 세션에 남는다."""
+    from dataclasses import replace
+    a = repos.alarms.create_alarm(uid, {"alarm_time": time(8, 0), "morning_call_type": "CONTENT",
+                                        "content_type": "EXERCISE", "content_option": "STRETCH"})
+    snap = SessionSnapshot(uid, a.alarm_id, now_kst().date(), "CONTENT", None, "EXERCISE", "STRETCH", time(8, 0), time(8, 0))
+    s = repos.sessions.get_or_create_session(snap)
+    full = [StepPlan(n, name, None, sec) for n, (name, sec) in
+            enumerate([("누워서 기지개", 40), ("무릎 좌우로 넘기기", 65), ("무릎 가슴으로 당기기", 65)], 1)]
+    neck = [StepPlan(1, name, None, sec, step_detail={"area": "NECK_SHOULDER"}) for name, sec in
+            [("턱 당기기", 40), ("고개 좌우로 돌리기", 65), ("팔 열어 가슴 펴기", 65)]]
+
+    repos.sessions.create_steps(uid, s.session_id, full)                              # 아무것도 판정하지 않았으면 1번부터
+    steps = repos.sessions.replace_pending_steps(uid, s.session_id, neck)
+    assert [(p.step_order, p.step_name) for p in steps] == [(1, "턱 당기기"), (2, "고개 좌우로 돌리기"), (3, "팔 열어 가슴 펴기")]
+    assert steps[0].step_detail == {"area": "NECK_SHOULDER"} and steps[0].planned_duration_sec == 40
+
+    repos.sessions.save_step(uid, replace(steps[0], step_status="DONE", checked_at=now_kst(), ai_verdict="done"))
+    steps = repos.sessions.replace_pending_steps(uid, s.session_id, full)            # 판정한 1번은 두고 다음 번호부터
+    assert [(p.step_order, p.step_name, p.step_status) for p in steps] == [
+        (1, "턱 당기기", "DONE"), (2, "누워서 기지개", "PENDING"), (3, "무릎 좌우로 넘기기", "PENDING"), (4, "무릎 가슴으로 당기기", "PENDING")]
+    assert repos.sessions.replace_pending_steps(other, s.session_id, neck) is None
+    assert len(repos.sessions.list_steps(uid, s.session_id)) == 4                       # 남의 요청은 아무것도 안 바뀜
+    with pytest.raises(ValidationFailed):
+        repos.sessions.replace_pending_steps(uid, s.session_id, [])
+
+    repos.sessions.update_session(uid, s.session_id, {"applied_intensity": 3, "stretch_area": "NECK_SHOULDER"})
+    db = repos.users.db
+    row = db.table("rs_morning_session").select("applied_intensity, stretch_area").eq("session_id", s.session_id).execute().data[0]
+    assert row == {"applied_intensity": 3, "stretch_area": "NECK_SHOULDER"}
+    for bad in ({"applied_intensity": 4}, {"stretch_area": "HEAD"}):
+        with pytest.raises(ValidationFailed):
+            repos.sessions.update_session(uid, s.session_id, bad)
+
+    setting = db.table("rs_user_setting").select("personality, intensity, auto_intensity, english_level") \
+        .eq("user_id", uid).execute().data[0]
+    assert setting == {"personality": "KIND", "intensity": 2, "auto_intensity": True, "english_level": "BEGINNER"}   # 기본값
+    for bad in ({"personality": "FIRM"}, {"intensity": 0}, {"english_level": "ADVANCED"}):
+        with pytest.raises(Exception, match="check constraint"):
+            db.table("rs_user_setting").update(bad).eq("user_id", uid).execute()
+    repos.alarms.delete_alarm(uid, a.alarm_id)
+
+
 def test_personalization(repos, uid):
     row = {"session_date": now_kst().date().isoformat(), "source": "rule", "mode": "rule", "strategy_id": "gentle",
            "strategy": json.dumps({"coaching": "soft"}), "rule_ids": json.dumps(["R1"]), "propensity": 1.0,
