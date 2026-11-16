@@ -25,6 +25,11 @@ def validate_setting(s: UserSetting) -> None:
         errors.append("user_call_name은 1~30자예요")
     _check(errors, "tone", s.tone, codes.TONES)
     _check(errors, "speech_style", s.speech_style, codes.SPEECH_STYLES)
+    _check(errors, "personality", s.personality, codes.PERSONALITIES)
+    _check(errors, "intensity", s.intensity, codes.INTENSITIES)
+    _check(errors, "english_level", s.english_level, codes.ENGLISH_LEVELS)
+    if not isinstance(s.auto_intensity, bool):
+        errors.append("auto_intensity는 true/false예요")
     _check(errors, "voice_type", s.voice_type, codes.VOICE_TYPES)
     _check(errors, "music_genre", s.music_genre, codes.MUSIC_GENRES)
     _check(errors, "theme", s.theme, codes.THEMES)

@@ -3,6 +3,7 @@ from dataclasses import dataclass, replace
 from datetime import date, time
 
 from backend.core.errors import Conflict, NotFound, ValidationFailed
+from backend.domain import codes
 from backend.domain.alarm_rules import ALARM_FIELDS, validate_alarm
 from backend.domain.models import Alarm, User, UserSetting
 from backend.domain.user_rules import validate_setting, validate_user
@@ -14,7 +15,7 @@ FIRST_ALARM_TIME = time(7, 0)
 
 USER_FIELDS = {"user_name", "birth_date", "gender"}
 SETTING_FIELDS = {"user_call_name", "tone", "speech_style", "voice_type", "sleep_alarm_enabled", "sleep_time",
-                  "music_genre", "theme", "app_language"}
+                  "music_genre", "theme", "app_language", "personality", "intensity", "auto_intensity", "english_level"}
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,11 @@ class OnboardingInput:
     morning_call_type: str
     template_id: str | None = None
     content_type: str | None = None
+    # 11/16 성격·강도·영어 수준. personality가 없으면(예전 앱) speech_style로 정한다
+    personality: str | None = None
+    intensity: int = 2
+    auto_intensity: bool = True
+    english_level: str = "BEGINNER"
 
 
 class UserService:
@@ -61,7 +67,9 @@ class UserService:
         if existing and existing.onboarding_done:
             raise Conflict("이미 온보딩을 마쳤어요", "ONBOARDING_DONE")
         user = User(user_id, inp.user_name.strip(), inp.birth_date, inp.gender, onboarding_done=False)
-        setting = UserSetting(user_id, inp.user_call_name.strip(), inp.music_genre, inp.tone, inp.speech_style, inp.voice_type)
+        setting = UserSetting(user_id, inp.user_call_name.strip(), inp.music_genre, inp.tone, inp.speech_style, inp.voice_type,
+                              personality=inp.personality or _personality_of(inp.speech_style), intensity=inp.intensity,
+                              auto_intensity=inp.auto_intensity, english_level=inp.english_level)
         alarm = Alarm("", user_id, FIRST_ALARM_TIME, inp.morning_call_type, template_id=inp.template_id,
                       content_type=inp.content_type)
         validate_user(user)
@@ -97,8 +105,15 @@ class UserService:
         setting = self.r.users.get_setting(user_id)
         if not setting:
             raise NotFound("온보딩을 먼저 마쳐 주세요", "SETTING_NOT_FOUND")
+        if "speech_style" in changes and "personality" not in changes:       # 예전 앱: 말투만 바꾸면 성격도 같이
+            changes = {**changes, "personality": _personality_of(changes["speech_style"])}
         validate_setting(replace(setting, **_pick(changes, SETTING_FIELDS)))
         return self.r.users.save_setting(user_id, changes)
+
+
+def _personality_of(speech_style: str) -> str:
+    """예전 말투 값을 성격으로 (DB 12번 SQL과 같게 FIRM → STRICT). 모르는 값은 그대로 두어 검사에서 걸리게 한다."""
+    return codes.SPEECH_TO_PERSONALITY.get(speech_style, speech_style)
 
 
 def _alarm_values(alarm: Alarm) -> dict:

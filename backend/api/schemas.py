@@ -11,6 +11,9 @@ HHMM = Annotated[time, PlainSerializer(lambda t: t.strftime("%H:%M"), return_typ
 Gender = Literal[codes.GENDERS]
 Tone = Literal[codes.TONES]
 SpeechStyle = Literal[codes.SPEECH_STYLES]
+Personality = Literal[codes.PERSONALITIES]
+Intensity = Literal[codes.INTENSITIES]
+EnglishLevel = Literal[codes.ENGLISH_LEVELS]
 VoiceType = Literal[codes.VOICE_TYPES]
 MusicGenre = Literal[codes.MUSIC_GENRES]
 Theme = Literal[codes.THEMES]
@@ -36,7 +39,11 @@ class UserOut(Out):
 class SettingOut(Out):
     user_call_name: str
     tone: str
-    speech_style: str
+    speech_style: str                   # 11/13부터 personality로 대체 (DB가 칸을 지울 때까지 함께 준다)
+    personality: str
+    intensity: int
+    auto_intensity: bool
+    english_level: str
     voice_type: str
     sleep_alarm_enabled: bool
     sleep_time: HHMM
@@ -58,7 +65,11 @@ class OnboardingIn(BaseModel):
     gender: Gender = "NONE"
     user_call_name: str = Field(min_length=1, max_length=30)
     tone: Tone = "FORMAL"
-    speech_style: SpeechStyle = "KIND"
+    speech_style: SpeechStyle = "KIND"  # 예전 앱용. personality가 없으면 이 값으로 정한다(FIRM → STRICT)
+    personality: Personality | None = None
+    intensity: Intensity = 2
+    auto_intensity: bool = True
+    english_level: EnglishLevel = "BEGINNER"
     voice_type: VoiceType = "FEMALE"
     music_genre: MusicGenre = "POP"     # 정의서에 기본값이 없어 정한 기본안
     morning_call_type: CallType         # 온보딩: 루틴 / 콘텐츠 선택
@@ -78,6 +89,10 @@ class SettingPatch(BaseModel):
     user_call_name: str | None = Field(default=None, min_length=1, max_length=30)
     tone: Tone | None = None
     speech_style: SpeechStyle | None = None
+    personality: Personality | None = None
+    intensity: Intensity | None = None
+    auto_intensity: bool | None = None
+    english_level: EnglishLevel | None = None
     voice_type: VoiceType | None = None
     sleep_alarm_enabled: bool | None = None
     sleep_time: time | None = None
