@@ -2,6 +2,7 @@ package com.example.respeclive.ui.morning
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -22,7 +23,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,6 +62,11 @@ data class FortuneShow(val text: String?, val style: String?, val basedOn: Strin
     val isHoroscope get() = style == "HOROSCOPE"
 }
 
+/** 쿠키 열기 전체 길이: 떨림·금 → 반으로 갈라짐 → 쪽지가 솟아오름 */
+private const val COOKIE_OPEN_MS = 1300
+/** 카드를 띄우는 시점 (쪽지가 거의 다 드러난 뒤) */
+private const val COOKIE_REVEAL_MS = 1000L
+
 /** 포춘쿠키 그림 색 (일러스트라 테마와 상관없이 고정) */
 private val COOKIE = Color(0xFFF7C873)
 private val COOKIE_SHADE = Color(0xFFE9A955)
@@ -85,6 +93,13 @@ fun FortuneScene(
     modifier: Modifier = Modifier
 ) {
     val title = if (fortune?.isHoroscope == true) "오늘의 운세" else "오늘의 포춘"
+    // 쿠키가 갈라지고 쪽지가 드러난 뒤에 카드를 보여 줌
+    val revealed by produceState(false, opened) {
+        if (opened) {
+            delay(COOKIE_REVEAL_MS)
+            value = true
+        } else value = false
+    }
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         // 넥스티 말풍선 (쿠키를 열기 전). 열린 뒤에도 자리는 남겨 쿠키가 위아래로 움직이지 않게 함
         Box(Modifier.fillMaxWidth().heightIn(min = 64.dp)) {
@@ -107,7 +122,7 @@ fun FortuneScene(
         }
 
         AnimatedContent(
-            targetState = opened,
+            targetState = revealed,
             transitionSpec = { (fadeIn(tween(350)) + slideInVertically(tween(350)) { it / 4 }) togetherWith fadeOut(tween(150)) },
             label = "fortune"
         ) { isOpen ->
@@ -192,22 +207,19 @@ private fun FortuneCard(title: String, fortune: FortuneShow?) {
     }
 }
 
-/** 표정이 있는 포춘쿠키. 열리면 쪽지가 솟아오르고 반짝임이 생김. 닫혀 있을 때는 살랑살랑 흔들리고 옆에 탭 표시 */
+/**
+ * 표정이 있는 포춘쿠키. 닫혀 있을 때는 살랑살랑 흔들림.
+ * 열기: 부르르 떨며 가운데에 금이 감 → 금을 따라 두 쪽으로 벌어짐 → 그 틈에서 쪽지가 솟아오르며 드러나고 반짝임이 생김
+ */
 @Composable
 private fun FortuneCookie(opened: Boolean, modifier: Modifier = Modifier) {
-    val open by animateFloatAsState(if (opened) 1f else 0f, tween(700, easing = FastOutSlowInEasing), label = "open")
+    val p by animateFloatAsState(if (opened) 1f else 0f, tween(COOKIE_OPEN_MS, easing = LinearEasing), label = "open")
     val infinite = rememberInfiniteTransition(label = "cookie")
     val wiggle by infinite.animateFloat(
         initialValue = -1f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "wiggle"
-    )
-    val pulse by infinite.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1400), RepeatMode.Restart),
-        label = "pulse"
     )
 
     Canvas(modifier) {
@@ -223,30 +235,95 @@ private fun FortuneCookie(opened: Boolean, modifier: Modifier = Modifier) {
                 size = Size(s * 0.6f, s * 0.07f)
             )
 
-            val pop = 1f + 0.06f * sin(PI.toFloat() * open)
-            val tilt = wiggle * 4f * (1f - open)
-            scale(pop, Offset(s * 0.5f, s * 0.6f)) {
+            // 진행도 p(0~1)를 단계별로 나눔
+            val crack = ((p - 0.06f) / 0.24f).coerceIn(0f, 1f)                 // 금이 위에서 아래로 번짐
+            val split = easeOut(((p - 0.30f) / 0.35f).coerceIn(0f, 1f))       // 두 쪽으로 벌어짐
+            val rise = backOut(((p - 0.38f) / 0.45f).coerceIn(0f, 1f))        // 쪽지가 틈에서 솟아오름
+            val shine = ((p - 0.65f) / 0.35f).coerceIn(0f, 1f)                // 반짝임
+            // 갈라지기 전까지 점점 세게 부르르
+            val amp = if (p > 0f && split == 0f) s * 0.012f * (p / 0.3f).coerceIn(0f, 1f) else 0f
+            val jx = sin(p * 160f) * amp
+            val tilt = if (p == 0f) wiggle * 4f else 0f
+            // 얼굴은 닫혀 있을 때만. 열기 시작하면 금이 가기 전에 바로 사라짐
+            val faceAlpha = 1f - (p / 0.1f).coerceIn(0f, 1f)
+
+            translate(jx, 0f) {
                 rotate(tilt, Offset(s * 0.5f, s * 0.75f)) {
-                    if (open > 0f) drawSlip(s, open)      // 쿠키 뒤에서 솟아오르는 쪽지
-                    drawCookieBody(s)
-                    drawCookieFace(s, open)
+                    if (p > 0.3f) drawSlip(s, rise)      // 쿠키 속에 숨어 있다가 벌어진 틈으로 드러남
+                    // 금을 경계로 왼쪽·오른쪽 반쪽을 따로 그려, 각자 아래 날개를 축으로 바깥으로 젖혀짐
+                    listOf(-1f, 1f).forEach { side ->
+                        translate(side * s * 0.06f * split, s * 0.015f * split) {
+                            rotate(side * 18f * split, Offset(s * (0.5f + side * 0.2f), s * 0.78f)) {
+                                clipPath(halfRegion(s, side)) {
+                                    drawCookieBody(s)
+                                    if (faceAlpha > 0f) drawCookieFace(s, faceAlpha)
+                                    // 갈라진 단면 테두리
+                                    if (split > 0f) clipPath(cookiePath(s)) {
+                                        drawPath(crackPath(s, 1f), COOKIE_LINE, style = Stroke(s * 0.032f, join = StrokeJoin.Round))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // 갈라지기 전: 위에서부터 번지는 금
+                    if (split == 0f && crack > 0f) clipPath(cookiePath(s)) {
+                        drawPath(crackPath(s, crack), COOKIE_LINE, style = Stroke(s * 0.012f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                    }
                 }
             }
 
-            if (open > 0f) {
-                drawSparkle(Offset(s * 0.13f, s * 0.32f), s * 0.05f * open, SPARKLE)
-                drawSparkle(Offset(s * 0.87f, s * 0.24f), s * 0.035f * open, SPARKLE_PINK)
-                drawSparkle(Offset(s * 0.9f, s * 0.6f), s * 0.03f * open, SPARKLE)
-            } else {
-                // 탭 표시: 점과 퍼지는 고리
-                val c = Offset(s * 0.93f, s * 0.64f)
-                drawCircle(PEACH.copy(alpha = 0.5f * (1f - pulse)), s * (0.04f + 0.04f * pulse), c, style = Stroke(s * 0.008f))
-                drawCircle(Color.White, s * 0.045f, c)
-                drawCircle(PEACH, s * 0.045f, c, style = Stroke(s * 0.008f))
-                drawCircle(PEACH, s * 0.022f, c)
+            if (p > 0f) {
+                drawSparkle(Offset(s * 0.13f, s * 0.32f), s * 0.05f * shine, SPARKLE)
+                drawSparkle(Offset(s * 0.87f, s * 0.24f), s * 0.035f * shine, SPARKLE_PINK)
+                drawSparkle(Offset(s * 0.9f, s * 0.6f), s * 0.03f * shine, SPARKLE)
+                drawSparkle(Offset(s * 0.36f, s * 0.08f), s * 0.03f * shine, SPARKLE)
             }
         }
     }
+}
+
+private fun easeOut(t: Float): Float {
+    val u = 1f - t
+    return 1f - u * u * u
+}
+
+/** 0→1로 가며 살짝 넘쳤다가 돌아오는 곡선 (쪽지가 쏙 튀어나왔다 자리 잡음) */
+private fun backOut(t: Float): Float {
+    val c = 1.7f
+    val u = t - 1f
+    return 1f + (c + 1f) * u * u * u + c * u * u
+}
+
+/** 쿠키 가운데를 위에서 아래로 가르는 지그재그 금 (쿠키 크기 기준 x, y) */
+private val CRACK = listOf(
+    0.50f to 0.18f, 0.48f to 0.27f, 0.52f to 0.35f,
+    0.485f to 0.43f, 0.515f to 0.51f, 0.50f to 0.60f
+)
+
+/** 금을 위에서부터 t(0~1)만큼만 그린 선 */
+private fun crackPath(s: Float, t: Float) = Path().apply {
+    val n = CRACK.size - 1
+    val f = t.coerceIn(0f, 1f) * n
+    val k = f.toInt()
+    moveTo(s * CRACK[0].first, s * CRACK[0].second)
+    for (i in 1..minOf(k, n)) lineTo(s * CRACK[i].first, s * CRACK[i].second)
+    if (k < n) {
+        val (x0, y0) = CRACK[k]
+        val (x1, y1) = CRACK[k + 1]
+        val r = f - k
+        lineTo(s * (x0 + (x1 - x0) * r), s * (y0 + (y1 - y0) * r))
+    }
+}
+
+/** 금을 경계로 한 왼쪽(side = -1) / 오른쪽(side = 1) 영역 */
+private fun halfRegion(s: Float, side: Float) = Path().apply {
+    val far = if (side < 0f) -s else s * 2f
+    moveTo(far, -s)
+    lineTo(s * 0.5f, -s)
+    CRACK.forEach { (x, y) -> lineTo(s * x, s * y) }
+    lineTo(s * 0.5f, s * 2f)
+    lineTo(far, s * 2f)
+    close()
 }
 
 /** 쿠키 몸통 윤곽: 위는 둥근 돔, 아래는 가운데가 ∧ 모양으로 접힌 두 날개 */
@@ -284,42 +361,32 @@ private fun DrawScope.drawCookieBody(s: Float) {
     drawPath(body, COOKIE_LINE, style = Stroke(s * 0.016f, join = StrokeJoin.Round))
 }
 
-/** 닫혀 있으면 동그란 눈과 작은 미소, 열리면 웃는 눈(^ ^)과 벌린 입 */
-private fun DrawScope.drawCookieFace(s: Float, open: Float) {
+/** 닫힌 쿠키의 얼굴: 동그란 눈, 볼터치, 작은 미소. alpha: 열기 시작할 때 사라지는 정도 */
+private fun DrawScope.drawCookieFace(s: Float, alpha: Float) {
     val eyeY = s * 0.45f
     val stroke = Stroke(s * 0.012f, cap = StrokeCap.Round)
     listOf(0.415f, 0.585f).forEach { x ->
-        if (open < 0.5f) {
-            drawCircle(COOKIE_LINE, s * 0.022f, Offset(s * x, eyeY))
-            drawCircle(Color.White, s * 0.007f, Offset(s * x + s * 0.007f, eyeY - s * 0.008f))
-        } else {
-            drawArc(COOKIE_LINE, 200f, 140f, false, Offset(s * (x - 0.03f), eyeY - s * 0.012f), Size(s * 0.06f, s * 0.05f), style = stroke)
-        }
+        drawCircle(COOKIE_LINE, s * 0.022f, Offset(s * x, eyeY), alpha = alpha)
+        drawCircle(Color.White, s * 0.007f, Offset(s * x + s * 0.007f, eyeY - s * 0.008f), alpha = alpha)
         val blushX = if (x < 0.5f) 0.32f else 0.61f     // 눈 바깥 아래 볼
-        drawOval(BLUSH.copy(alpha = 0.85f), Offset(s * blushX, s * 0.5f), Size(s * 0.07f, s * 0.04f))
+        drawOval(BLUSH, Offset(s * blushX, s * 0.5f), Size(s * 0.07f, s * 0.04f), alpha = 0.85f * alpha)
     }
-    if (open < 0.5f) {
-        drawArc(COOKIE_LINE, 20f, 140f, false, Offset(s * 0.47f, s * 0.47f), Size(s * 0.06f, s * 0.04f), style = stroke)
-    } else {
-        val mouth = Path().apply {
-            moveTo(s * 0.465f, s * 0.49f)
-            lineTo(s * 0.535f, s * 0.49f)
-            quadraticTo(s * 0.535f, s * 0.545f, s * 0.5f, s * 0.545f)
-            quadraticTo(s * 0.465f, s * 0.545f, s * 0.465f, s * 0.49f)
-            close()
-        }
-        drawPath(mouth, COOKIE_LINE)
-        drawOval(BLUSH, Offset(s * 0.483f, s * 0.522f), Size(s * 0.034f, s * 0.02f))
-    }
+    drawArc(COOKIE_LINE, 20f, 140f, false, Offset(s * 0.47f, s * 0.47f), Size(s * 0.06f, s * 0.04f), alpha = alpha, style = stroke)
 }
 
-/** 쿠키 위로 솟아오르는 쪽지 (줄과 반짝임) */
-private fun DrawScope.drawSlip(s: Float, open: Float) {
-    val w = s * 0.12f
-    val h = s * 0.3f
-    val left = s * 0.5f
-    val top = s * 0.02f + s * 0.16f * (1f - open)
-    rotate(16f, Offset(left + w / 2, top + h)) {
+/**
+ * 쿠키 속에서 솟아오르는 쪽지 (줄과 반짝임).
+ * rise 0: 작게 접혀 쿠키 몸통 뒤에 완전히 가려짐 → 1: 원래 크기로 쿠키 위에 비스듬히 섬
+ */
+private fun DrawScope.drawSlip(s: Float, rise: Float) {
+    val k = 0.5f + 0.5f * rise
+    val w = s * 0.12f * k
+    val h = s * 0.3f * k
+    val cx = s * 0.5f
+    val cy = s * (0.42f - 0.15f * rise)
+    val left = cx - w / 2
+    val top = cy - h / 2
+    rotate(10f * rise, Offset(cx, cy)) {
         drawRoundRect(Color.White, Offset(left, top), Size(w, h), CornerRadius(s * 0.012f))
         drawRoundRect(COOKIE_LINE, Offset(left, top), Size(w, h), CornerRadius(s * 0.012f), style = Stroke(s * 0.01f))
         drawSparkle(Offset(left + w * 0.5f, top + h * 0.17f), w * 0.26f, SPARKLE)
