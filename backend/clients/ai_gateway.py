@@ -13,7 +13,7 @@ import httpx
 
 from backend.core.config import Settings
 from backend.core.errors import ServiceUnavailable
-from backend.domain.models import AlarmRoutineItem, NightRecord, RecentRecords
+from backend.domain.models import AlarmRoutineItem, NightRecord, RecentRecords, UserSetting
 
 
 AUTH_TOKEN_URL = "https://generativelanguage.googleapis.com/v1alpha/auth_tokens"
@@ -25,11 +25,15 @@ NIGHT_RECORD_FIELDS = ("ai_summary", "tomorrow_goal", "tomorrow_notes", "conditi
 
 @dataclass(frozen=True)
 class Persona:
-    """RS_USER_SETTING: USER_CALL_NAME, TONE, SPEECH_STYLE, VOICE_TYPE"""
+    """RS_USER_SETTING: USER_CALL_NAME, TONE, SPEECH_STYLE, VOICE_TYPE + 11/16 PERSONALITY, INTENSITY, AUTO_INTENSITY.
+    intensity는 아침이면 그날 쓴 강도(세션 APPLIED_INTENSITY), 밤이면 설정 강도."""
     call_name: str
     tone: str = "FORMAL"
     speech_style: str = "KIND"
     voice_type: str = "FEMALE"
+    personality: str = ""
+    intensity: int = 2
+    auto_intensity: bool = True
 
 
 @dataclass(frozen=True)
@@ -88,6 +92,8 @@ class BriefingContext:
     strategy_block: str = ""
     weather: Weather | None = None          # 없으면 브리핑에서 날씨를 건너뜀
     one_liner_follows: bool = False         # 브리핑 뒤 앱이 어젯밤 한마디 녹음을 틀어 줌 → 마무리에서 순서 안내 (AI 11/10)
+    plan: tuple[str, ...] = ()              # 모닝콜 순서표 (AI B15). 비어 있으면 AI가 예전 순서로 말한다
+    already_done: bool = False              # 오늘 단계를 이미 모두 마친 날 (앱 재진입) → 짧게 칭찬만
 
 
 @dataclass(frozen=True)
@@ -110,6 +116,8 @@ class CoachingContext:
     strategy_block: str = ""
     content_type: str = ""                  # CONTENT 세션: 콘텐츠 종류·오늘 쓴 세부 (CONTRACTS B14, 비어 있으면 AI가 단계로 추정)
     content_option: str = ""
+    plan: tuple[str, ...] = ()
+    stretch_routines: tuple = ()            # ((부위, (CoachStep, ...)), ...) 있으면 AI가 부위를 묻고 select_stretch_area (AI B17)
 
 
 @dataclass(frozen=True)
@@ -178,11 +186,23 @@ class RoutineChangeRequest:
     note: str = ""
 
 
+def persona_of(st: UserSetting, intensity: int | None = None) -> Persona:
+    """설정 → AI Persona. intensity를 주면(아침: 그날 쓴 강도) 설정 강도 대신 쓴다."""
+    return Persona(st.user_call_name, st.tone, st.speech_style, st.voice_type, st.personality,
+                   intensity or st.intensity, st.auto_intensity)
+
+
 def night_view(rec: NightRecord | None) -> NightView | None:
     if rec is None or rec.extract_status != "DONE":
         return None
     return NightView(rec.ai_summary or "", rec.tomorrow_goal or "", tuple(rec.tomorrow_notes), rec.condition_label or "",
                      rec.condition_text or "", rec.encouragement or "", rec.insight or "")
+
+
+def _fit(steps, duration_sec: int) -> list[ContentStep]:
+    """AI 단계(ai.live.inputs.Step) → ContentStep, 시간은 서버 설정 합계에 맞춘다."""
+    secs = fit_seconds([s.planned_sec for s in steps], duration_sec)
+    return [ContentStep(s.name, sec, s.response_type, s.script) for s, sec in zip(steps, secs)]
 
 
 def fit_seconds(raw: list[int | None], total: int) -> list[int]:
@@ -199,12 +219,16 @@ class AIGateway(Protocol):
     def issue_briefing_token(self, ctx: BriefingContext) -> LiveToken: ...
     def issue_coaching_token(self, ctx: CoachingContext) -> LiveToken: ...
     def compose_content_steps(self, content_type: str, content_option: str | None, duration_sec: int,
-                              today: date) -> ContentPlan: ...            # 실패해도 AI 쪽 기본 단계를 돌려준다
+                              today: date, english_level: str = "", context: str = "") -> ContentPlan: ...  # 실패해도 AI 쪽 기본 단계를 돌려준다
+    def stretch_routines(self, duration_sec: int) -> dict[str, list[ContentStep]]: ...   # 부위 5개 루틴 {부위: 단계}
+    def morning_plan(self, has_one_liner: bool, coaching: bool) -> tuple[str, ...]: ...   # 아침 순서표 (AI B15)
+    def today_intensity(self, base: int, sessions: list, auto: bool) -> int: ...          # sessions = 지난 MorningSession(오래된 것부터)
     def decide_strategy(self, user_id: str, records: RecentRecords, today: date, condition: str | None,
                         speech_style: str | None, mode: str, bandit_state: dict | None) -> StrategyDecision: ...
     def strategy_blocks(self, strategy: dict | None) -> tuple[str, str]: ...   # 재연결: 로그의 strategy → (브리핑, 코칭) 문장
     def compose_fortune(self, one_liner: str, tone: str, today: date, diary_text: str) -> Fortune: ...
-    def issue_fortune_token(self, persona: Persona, fortune: Fortune, based_on: str = "") -> LiveToken: ...   # 문장을 그대로 읽는 Live
+    def issue_fortune_token(self, persona: Persona, fortune: Fortune, based_on: str = "",
+                            plan: tuple[str, ...] = ()) -> LiveToken: ...   # 문장을 그대로 읽는 Live
 
 
 def _wake(v) -> time | None:
@@ -254,7 +278,7 @@ class RealAIGateway:
         from ai.live import inputs as ai
         from ai.live.config import build_setup
         inp = ai.NightInput(
-            persona=ai.Persona(ctx.persona.call_name, ctx.persona.tone, ctx.persona.speech_style, ctx.persona.voice_type),
+            persona=self._persona(ai, ctx.persona),
             events_today=tuple(ai.CalendarEvent(e.title, e.start, e.end, e.all_day) for e in ctx.events_today),
             now_hhmm=ctx.now_hhmm, tomorrow_wake_time=ctx.tomorrow_wake_time,
             events_tomorrow=tuple(ai.CalendarEvent(e.title, e.start, e.end, e.all_day) for e in ctx.events_tomorrow),
@@ -288,7 +312,8 @@ class RealAIGateway:
     # ---------- 아침 ----------
     @staticmethod
     def _persona(ai, p: Persona):
-        return ai.Persona(p.call_name, p.tone, p.speech_style, p.voice_type)
+        return ai.Persona(p.call_name, p.tone, p.speech_style, p.voice_type, personality=p.personality,
+                          intensity=p.intensity, auto_intensity=p.auto_intensity)
 
     @staticmethod
     def _night(ai, n: NightView | None):
@@ -303,27 +328,43 @@ class RealAIGateway:
             one_liner_follows=ctx.one_liner_follows,
             now_hhmm=ctx.now_hhmm, events_today=tuple(ai.CalendarEvent(e.title, e.start, e.end, e.all_day) for e in ctx.events_today),
             weather=ai.Weather(**asdict(ctx.weather)) if ctx.weather else None, night=self._night(ai, ctx.night),
-            strategy_block=ctx.strategy_block)
+            strategy_block=ctx.strategy_block, plan=ctx.plan, already_done=ctx.already_done)
         return self._issue("briefing", build_setup("briefing", inp))
 
     def issue_coaching_token(self, ctx: CoachingContext) -> LiveToken:
         from ai.live import inputs as ai
         from ai.live.config import build_setup
+        def step(s: CoachStep):
+            return ai.Step(s.order, s.name, s.planned_sec, s.response_type, s.script)
         inp = ai.CoachingInput(
             persona=self._persona(ai, ctx.persona), morning_call_type=ctx.morning_call_type,
-            steps=tuple(ai.Step(s.order, s.name, s.planned_sec, s.response_type, s.script) for s in ctx.steps),
+            steps=tuple(step(s) for s in ctx.steps),
             resumed=ctx.resumed, night=self._night(ai, ctx.night), strategy_block=ctx.strategy_block,
-            content_type=ctx.content_type, content_option=ctx.content_option)
+            content_type=ctx.content_type, content_option=ctx.content_option, plan=ctx.plan,
+            stretch_routines=tuple((area, tuple(step(s) for s in steps)) for area, steps in ctx.stretch_routines))
         return self._issue("coaching", build_setup("coaching", inp))
 
-    def compose_content_steps(self, content_type: str, content_option: str | None, duration_sec: int, today: date) -> ContentPlan:
+    def compose_content_steps(self, content_type: str, content_option: str | None, duration_sec: int, today: date,
+                              english_level: str = "", context: str = "") -> ContentPlan:
         """AI는 항상 5분(300초)으로 구성하므로, 서버 설정(CONTENT_DURATION_SEC)이 다르면 비율대로 늘이거나 줄인다.
-        스트레칭·인물/상식 퀴즈·끝말잇기는 AI 없이 정해 둔 단계, 영어는 AI 구성(B14)."""
+        스트레칭·인물/상식 퀴즈·끝말잇기는 AI 없이 정해 둔 단계, 영어는 AI 구성(B14, 11/13 수준·오늘 이야기)."""
         from ai.tasks.content_steps import compose_content_steps
-        res = compose_content_steps(content_type, content_option, self.llm, today=today)
-        secs = fit_seconds([s.planned_sec for s in res.steps], duration_sec)
-        return ContentPlan([ContentStep(s.name, sec, s.response_type, s.script) for s, sec in zip(res.steps, secs)],
-                           getattr(res, "option", "") or content_option or "")
+        res = compose_content_steps(content_type, content_option, self.llm, today=today,
+                                    english_level=english_level or None, context=context)
+        return ContentPlan(_fit(res.steps, duration_sec), getattr(res, "option", "") or content_option or "")
+
+    def stretch_routines(self, duration_sec: int) -> dict[str, list[ContentStep]]:
+        from ai.tasks.stretch_sets import all_area_steps
+        return {area: _fit(steps, duration_sec) for area, steps in all_area_steps().items()}
+
+    def morning_plan(self, has_one_liner: bool, coaching: bool) -> tuple[str, ...]:
+        from ai.tasks.morning_plan import morning_plan
+        return tuple(morning_plan(has_one_liner, coaching))
+
+    def today_intensity(self, base: int, sessions: list, auto: bool) -> int:
+        """AI 쪽 history_from_sessions는 wake_success·rewake_count·applied_intensity 속성만 읽어 MorningSession을 그대로 넘긴다."""
+        from ai.personalization.intensity import history_from_sessions, today_intensity
+        return today_intensity(base, history_from_sessions(sessions), auto)
 
     def decide_strategy(self, user_id, records, today, condition, speech_style, mode, bandit_state) -> StrategyDecision:
         from ai.personalization.agent import decide
@@ -341,12 +382,12 @@ class RealAIGateway:
         res = compose_fortune(one_liner or "", self.llm, None, tone, today, diary_text or "")
         return Fortune(res.text, res.style, res.source)
 
-    def issue_fortune_token(self, persona: Persona, fortune: Fortune, based_on: str = "") -> LiveToken:
+    def issue_fortune_token(self, persona: Persona, fortune: Fortune, based_on: str = "", plan: tuple[str, ...] = ()) -> LiveToken:
         """based_on: ONE_LINER / DIARY / "" — 소개 문장이 "어젯밤 한마디로 만든 …"처럼 재료를 밝힌다(AI 11/10)."""
         from ai.live import inputs as ai
         from ai.live.config import build_setup
         inp = ai.FortuneInput(persona=self._persona(ai, persona), fortune_text=fortune.text, style=fortune.style,
-                              based_on=based_on)
+                              based_on=based_on, plan=plan)
         return self._issue("fortune", build_setup("fortune", inp))
 
     def strategy_blocks(self, strategy: dict | None) -> tuple[str, str]:
@@ -370,6 +411,16 @@ class UnavailableAIGateway:
 
     def strategy_blocks(self, strategy):
         return "", ""           # 전략 문장이 없으면 대화는 기본 방식으로 진행된다
+
+    # 알람 응답(세션 시작)을 막지 않도록, 없으면 예전 동작이 되는 값을 준다
+    def morning_plan(self, has_one_liner, coaching):
+        return ()               # 순서표 없음 = 앱·AI 모두 예전 순서
+
+    def stretch_routines(self, duration_sec):
+        return {}               # 부위 고르기 없이 전신 루틴
+
+    def today_intensity(self, base, sessions, auto):
+        return base
 
 
 def build_ai_gateway(settings: Settings):

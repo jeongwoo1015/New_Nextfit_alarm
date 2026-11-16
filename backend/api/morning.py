@@ -7,14 +7,17 @@ from backend.core.auth import current_user_id
 from backend.services.morning_service import Location, MorningService, SessionView
 
 from .schemas import (BriefingTokenIn, CoachingTokenOut, FortuneTokenOut, LiveTokenOut, ProgressOut, RewakeOut, SessionOut, SessionStartIn,
-                      SessionViewOut, SnoozeOut, StepDurationIn, StepOut, StepStatusIn, VerdictIn)
+                      SessionViewOut, SnoozeOut, StepDurationIn, StepOut, StepStatusIn, StretchAreaIn, StretchStepOut, VerdictIn)
 
 router = APIRouter(prefix="/morning", tags=["morning"])
 
 
 def _view(v: SessionView) -> SessionViewOut:
+    routines = ({area: [StretchStepOut.model_validate(p) for p in plans] for area, plans in v.stretch_routines.items()}
+                if v.stretch_routines else None)
     return SessionViewOut(session=SessionOut.model_validate(v.session), steps=[StepOut.model_validate(s) for s in v.steps],
-                          progress=ProgressOut.model_validate(v.progress))
+                          progress=ProgressOut.model_validate(v.progress),
+                          morning_plan=list(v.morning_plan) if v.morning_plan is not None else None, stretch_routines=routines)
 
 
 @router.post("/sessions", response_model=SessionViewOut)
@@ -104,6 +107,14 @@ def mark_step(session_id: str, step_order: int, body: StepStatusIn, user_id: str
               svc: MorningService = Depends(morning_service)):
     """체크리스트에서 직접 체크(DONE)·건너뛰기(SKIPPED)·해제(PENDING)."""
     return _view(svc.mark_step(user_id, session_id, step_order, body.step_status))
+
+
+@router.post("/sessions/{session_id}/stretch-area", response_model=SessionViewOut)
+def select_stretch_area(session_id: str, body: StretchAreaIn, user_id: str = Depends(current_user_id),
+                        svc: MorningService = Depends(morning_service)):
+    """스트레칭 코칭 중 AI의 select_stretch_area(area)를 앱이 전달. 아직 판정하지 않은 단계를 그 부위 루틴(1번부터)으로 바꾼다.
+    판정한 단계가 이미 있거나 이미 다른 부위를 골랐으면 409 STRETCH_AREA_LOCKED (앱은 AI에 그대로 ok를 돌려주고 기존 단계로 진행)."""
+    return _view(svc.select_stretch_area(user_id, session_id, body.area))
 
 
 @router.patch("/sessions/{session_id}/steps/{step_order}/duration", response_model=SessionViewOut)

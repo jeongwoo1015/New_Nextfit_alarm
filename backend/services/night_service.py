@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-from backend.clients.ai_gateway import AIGateway, CalendarEvent, LiveToken, NightContext, Persona
+from backend.clients.ai_gateway import AIGateway, CalendarEvent, LiveToken, NightContext, Persona, persona_of
 from backend.core.errors import AppError, Conflict, NotFound, ValidationFailed, check_media_type
 from backend.core.timeutil import now_kst, to_kst
 from backend.domain import codes
@@ -39,7 +39,7 @@ class NightService:
         s = self.r.users.get_setting(user_id)
         if not s:
             raise NotFound("온보딩을 먼저 마쳐 주세요", "SETTING_NOT_FOUND")
-        return Persona(s.user_call_name, s.tone, s.speech_style, s.voice_type)
+        return persona_of(s)
 
     def _tomorrow_alarm(self, user_id: str, at: datetime) -> Alarm | None:
         """하루 한정 변경과 대화로 바꾼 루틴 항목을 적용할 알람 = 밤 기록이 적용되는 아침에 가장 먼저 울리는 알람.
