@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.RingtoneManager
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.respeclive.MainActivity
@@ -59,10 +60,13 @@ object AlarmNotifier {
             .apply { flags = flags or Notification.FLAG_INSISTENT } // 앱 화면이 열려 알림이 취소될 때까지 반복
 
         val nm = NotificationManagerCompat.from(context)
-        if (nm.areNotificationsEnabled()) {
-            nm.notify(id, notification)
-        } else {
-            // 알림 권한이 없으면 직접 열기 시도 (백그라운드에서는 막힐 수 있음)
+        val notified = nm.areNotificationsEnabled()
+        if (notified) nm.notify(id, notification)
+
+        // '다른 앱 위에 표시'가 켜져 있으면 폰을 쓰는 중에도 팝업 대신 수신 화면을 바로 연다.
+        // 알림은 열기가 막혔을 때를 위한 예비로 남겨 두고, 화면이 열리면 MainActivity가 취소한다.
+        // 알림 권한이 없을 때도 열기를 시도한다(오버레이 권한이 없으면 백그라운드에서는 막힐 수 있음).
+        if (Settings.canDrawOverlays(context) || !notified) {
             try {
                 context.startActivity(launch)
             } catch (e: Exception) {
