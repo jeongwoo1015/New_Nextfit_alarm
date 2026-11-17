@@ -39,13 +39,7 @@ object AlarmNotifier {
     fun show(context: Context, id: Int, type: String, label: String) {
         ensureChannel(context)
 
-        val launch = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra(AlarmExtras.FROM_ALARM, true)
-            putExtra(AlarmExtras.ID, id)
-            putExtra(AlarmExtras.TYPE, type)
-            putExtra(AlarmExtras.LABEL, label)
-        }
+        val launch = launchIntent(context, id, type, label)
         val pi = PendingIntent.getActivity(
             context, id, launch, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -75,4 +69,18 @@ object AlarmNotifier {
             }
         }
     }
+
+    /** 디버그: 알람 시각을 기다리지 않고 지금 바로 수신 화면을 엶 (알람이 울려 알림을 누른 것과 같은 경로) */
+    fun ringNow(context: Context, id: Int, type: String, label: String) {
+        context.startActivity(launchIntent(context, id, type, label))
+    }
+
+    private fun launchIntent(context: Context, id: Int, type: String, label: String) =
+        Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(AlarmExtras.FROM_ALARM, true)
+            putExtra(AlarmExtras.ID, id)
+            putExtra(AlarmExtras.TYPE, type)
+            putExtra(AlarmExtras.LABEL, label)
+        }
 }

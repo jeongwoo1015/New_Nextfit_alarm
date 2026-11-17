@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.respeclive.alarm.AlarmNotifier
 import com.example.respeclive.alarm.AlarmScheduler
 import com.example.respeclive.data.Alarm
 import com.example.respeclive.data.AlarmRepository
@@ -40,6 +41,7 @@ import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.theme.AppTheme
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.launch
+import java.util.Calendar
 import kotlin.math.roundToInt
 
 @Composable
@@ -113,9 +115,24 @@ fun HomeScreen(
                 ) {
                     Text("+ 나만의 알람 만들기", color = RespecColors.Purple, fontWeight = FontWeight.Bold)
                 }
-                // 넥스티 디버그 화면으로 (나만의 알람 만들기 바로 아래)
-                TextButton(onClick = onOpenDebug, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                    Text("디버그", color = RespecColors.TextSub, fontSize = 13.sp)
+                // 디버그 (나만의 알람 만들기 바로 아래): 넥스티 디버그 화면 / 지금 바로 모닝콜 받기
+                Row(Modifier.align(Alignment.CenterHorizontally)) {
+                    TextButton(onClick = onOpenDebug) {
+                        Text("디버그", color = RespecColors.TextSub, fontSize = 13.sp)
+                    }
+                    TextButton(onClick = {
+                        // 다음에 울릴 모닝콜 알람(켜진 것 우선)으로 수신 화면을 바로 엶. 수신 화면의 시각은 지금 시각
+                        val wake = alarms.firstOrNull { it.type == AlarmType.WAKE }
+                        if (wake == null) {
+                            Toast.makeText(context, "모닝콜 알람을 먼저 만들어 주세요", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val now = Calendar.getInstance()
+                            val label = Alarm.timeLabelOf(now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE))
+                            AlarmNotifier.ringNow(context, wake.id, AlarmType.WAKE.name, label)
+                        }
+                    }) {
+                        Text("모닝콜 받기", color = RespecColors.TextSub, fontSize = 13.sp)
+                    }
                 }
             }
 
