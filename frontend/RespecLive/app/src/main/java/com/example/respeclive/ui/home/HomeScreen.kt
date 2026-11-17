@@ -5,12 +5,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -21,14 +17,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.respeclive.alarm.AlarmNotifier
@@ -37,12 +28,10 @@ import com.example.respeclive.data.Alarm
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.data.WakeOverrides
-import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.theme.AppTheme
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.launch
 import java.util.Calendar
-import kotlin.math.roundToInt
 
 @Composable
 fun HomeScreen(
@@ -85,60 +74,85 @@ fun HomeScreen(
                 Text("${alarms.size}개", color = RespecColors.TextSub, fontSize = 14.sp)
             }
 
-            Column(
-                Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                alarms.forEach { alarm ->
-                    AlarmCard(
-                        alarm = alarm,
-                        onClick = { onEditAlarm(alarm.id) },
-                        onToggle = { checked ->
-                            scope.launch {
-                                val error = AlarmRepository.setEnabled(context, alarm.id, checked)
-                                val message = error ?: if (checked) AlarmScheduler.describeRemaining(alarm) else null
-                                message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
-                            }
-                        }
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = onCreateAlarm,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(28.dp),
-                    border = BorderStroke(2.dp, RespecColors.Purple)
-                ) {
-                    Text("+ 나만의 알람 만들기", color = RespecColors.Purple, fontWeight = FontWeight.Bold)
-                }
-                // 디버그 (나만의 알람 만들기 바로 아래): 넥스티 디버그 화면 / 지금 바로 모닝콜 받기
-                Row(Modifier.align(Alignment.CenterHorizontally)) {
-                    TextButton(onClick = onOpenDebug) {
-                        Text("디버그", color = RespecColors.TextSub, fontSize = 13.sp)
-                    }
-                    TextButton(onClick = {
-                        // 다음에 울릴 모닝콜 알람(켜진 것 우선)으로 수신 화면을 바로 엶. 수신 화면의 시각은 지금 시각
-                        val wake = alarms.firstOrNull { it.type == AlarmType.WAKE }
-                        if (wake == null) {
-                            Toast.makeText(context, "모닝콜 알람을 먼저 만들어 주세요", Toast.LENGTH_SHORT).show()
-                        } else {
-                            val now = Calendar.getInstance()
-                            val label = Alarm.timeLabelOf(now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE))
-                            AlarmNotifier.ringNow(context, wake.id, AlarmType.WAKE.name, label)
-                        }
-                    }) {
-                        Text("모닝콜 받기", color = RespecColors.TextSub, fontSize = 13.sp)
-                    }
+            // 목록을 내리면 대화 버튼을 아이콘만 남게 줄이고, 올리면 다시 글자를 펼침
+            val scrollState = rememberScrollState()
+            var fabExpanded by remember { mutableStateOf(true) }
+            LaunchedEffect(scrollState) {
+                var last = scrollState.value
+                snapshotFlow { scrollState.value }.collect { value ->
+                    if (value > last) fabExpanded = false
+                    else if (value < last) fabExpanded = true
+                    last = value
                 }
             }
 
-            Spacer(Modifier.height(12.dp))   // 목록 끝과 띄워 둠
-            SwipeBanner(text = "밀어서 취침 전 대화 시작하기 →", onComplete = onStartNightChat)
-            Spacer(Modifier.height(16.dp))
+            Box(Modifier.weight(1f)) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(scrollState),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    alarms.forEach { alarm ->
+                        AlarmCard(
+                            alarm = alarm,
+                            onClick = { onEditAlarm(alarm.id) },
+                            onToggle = { checked ->
+                                scope.launch {
+                                    val error = AlarmRepository.setEnabled(context, alarm.id, checked)
+                                    val message = error ?: if (checked) AlarmScheduler.describeRemaining(alarm) else null
+                                    message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+                                }
+                            }
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = onCreateAlarm,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = RoundedCornerShape(28.dp),
+                        border = BorderStroke(2.dp, RespecColors.Purple)
+                    ) {
+                        Text("+ 나만의 알람 만들기", color = RespecColors.Purple, fontWeight = FontWeight.Bold)
+                    }
+                    // 디버그 (나만의 알람 만들기 바로 아래): 넥스티 디버그 화면 / 지금 바로 모닝콜 받기
+                    Row(Modifier.align(Alignment.CenterHorizontally)) {
+                        TextButton(onClick = onOpenDebug) {
+                            Text("디버그", color = RespecColors.TextSub, fontSize = 13.sp)
+                        }
+                        TextButton(onClick = {
+                            // 다음에 울릴 모닝콜 알람(켜진 것 우선)으로 수신 화면을 바로 엶. 수신 화면의 시각은 지금 시각
+                            val wake = alarms.firstOrNull { it.type == AlarmType.WAKE }
+                            if (wake == null) {
+                                Toast.makeText(context, "모닝콜 알람을 먼저 만들어 주세요", Toast.LENGTH_SHORT).show()
+                            } else {
+                                val now = Calendar.getInstance()
+                                val label = Alarm.timeLabelOf(now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE))
+                                AlarmNotifier.ringNow(context, wake.id, AlarmType.WAKE.name, label)
+                            }
+                        }) {
+                            Text("모닝콜 받기", color = RespecColors.TextSub, fontSize = 13.sp)
+                        }
+                    }
+                    // 떠 있는 대화 버튼이 마지막 카드의 스위치를 가리지 않도록 버튼 높이만큼 비워 둠
+                    Spacer(Modifier.height(72.dp))
+                }
+
+                // 누르면 넥스티 전화가 걸려 오는 화면으로 (밤엔 굿나잇 대화, 낮엔 넥스티와 대화)
+                ExtendedFloatingActionButton(
+                    text = { Text("굿나잇콜", fontWeight = FontWeight.Bold) },
+                    icon = { Icon(Icons.Filled.Bedtime, contentDescription = null, tint = RespecColors.Sun) },
+                    onClick = onStartNightChat,
+                    expanded = fabExpanded,
+                    containerColor = RespecColors.Banner,
+                    contentColor = RespecColors.OnBanner,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = 16.dp)
+                )
+            }
         }
     }
 }
@@ -240,59 +254,5 @@ private fun TypeBadge(night: Boolean) {
             fontWeight = FontWeight.Bold,
             fontSize = 12.sp
         )
-    }
-}
-
-/** 오른쪽으로 끝까지 밀면 onComplete 호출 */
-@Composable
-private fun SwipeBanner(text: String, onComplete: () -> Unit) {
-    val density = LocalDensity.current
-    val knobSize = 52.dp
-    val inset = 6.dp
-    var widthPx by remember { mutableFloatStateOf(0f) }
-    var offsetPx by remember { mutableFloatStateOf(0f) }
-    val maxOffset = (widthPx - with(density) { (knobSize + inset * 2).toPx() }).coerceAtLeast(0f)
-    val shape = RoundedCornerShape(32.dp)
-
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(64.dp)
-            .clip(shape)
-            .background(RespecColors.Banner)
-            .border(1.dp, RespecColors.Banner, shape)
-            .onSizeChanged { widthPx = it.width.toFloat() },
-        contentAlignment = Alignment.CenterStart
-    ) {
-        // 손잡이 자리를 비워 두고, 좁은 화면에서는 줄바꿈 대신 글자를 줄임
-        FitText(
-            text,
-            modifier = Modifier.fillMaxWidth().padding(start = knobSize + inset * 2, end = 16.dp),
-            textAlign = TextAlign.Center,
-            color = RespecColors.OnBanner,
-            fontWeight = FontWeight.Bold,
-            fontSize = 16.sp
-        )
-        Box(
-            Modifier
-                .offset { IntOffset(offsetPx.roundToInt(), 0) }
-                .padding(inset)
-                .size(knobSize)
-                .clip(CircleShape)
-                .background(RespecColors.Sun)
-                .draggable(
-                    orientation = Orientation.Horizontal,
-                    state = rememberDraggableState { delta ->
-                        offsetPx = (offsetPx + delta).coerceIn(0f, maxOffset)
-                    },
-                    onDragStopped = {
-                        if (offsetPx > maxOffset * 0.8f) onComplete()
-                        offsetPx = 0f
-                    }
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(Icons.Filled.Bedtime, contentDescription = null, tint = Color(0xFF1F2547))
-        }
     }
 }

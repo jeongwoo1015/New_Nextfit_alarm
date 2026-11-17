@@ -4,16 +4,15 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -21,10 +20,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.respeclive.ui.common.SwipeToAnswer
 import com.example.respeclive.ui.nexty.NextyCharacter
 import com.example.respeclive.ui.nexty.NextyFace
 import com.example.respeclive.ui.nexty.NextyMotion
@@ -52,18 +51,12 @@ fun NightCallScreen(
         animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Restart),
         label = "ringAlpha"
     )
-    val acceptPulse by infinite.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.1f,
-        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
-        label = "acceptPulse"
-    )
 
     Column(
         Modifier
             .fillMaxSize()
             .background(RespecColors.Background)
-            .padding(horizontal = 36.dp, vertical = 32.dp),
+            .padding(horizontal = 28.dp, vertical = 32.dp),   // 모닝콜 수신 화면과 같은 여백
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
@@ -126,44 +119,13 @@ fun NightCallScreen(
             }
         }
 
-        // 하단 버튼
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            CallButton(
-                icon = { Icon(Icons.Filled.CallEnd, null, tint = Color.White, modifier = Modifier.size(30.dp)) },
-                background = RespecColors.Danger,   // 통화 거절·종료 #E46B5C
-                label = "나중에 하기",
-                onClick = onDecline
-            )
-            CallButton(
-                icon = { Icon(Icons.Filled.Call, null, tint = RespecColors.OnAccent, modifier = Modifier.size(30.dp)) },
-                background = RespecColors.Lime,
-                label = "받기",
-                scale = acceptPulse,
-                onClick = onAccept
-            )
+        // 하단: 모닝콜과 같이 밀어서 받기 + 나중에 하기
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            SwipeToAnswer(onComplete = onAccept)
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = onDecline) {
+                Text("나중에 하기", color = RespecColors.TextSub, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            }
         }
-    }
-}
-
-@Composable
-private fun CallButton(
-    icon: @Composable () -> Unit,
-    background: Color,
-    label: String,
-    scale: Float = 1f,
-    onClick: () -> Unit
-) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier
-                .size(76.dp)
-                .scale(scale)
-                .clip(CircleShape)
-                .background(background)
-                .clickable(onClick = onClick),
-            contentAlignment = Alignment.Center
-        ) { icon() }
-        Spacer(Modifier.height(12.dp))
-        Text(label, color = RespecColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
