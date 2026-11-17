@@ -24,8 +24,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** 상황별 수면 음악 볼륨: 대화·녹음 듣기 중에는 마이크에 섞이지 않게 아주 작게, 그 밖에는 보통 */
-enum class SleepLevel(val volume: Float) { QUIET(0.06f), NORMAL(0.35f) }
+/**
+ * 상황별 수면 음악 볼륨 (앱 재생 비율): 대화·녹음 듣기 중에는 마이크에 섞이지 않게 아주 작게,
+ * 그 밖에는 앱에서 줄이지 않고 폰 미디어 볼륨 그대로 (1)
+ */
+enum class SleepLevel(val volume: Float) { QUIET(0.06f), NORMAL(1f) }
 
 /**
  * 수면 음악 조작 창구. 실제 재생은 SleepMusicService가 맡아 화면을 끄거나 나가도 이어짐.
