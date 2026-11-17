@@ -63,11 +63,12 @@ import com.example.respeclive.data.RespecApi
 import com.example.respeclive.data.RoutineRepository
 import com.example.respeclive.live.LiveAuth
 import com.example.respeclive.live.LiveClient
+import com.example.respeclive.ui.common.CallLayout
 import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.common.SubtitleBox
-import com.example.respeclive.ui.common.SubtitleNumbers
 import com.example.respeclive.ui.common.rememberHeldUserLine
 import com.example.respeclive.ui.common.rememberScreenScale
+import com.example.respeclive.ui.common.rememberSubtitleHeight
 import com.example.respeclive.ui.common.rememberSpokenPage
 import com.example.respeclive.ui.nexty.NextyCharacter
 import com.example.respeclive.ui.nexty.NextyMotion
@@ -79,6 +80,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -94,8 +97,17 @@ private data class Banner(val title: String, val sub: String)
 private const val BTN_DONE = "완료했어요"
 
 /** 루틴 게이지 최대 크기 (자리가 모자라면 줄어듦) */
-private val RING_SIZE = 240.dp
+private val RING_SIZE = CallLayout.ORB_SIZE
 private const val BTN_LATER = "오늘은 건너뛸게요"
+
+/**
+ * 판정 함수를 부르기 전에 AI가 이미 한 말이 다음 단계 안내(대답 방법으로 끝남: "'했어요'라고 말해 주세요")나
+ * 코칭 마무리(포춘으로 넘기기·하루 응원)인지. 그렇다면 함수 응답 뒤 AI가 이어서 하는 응답은 되풀이이거나
+ * 사용자 대답 전에 다음 단계를 미리 판정하고 마무리하는 말이라 들려주지 않음
+ */
+private val GUIDE_SPOKEN = Regex("라고\\s?(말|대답|얘기)|포춘|좋은 하루")
+/** 코칭 마무리 말 (다음 순서인 포춘으로 넘기거나 하루를 응원): 이 말이 나오면 완료·건너뛰기 버튼을 숨김 */
+private val COACH_CLOSING = Regex("포춘|좋은 하루")
 
 /** 퀴즈 답에 O / X로 반응하는 시간 */
 private const val QUIZ_REACTION_MS = 2800L
@@ -127,6 +139,14 @@ private const val REWAKE_NOTICE = "(앱 알림: 재기상 음악 재생)"
 
 /** 판정 보고가 사용자 말 받아쓰기보다 먼저 올 때, 받아쓰기를 기다리는 시간 (B19) */
 private const val REPORT_SPEECH_WAIT_MS = 1_500L
+
+/**
+ * 보류한 판정 보고로 화면을 다음 단계로 넘기려면 직전 보고(또는 코칭 시작) 뒤 이만큼 지나야 함.
+ * 사용자 말 받아쓰기가 늦은 진짜 대답은 단계 시간만큼 지나서 오고, AI가 다음 단계를 안내하며 미리 보낸 보고는 몇 초 만에 옴
+ */
+private const val HELD_ADVANCE_GAP_MS = 8_000L
+/** 단계를 마친 것으로 보는 판정 (ambiguous·other는 AI가 다시 물으므로 그 단계에 머묾) */
+private val FINAL_VERDICTS = setOf("done", "skipped", "not_done")
 
 /** 마무리 안내 자막을 보여 주는 시간 (앱은 읽지 않음) */
 private const val NOTE_SHOW_MS = 2_500L
@@ -189,6 +209,13 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     var quizByTool by remember { mutableStateOf(false) }
     var fortune by remember { mutableStateOf<FortuneShow?>(null) }    // 오늘의 포춘 (포춘 단계에서만)
     var fortuneOpen by remember { mutableStateOf(false) }             // 쿠키를 열어 카드를 보여 줌
+    // 스트레칭 부위를 고르는 중 (세션 시작 응답에 부위별 루틴이 왔고 아직 select_stretch_area가 오지 않음).
+    // 이때 화면의 1번 단계는 전신 루틴이라 AI가 부위를 묻는 동안 단계 이름·타이머·시범을 보여 주지 않음
+    var areaPending by remember { mutableStateOf(false) }
+    // 보류한 판정 보고 (단계 번호 → verdict). AI는 보고한 단계를 마친 것으로 보고 다음 단계로 넘어가므로 화면은 바로 넘기고,
+    // 서버 기록은 사용자 말 받아쓰기가 도착하거나 AI가 다음 단계를 보고하거나 코칭이 끝날 때 함 (B19)
+    val heldReports = remember { mutableStateMapOf<Int, String>() }
+    var heldShown by remember { mutableIntStateOf(0) }     // 보류한 보고로 화면을 넘긴 마지막 단계 번호 (화면은 그다음 단계)
 
     fun finish() {
         val sid = sessionId ?: initialSession?.optJSONObject("session")?.optString("session_id")?.takeIf { it.isNotBlank() }
@@ -256,12 +283,16 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
 
     // 브리핑 확인 질문("잘 주무셨어요?")에 대한 첫 대답(말 또는 버튼): 첫 응답 기록 → 기상 확인 (AI CONTRACTS 6-1).
     // AI는 wake_check_done을 부르지 않으므로 앱이 판정 시점을 알린다.
+    // 받아쓰기 글자가 들어올 때마다 이 효과가 다시 시작되므로, 요청은 효과 밖(ApiClient.scope)에서 끝까지 보냄
+    // (효과 안에서 보내면 첫 응답 요청 중에 취소돼 기상 확인을 보내지 못하고 '기상 미확인'으로 남음)
     LaunchedEffect(lines, sessionId) {
         val sid = sessionId ?: return@LaunchedEffect
         if (!responded && lines.any { it.role == LiveClient.Role.User }) {
             responded = true
-            RespecApi.firstResponse(sid)
-            RespecApi.wakeCheck(sid)?.let { RoutineRepository.applyView(it) }
+            ApiClient.scope.launch {
+                RespecApi.firstResponse(sid)
+                RespecApi.wakeCheck(sid)?.let { v -> withContext(Dispatchers.Main) { RoutineRepository.applyView(v) } }
+            }
         }
     }
 
@@ -270,20 +301,55 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
         var acceptedUserTurns = 0       // 마지막으로 받아들인 판정 보고 때의 사용자 말 횟수 (B19)
         var skipUserTurns = -1          // 건너뛰기 보고를 받아들인 사용자 말 (같은 말에 이어 오는 skipped는 받음)
 
-        // 판정 결과 반영: 새로 완료된 단계가 있으면 배너
-        fun applyStepView(v: JSONObject) {
-            val before = items.filter { it.done }.mapNotNull { it.stepOrder }.toSet()
-            RoutineRepository.applyView(v)
-            val newly = items.firstOrNull { it.done && it.stepOrder !in before }
-            if (newly != null) banner = Banner("${items.count { it.done }}번째 스텝 완료!", newly.title)
+        // 스텝 완료 배너: 서버 응답을 기다리지 않고 화면이 다음 단계로 넘어가는 때(AI의 done 판정을 받아들인 때) 한 단계에 한 번만.
+        // 서버 응답 뒤에 띄우면 늦게 뜨고, 보류했던 보고를 한꺼번에 기록할 때 두 개가 연달아 떴음
+        val announced = mutableSetOf<Int>()
+        fun announce(orders: List<Int>) {
+            val fresh = orders.filter { announced.add(it) }
+            val last = fresh.maxOrNull() ?: return
+            val idx = items.indexOfFirst { it.stepOrder == last }
+            if (idx >= 0) banner = Banner("${idx + 1}번째 스텝 완료!", items[idx].title)
         }
 
-        // 판정 보고 검사 (AI CONTRACTS B19): AI가 사용자 대답 전에 미리 판정하거나 한 응답에서 두 단계를 보내는 일이 있어,
-        // ① 지금 진행 중인 단계이고 ② 직전에 받아들인 보고 뒤에 사용자가 말했을 때만 기록함.
+        // 판정 보고 처리는 한 번에 하나씩 (보고·보류 기록·받아쓰기 도착이 서로 끼어들지 않게)
+        val reportLock = Mutex()
+        var lastReportAt = 0L           // 직전 판정 보고(또는 코칭 시작·부위 선택) 시각
+
+        suspend fun record(order: Int, verdict: String) {
+            val sid = RoutineRepository.sessionId ?: return
+            RespecApi.reportVerdict(sid, order, verdict)?.let { RoutineRepository.applyView(it) }
+        }
+
+        // 보류한 보고 중 below보다 앞 단계를 기록
+        suspend fun flushHeld(below: Int = Int.MAX_VALUE) {
+            val orders = heldReports.keys.filter { it < below }.sorted()
+            announce(orders.filter { heldReports[it] == "done" })     // 여러 개면 마지막 하나만 배너
+            for (o in orders) {
+                val v = heldReports[o] ?: continue
+                record(o, v)
+                heldReports.remove(o)
+            }
+        }
+
+        // 판정 보고 검사 (AI CONTRACTS B19): AI가 사용자 대답 전에 미리 판정하는 일이 있어,
+        // ① 지금 진행 중인 단계이고 ② 직전에 받아들인 보고 뒤에 사용자가 말했을 때 바로 기록함.
+        // 사용자 말 받아쓰기는 판정보다 몇 초 늦거나 빠지기도 해서, 그렇지 않은 보고도 버리지 않고 보류함
+        // (버리면 앱의 지금 단계가 AI보다 뒤에 멈춰 이후 보고가 모두 순서가 어긋나 무시되던 문제, 11/17 실기기).
         // 예외: 건너뛰기(skipped)는 사용자가 말했으면 순서와 관계없이, 같은 말에 이어 온 skipped도 받음(전체 건너뛰기)
-        suspend fun acceptReport(order: Int, verdict: String): Boolean {
+        // 돌려주는 값: AI의 판정으로 받아들였는가(바로 기록 또는 보류). 이미 지난 단계의 보고면 false
+        suspend fun handleReport(order: Int, verdict: String): Boolean {
+            // AI가 다음 단계를 보고했으면 앞에서 보류한 단계는 AI가 그대로 넘어간 것이므로 먼저 확정
+            if (heldReports.keys.any { it < order }) flushHeld(below = order)
             val current = items.firstOrNull { !it.done && !it.skipped }?.stepOrder
             val skip = verdict == "skipped"
+            // 완료 배너는 받아쓰기를 기다리지 않고 바로: 사용자가 말했거나, 직전 보고 뒤 충분히 지난(미리 보낸 보고가 아닌) 지금 단계의 done
+            // (말로 대답하면 받아쓰기가 판정보다 늦게 와서 아래 대기만큼 배너가 늦게 떴음. 버튼은 받아쓰기 없이 바로 세어 빨랐음)
+            val sinceLast = System.currentTimeMillis() - lastReportAt
+            if (verdict == "done" && order == current && (client.userTurns > acceptedUserTurns || sinceLast >= HELD_ADVANCE_GAP_MS)) {
+                announce(listOf(order))
+            }
+            val lastUser = client.transcript.value.lastOrNull { it.role == LiveClient.Role.User }
+            Log.d("Morning", "판정 도착: step=$order verdict=$verdict 마지막 사용자 말 뒤 ${lastUser?.let { System.currentTimeMillis() - it.atMs } ?: -1}ms")
             // 판정이 사용자 말 받아쓰기보다 먼저 도착하기도 해서, 지금 단계 보고면 받아쓰기를 잠깐 기다림
             if (order == current && client.userTurns <= acceptedUserTurns) {
                 withTimeoutOrNull(REPORT_SPEECH_WAIT_MS) {
@@ -293,35 +359,59 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             val turns = client.userTurns
             val spoke = turns > acceptedUserTurns
             val ok = (spoke && (order == current || skip)) || (skip && turns == skipUserTurns)
+            val now = System.currentTimeMillis()
+            val gap = now - lastReportAt
+            lastReportAt = now
             if (ok) {
                 acceptedUserTurns = turns
                 if (skip) skipUserTurns = turns
-            } else {
-                Log.w("Morning", "판정 보고 무시: step=$order verdict=$verdict current=$current spoke=$spoke")
+                heldReports.remove(order)
+                if (verdict !in FINAL_VERDICTS) heldShown = minOf(heldShown, order - 1)   // AI가 그 단계를 다시 물음
+                if (verdict == "done") announce(listOf(order))
+                record(order, verdict)
+                return true
             }
-            return ok
+            if (current == null || order < current) {
+                Log.w("Morning", "판정 보고 무시(이미 지난 단계): step=$order verdict=$verdict current=$current")
+                return false
+            }
+            Log.w("Morning", "판정 보고 보류: step=$order verdict=$verdict current=$current spoke=$spoke")
+            heldReports[order] = verdict
+            // 화면은 AI를 따라 다음 단계로. 단, 직전 보고 직후에 온 보고는 미리 보낸 것일 수 있어 화면은 그대로 둠
+            if (verdict in FINAL_VERDICTS && gap >= HELD_ADVANCE_GAP_MS) {
+                heldShown = maxOf(heldShown, order)
+                if (verdict == "done") announce(listOf(order))
+            }
+            return true
+        }
+
+        // 보류한 보고가 있을 때 사용자 말이 (늦게) 들어오면 그 말을 대답으로 보고 기록
+        launch {
+            client.transcript.collect {
+                if (heldReports.isEmpty() || client.userTurns <= acceptedUserTurns) return@collect
+                reportLock.withLock {
+                    if (heldReports.isNotEmpty() && client.userTurns > acceptedUserTurns) {
+                        acceptedUserTurns = client.userTurns
+                        flushHeld()
+                    }
+                }
+            }
         }
 
         client.onToolCall = { call ->
             when (call.name) {
                 "report_step_result" -> {
-                    val sid = RoutineRepository.sessionId
+                    client.muteReplyToToolCall(call, GUIDE_SPOKEN)
                     val order = call.args.optInt("step_order", -1)
                     val verdict = call.args.optString("verdict")
-                    // 받아들이지 않은 보고는 기록·화면 갱신을 건너뛰고, AI에게는 똑같이 ok만 돌려줌
+                    // 지난 단계의 보고는 기록·화면 갱신을 건너뛰고, AI에게는 똑같이 ok만 돌려줌
                     // (에러로 답하면 AI가 이유를 설명하려고 또 말함)
-                    if (withContext(Dispatchers.Main) { acceptReport(order, verdict) }) {
+                    if (order > 0 && verdict.isNotBlank()) withContext(Dispatchers.Main) {
+                        val taken = reportLock.withLock { handleReport(order, verdict) }
                         // 퀴즈 콘텐츠: AI가 정답 여부를 함께 보냄 → 넥스티가 바로 O / X
-                        if (call.args.has("answer_correct")) {
-                            val correct = call.args.optBoolean("answer_correct")
-                            withContext(Dispatchers.Main) {
-                                quizByTool = true
-                                reaction = if (correct) NextyMotion.QUIZ_O else NextyMotion.QUIZ_X
-                            }
-                        }
-                        if (sid != null && order > 0 && verdict.isNotBlank()) {
-                            RespecApi.reportVerdict(sid, order, verdict)
-                                ?.let { v -> withContext(Dispatchers.Main) { applyStepView(v) } }
+                        if (taken && call.args.has("answer_correct")) {
+                            quizByTool = true
+                            reaction = if (call.args.optBoolean("answer_correct")) NextyMotion.QUIZ_O else NextyMotion.QUIZ_X
                         }
                     }
                     JSONObject().put("result", "ok")
@@ -344,10 +434,17 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                 // 이미 판정한 단계가 있거나 부위를 골랐으면 서버가 409(STRETCH_AREA_LOCKED) → 기존 단계로 진행.
                 // AI에게는 어느 쪽이든 ok만 돌려줌
                 "select_stretch_area" -> {
+                    // AI는 부위를 알리고 1번 단계 안내까지 말한 뒤 이 함수를 부름 → 함수 응답 뒤 1번 안내를 되풀이하는 말은 버림
+                    client.muteReplyToToolCall(call)
                     val sid = RoutineRepository.sessionId
                     val area = call.args.optString("area")
                     val view = if (sid != null && area.isNotBlank()) RespecApi.selectStretchArea(sid, area) else null
                     withContext(Dispatchers.Main) {
+                        areaPending = false
+                        heldReports.clear()
+                        heldShown = 0
+                        announced.clear()
+                        lastReportAt = System.currentTimeMillis()
                         if (view != null) {
                             RoutineRepository.applyView(view)
                             // 부위를 말한 대답은 새 1번 단계의 판정 근거가 아님 → 1번은 이 뒤의 사용자 말부터 받음 (B19)
@@ -435,7 +532,8 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             }
             fortune = FortuneShow(t.text, t.style, basedOn)
             client.stop()
-            client.start(listen = false) { auth }
+            // 듣기만 하는 단계지만 마이크는 열어 둠(보내지는 않음): 마이크가 닫히면 폰이 다른 음량 경로로 재생해 목소리가 작아짐
+            client.start(listen = false, silentMic = true) { auth }
             val read = client.awaitFirstTurn(FORTUNE_MAX_MS)
             fortuneOpen = true
             if (read || t.text != null) delay(FORTUNE_HOLD_MS)
@@ -468,6 +566,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             first.steps?.let { RoutineRepository.applySteps(it) }
             acceptedUserTurns = client.userTurns       // 판정 보고 검사(B19)는 코칭을 시작한 뒤의 사용자 말부터 셈
             skipUserTurns = -1
+            lastReportAt = System.currentTimeMillis()
             coachingStarted = true
 
             // 첫 연결은 받아 둔 토큰, 재연결은 서버가 남은 단계만 넣은 새 토큰
@@ -485,6 +584,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             // 마지막 판정 뒤 AI는 마무리 말을 이어서 함: 그 응답이 끝나고 음성 재생까지 마친 뒤 다음 단계로
             client.awaitReplyEnd()
             client.pauseMic()
+            reportLock.withLock { flushHeld() }      // 아직 보류 중인 판정도 AI의 판정대로 기록 (리포트에 반영)
         }
 
         // 1) 오늘 세션 (수신 화면에서 만들었으면 그대로, 아니면 지금 만듦)
@@ -499,6 +599,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             return@LaunchedEffect
         }
         RoutineRepository.applyView(started)
+        areaPending = started.optJSONObject("stretch_routines")?.length()?.let { it > 0 } == true
         if (initialSession == null) launch { RoutineRepository.loadPlan() }   // 수신 화면을 거치지 않았으면 여기서
         val sid = RoutineRepository.sessionId ?: return@LaunchedEffect
         sessionId = sid
@@ -619,7 +720,10 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     }
     // 단계 타이머·시범은 이번 통화에서 코칭을 시작한 뒤에만 (브리핑·메시지 중에는 표시 안 함)
     val showRoutine = coachingStarted && RoutineRepository.hasSteps
-    val currentStep = items.firstOrNull { !it.done && !it.skipped }
+    // 부위를 고르기 전에 단계를 판정했으면(부위 질문 없이 진행) 고르는 중이 아님
+    val choosingArea = areaPending && stage == Stage.Coaching && items.none { it.done || it.skipped }
+    // 화면의 지금 단계는 AI를 따라감: 보류한 보고로 넘긴 단계가 있으면 그다음 단계부터
+    val currentStep = items.firstOrNull { !it.done && !it.skipped && (it.stepOrder ?: 0) > heldShown }?.takeUnless { choosingArea }
     val currentTitle = currentStep?.title
     val contentType = RoutineRepository.session?.contentType
 
@@ -694,7 +798,12 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
         else -> NextyMotion.IDLE
     }
     // 루틴을 모두 판정했으면 완료/건너뛰기 버튼을 숨기고, 코칭을 끌지 않고 바로 마무리로
-    val routineOver = stage == Stage.Coaching && items.isNotEmpty() && currentTitle == null
+    val routineOver = stage == Stage.Coaching && !choosingArea && items.isNotEmpty() && currentTitle == null
+    // AI가 루틴을 마친 것으로 보는 중: 모든 단계를 판정(보류 포함)했거나, 마무리 말(포춘으로 넘기기 등)을 함
+    val aiWrapping = stage == Stage.Coaching && coachSpoke && (
+        (items.isNotEmpty() && items.all { it.done || it.skipped || it.stepOrder in heldReports.keys }) ||
+            lines.lastOrNull()?.let { it.role == LiveClient.Role.Assistant && COACH_CLOSING.containsMatchIn(it.text) } == true
+        )
     LaunchedEffect(routineOver) { if (routineOver) toolEvents.trySend(ROUTINE_OVER) }
 
     // ---- UI ----
@@ -707,22 +816,27 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     ) {
         Column(Modifier.fillMaxSize()) {
             MorningHeader(elapsed)
-            Spacer(Modifier.height(8.dp))
 
             // 오늘의 포춘: 원·자막 자리를 포춘쿠키 화면으로
             if (stage == Stage.Fortune) {
                 FortuneScene(
                     fortune = fortune,
                     opened = fortuneOpen,
-                    aiLine = lines.lastOrNull { it.role == LiveClient.Role.Assistant }?.text?.let(SubtitleNumbers::apply) ?: notice,
-                    speaking = aiSpeaking,
                     onOpen = { if (fortune != null) fortuneOpen = true },
                     modifier = Modifier.weight(1f).fillMaxWidth()
                 )
             } else {
-                // 세로가 짧은 폰에서는 자막·버튼과 겹치지 않도록 남은 공간에 맞춰 줄임 (아래 상태 문구 자리 30dp)
-                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    val ring = minOf(RING_SIZE, maxHeight - 30.dp, maxWidth).coerceAtLeast(0.dp)
+                // 원 + 자막 박스. 자막 박스는 아래(대답 버튼 위)에 붙고 위치는 밤 대화와 같음.
+                // 자리가 모자라면 원을 먼저 줄이고(최소 CallLayout.ORB_MIN), 그래도 모자랄 때만 자막 박스를 줄임 (밤 대화와 같은 규칙)
+                val subtitlePref = rememberSubtitleHeight()
+                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                // 원 위·원과 자막 사이 최소 간격(GAP × 2)을 뺀 자리. 원과 상태 문구는 그 사이 가운데 (밤 대화와 같은 위치)
+                val free = maxHeight - CallLayout.ORB_STATUS_HEIGHT - CallLayout.GAP * 2
+                val subtitleHeight = minOf(subtitlePref, maxOf(CallLayout.SUBTITLE_MIN, free - CallLayout.ORB_MIN))
+                val ringMax = minOf(RING_SIZE, free - subtitleHeight, maxWidth).coerceAtLeast(0.dp)
+                Column(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    val ring = ringMax
                     val k = ring / RING_SIZE
                     val tint = when (phase) {
                         MPhase.AiSpeaking -> RespecColors.AccentText
@@ -741,7 +855,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                             ) {
                                 Column(
                                     Modifier
-                                        .size(ring * (if (showRoutine) 188 else 156) / 240)
+                                        .size(if (showRoutine) ring * 188 / 240 else ring * CallLayout.ORB_INNER)
                                         .clip(CircleShape)
                                         .background(RespecColors.Card)
                                         .border(2.dp, if (showRoutine) Color.Transparent else tint.copy(alpha = 0.7f), CircleShape)
@@ -766,36 +880,40 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                                 }
                             }
                         }
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(CallLayout.ORB_STATUS_GAP))
                         FitText(
                             when {
                                 phase == MPhase.Playing -> "어젯밤의 내가 남긴 한 마디 · 탭하면 건너뛰기"
                                 preparing -> "곧 시작해요"
                                 phase == MPhase.Listening -> "듣고 있어요"
+                                choosingArea -> "오늘 풀어 줄 부위를 고르는 중"
                                 stage == Stage.Coaching && currentTitle != null ->
                                     "지금은 · $currentTitle" + (remainingMs?.let { " · ${(it + 999) / 1000}초" } ?: "")
                                 stage == Stage.Briefing -> "아침 브리핑"
                                 else -> "리스펙이 이야기하는 중"
                             },
                             color = if (showRoutine) RespecColors.TextSub else tint,
-                            fontSize = if (showRoutine) 13.sp else 14.sp,
+                            fontSize = CallLayout.ORB_STATUS_TEXT,
                             fontWeight = if (showRoutine) FontWeight.Normal else FontWeight.SemiBold,
                             textAlign = TextAlign.Center
                         )
                     }
                 }
 
-                // 크기가 고정된 자막 박스 (AI 음성 받아쓰기)
-                SubtitleBox(subtitle, fromUser = subtitleFromUser, pageKey = spokenPage?.key)
+                // 자막 박스 (AI 음성 받아쓰기)
+                SubtitleBox(subtitle, fromUser = subtitleFromUser, pageKey = spokenPage?.key, height = subtitleHeight)
+                }
+                }
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(CallLayout.GAP))
 
             // 대답 버튼: 대답을 기다릴 때만 (말 대신 누르기). 시작 전(preparing은 Listening이 아님)과 루틴을 다 마쳤으면 숨김
             val answers = when {
-                phase == MPhase.Listening && !routineOver && stage == Stage.Coaching -> BTN_LATER to BTN_DONE
+                // 스트레칭 부위를 묻는 동안은 아직 할 단계가 없으므로 숨김 (부위는 말로 대답)
+                phase == MPhase.Listening && !routineOver && !aiWrapping && !choosingArea && stage == Stage.Coaching -> BTN_LATER to BTN_DONE
                 else -> null
             }
-            Box(Modifier.fillMaxWidth().height(64.dp * scale), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxWidth().height(CallLayout.ANSWER_HEIGHT * scale), contentAlignment = Alignment.Center) {
                 if (answers != null) {
                     val (laterText, doneText) = answers
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -823,7 +941,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                     }
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(CallLayout.GAP))
 
             Row(
                 Modifier.fillMaxWidth(),
@@ -880,13 +998,13 @@ private fun OrbHalo(size: Dp, tint: Color) {
     )
     Box(
         Modifier
-            .size(size * 216 / 230)
+            .size(size * CallLayout.ORB_RING)
             .scale(pulse)
             .border(2.dp, tint.copy(alpha = 0.35f), CircleShape)
     )
     Box(
         Modifier
-            .size(size * 184 / 230)
+            .size(size * CallLayout.ORB_GLOW)
             .scale(pulse)
             .clip(CircleShape)
             .background(tint.copy(alpha = 0.08f))
@@ -960,7 +1078,7 @@ private fun quizReaction(text: String, finished: Boolean): NextyMotion? = when {
 
 @Composable
 private fun MorningHeader(elapsed: Int) {
-    Column(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().height(CallLayout.HEADER_HEIGHT), verticalArrangement = Arrangement.Center) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(10.dp).clip(CircleShape).background(RespecColors.Mint))
             Spacer(Modifier.width(8.dp))

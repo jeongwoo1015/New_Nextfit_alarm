@@ -585,7 +585,7 @@ fun NextyCharacter(
         val s = min(size.width / CANVAS_W, size.height / CANVAS_H)
         translate((size.width - CANVAS_W * s) / 2f, (size.height - CANVAS_H * s) / 2f) {
             scale(s, s, Offset.Zero) {
-                // 누운 자세는 발과 천장으로 든 손까지 들어오도록 왼쪽 아래로 조금 옮김
+                // 누운 자세는 매트가 가운데 오도록 옮김
                 val lying = motion.posture == NextyPosture.LIE || motion.posture == NextyPosture.SIDE
                 translate(MARGIN_X + if (lying) LIE_SHIFT_X else 0f, if (lying) LIE_SHIFT_Y else 0f) {
                     drawNexty(
@@ -686,9 +686,9 @@ private val SIDE_NEAR_HIP = Offset(126f, 184f)
 private val SIDE_FAR_HIP = Offset(78f, 186f)
 /** 누운 자세: 천장 쪽 높이가 화면 위쪽으로 보이는 비율 (천장에서 비스듬히 내려다봄) */
 private const val LIE_DEPTH = 0.8f
-/** 누운 자세를 왼쪽으로 옮기는 정도 (쭉 뻗은 다리 끝이 잘리지 않게) */
-private const val LIE_SHIFT_X = -10f
-private const val LIE_SHIFT_Y = 8f
+/** 누운 자세를 옮기는 정도: 매트(가운데 105, 135)가 캔버스 가운데(130, 120)에 오도록 (원 안 가운데 정렬) */
+private const val LIE_SHIFT_X = -5f
+private const val LIE_SHIFT_Y = -15f
 /** 옆으로 누운 자세: 화면 쪽(몸 앞)이 화면 아래쪽, 몸 뒤쪽이 화면 위쪽으로 보이는 비율 (앞 위에서 내려다봄) */
 private const val SIDE_DEPTH = -0.9f
 private const val THIGH = 34f

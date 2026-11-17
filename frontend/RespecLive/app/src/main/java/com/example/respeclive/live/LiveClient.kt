@@ -93,6 +93,8 @@ class LiveClient(context: Context) {
 
     @Volatile private var stopping = false
     @Volatile private var micPaused = false        // 대화는 끝났고 안내 문장만 읽는 중 (재연결하지 않음)
+    @Volatile private var silentMic = false        // 듣기만 하는 세션인데 마이크는 열어 둠 (서버로 보내지 않음)
+    @Volatile private var userMuted = false        // 화면의 음소거 버튼
     @Volatile private var dropAudio = false        // 건너뛴 안내 문장의 남은 음성을 버림
     private val turns = MutableStateFlow(0)        // AI 응답(turn)이 끝난 횟수
     private val voicedTurns = MutableStateFlow(0)  // 그중 음성이 있었던 응답 수 (마무리 말이 끝났는지 볼 때 씀)
@@ -104,6 +106,15 @@ class LiveClient(context: Context) {
     private val userTurnCount = java.util.concurrent.atomic.AtomicInteger(0)
     @Volatile private var turnAudioMs = 0L         // 이번 응답에서 받은 음성 길이
     @Volatile private var newAssistantLine = false // 다음 AI 글자는 새 줄로 (응답마다 한 줄)
+    // 다음 사용자 글자는 새 줄로 (AI 응답이 끝난 뒤). AI 받아쓰기가 오지 않은 응답이 있어도 사용자 말 횟수가 늘도록
+    @Volatile private var newUserLine = false
+    // 함수 호출마다 그 호출이 온 응답의 상태 (call id → 상태). onToolCall이 따로 돌아서 호출 시점 값을 남겨 둠
+    private class CallTurn(val spoke: Boolean, val text: String, val inMuted: Boolean)
+    private val callTurns = java.util.concurrent.ConcurrentHashMap<String, CallTurn>()
+    @Volatile private var mutedTurnOpen = false    // 버리는 응답의 음성·글자가 오는 중 (그 응답의 turnComplete 전)
+    @Volatile private var muteAfterTurn = false    // 지금 응답이 끝나면 그다음 응답을 버림 (함수 응답에 대한 되풀이 말)
+    @Volatile private var muteTurn = false         // 지금 응답의 음성·글자를 버리는 중
+    private val muteLock = Any()
     @Volatile private var lastUserAt = 0L          // 사용자 말(받아쓰기·버튼)이 마지막으로 들어온 시각 (elapsedRealtime)
 
     /**
@@ -125,8 +136,11 @@ class LiveClient(context: Context) {
     /**
      * 통화 시작. tokenSource는 연결(재연결 포함)할 때마다 불러 새 1회용 토큰을 받음.
      * listen=false: 마이크를 열지 않고 AI 말만 들려줌 (포춘 읽기처럼 듣기만 하는 짧은 세션. 끊기면 재연결하지 않음)
+     * silentMic(listen=false일 때만): 마이크는 열되 소리를 서버로 보내지 않음. 통화 녹음이 열려 있어야 폰이 대화 때와 같은
+     * 음량 경로로 재생해서(갤럭시에서 마이크 없이 재생하면 AI 목소리가 작게 들림), 듣기만 하는 세션도 음량을 맞춤.
+     * 사용자 말이 AI에 가지 않으므로 읽는 중에 끊기지 않음
      */
-    fun start(listen: Boolean = true, tokenSource: suspend () -> LiveAuth?) {
+    fun start(listen: Boolean = true, silentMic: Boolean = false, tokenSource: suspend () -> LiveAuth?) {
         val s = _status.value
         if (s == Status.Connecting || s == Status.Live || s == Status.Reconnecting) return
 
@@ -135,7 +149,11 @@ class LiveClient(context: Context) {
         stopping = false
         micStarted = false
         micPaused = !listen
+        this.silentMic = !listen && silentMic
+        audioIn.muted = userMuted || this.silentMic
         dropAudio = false
+        newUserLine = false
+        clearMute()
         turns.value = 0
         _transcript.value = emptyList()
         _toolLog.value = emptyList()
@@ -179,7 +197,8 @@ class LiveClient(context: Context) {
 
     /** 음소거: 마이크는 열어 두되 서버로 보내지 않음. */
     fun setMuted(muted: Boolean) {
-        audioIn.muted = muted
+        userMuted = muted
+        audioIn.muted = muted || silentMic
         if (muted) session.sendAudioStreamEnd()
     }
 
@@ -191,6 +210,7 @@ class LiveClient(context: Context) {
      */
     fun pauseMic() {
         micPaused = true
+        silentMic = false
         session.sendAudioStreamEnd()
         audioIn.stop()
         micStarted = false
@@ -225,6 +245,22 @@ class LiveClient(context: Context) {
         return true
     }
 
+    /**
+     * onToolCall 안에서 부름: 이 함수 호출이 AI가 이미 말을 한 응답 끝에 왔으면, 함수 응답을 받고 AI가 이어서 하는
+     * 응답(같은 안내를 되풀이하거나, 사용자 대답 전에 다음 단계를 미리 판정하고 마무리하는 말)을 들려주지 않고 자막에도 넣지 않음.
+     * 사용자가 말하면 바로 풂. 말 없이 함수부터 불렀으면 아무것도 하지 않음 (그 뒤의 말이 진짜 안내).
+     * spokenMatches: 함수를 부르기 전에 한 말이 이 조건에 맞을 때만 (예: 다음 단계 안내를 이미 마쳤을 때).
+     * 버리는 응답 안에서 온 함수 호출이면 조건 없이 그 뒤 응답도 버림
+     */
+    fun muteReplyToToolCall(call: FunctionCall, spokenMatches: Regex? = null) {
+        val t = callTurns[call.id] ?: return
+        if (!t.inMuted) {
+            if (!t.spoke) return
+            if (spokenMatches != null && !spokenMatches.containsMatchIn(t.text)) return
+        }
+        synchronized(muteLock) { if (turnOpen || mutedTurnOpen) muteAfterTurn = true else muteTurn = true }
+    }
+
     /** 안내 문장 건너뛰기: 지금 나오는 음성과 이 응답의 남은 음성을 버림 */
     fun interruptSpeech() {
         dropAudio = true
@@ -233,7 +269,10 @@ class LiveClient(context: Context) {
 
     /** 말 대신 버튼으로 대답할 때. 음성 받아쓰기에 잡히지 않으므로 대화 원문에 직접 넣음. */
     fun sendText(text: String) {
-        if (session.sendText(text)) appendLine(Role.User, text)
+        if (session.sendText(text)) {
+            clearMute()
+            appendLine(Role.User, text)
+        }
     }
 
     /**
@@ -380,16 +419,17 @@ class LiveClient(context: Context) {
                 startSignal?.takeIf { it.isNotBlank() }?.let { session.sendText(it) }
             }
 
-            is LiveEvent.Audio -> if (!dropAudio) {
+            is LiveEvent.Audio -> if (muteTurn) mutedTurnOpen = true else if (!dropAudio) {
                 openTurn()
                 turnAudioMs += e.pcm.size / (LiveConfig.OUTPUT_SAMPLE_RATE * 2 / 1000)
                 audioOut.write(e.pcm)
             }
             is LiveEvent.InputText -> {
+                clearMute()
                 lastUserAt = SystemClock.elapsedRealtime()
                 append(Role.User, e.text)
             }
-            is LiveEvent.OutputText -> {
+            is LiveEvent.OutputText -> if (muteTurn) mutedTurnOpen = true else {
                 openTurn()
                 append(Role.Assistant, e.text)
             }
@@ -398,12 +438,21 @@ class LiveClient(context: Context) {
                 turnOpen = false
                 turnAudioMs = 0L
                 newAssistantLine = true
+                newUserLine = true
+                clearMute()
             }
             LiveEvent.TurnComplete -> {
-                val voiced = turnAudioMs > 0
+                val voiced = turnAudioMs > 0 && !muteTurn
                 turnOpen = false
+                mutedTurnOpen = false
                 newAssistantLine = true
+                newUserLine = true
                 dropAudio = false
+                // 함수 응답 뒤의 되풀이 응답을 버렸으면 풀고, 버릴 응답이 이 다음이면 지금부터 버림
+                synchronized(muteLock) {
+                    muteTurn = muteAfterTurn
+                    muteAfterTurn = false
+                }
                 if (voiced) voicedTurns.update { it + 1 }
                 turns.update { it + 1 }
             }
@@ -418,6 +467,14 @@ class LiveClient(context: Context) {
 
             is LiveEvent.ToolCall -> {
                 toolMark = voicedTurns.value      // 이벤트 순서대로 기록 (뒤따르는 turnComplete보다 먼저)
+                val last = _transcript.value.lastOrNull()
+                val turnText = if (turnOpen && !newAssistantLine && last?.role == Role.Assistant) last.text else ""
+                val ct = CallTurn(spoke = turnOpen && turnAudioMs > 0, text = turnText, inMuted = muteTurn)
+                if (muteTurn) {
+                    mutedTurnOpen = true      // 말 없이 함수만 온 응답도 그 응답의 turnComplete 뒤 응답을 버리도록
+                    Log.d(TAG, "버리는 응답 안의 함수 호출: ${e.calls.joinToString { it.name }}")
+                }
+                e.calls.forEach { callTurns[it.id] = ct }
                 handleToolCall(e)
             }
         }
@@ -431,6 +488,8 @@ class LiveClient(context: Context) {
                     onToolCall(call)
                 } catch (ex: Exception) {
                     JSONObject().put("error", ex.message ?: "error")
+                } finally {
+                    callTurns.remove(call.id)
                 }
                 out?.let { ToolResult(call.id, call.name, it) }
             }
@@ -438,10 +497,17 @@ class LiveClient(context: Context) {
         }
     }
 
+    private fun clearMute() = synchronized(muteLock) {
+        muteTurn = false
+        muteAfterTurn = false
+        mutedTurnOpen = false
+    }
+
     /** 버튼 대답처럼 따로 들어온 말은 앞 줄에 이어 붙이지 않고 새 줄로 넣음 */
     private fun appendLine(role: Role, text: String) {
         if (role == Role.User) {
             lastUserAt = SystemClock.elapsedRealtime()
+            newUserLine = false
             userTurnCount.incrementAndGet()
         }
         _transcript.update { it + Line(role, text, System.currentTimeMillis()) }
@@ -458,10 +524,11 @@ class LiveClient(context: Context) {
     }
 
     private fun append(role: Role, text: String) {
-        val split = role == Role.Assistant && newAssistantLine
-        if (role == Role.Assistant) newAssistantLine = false
+        // AI 응답이 끝난 뒤의 사용자 말은 새 줄 (AI 받아쓰기가 빠져 앞 사용자 줄에 붙으면 말 횟수가 늘지 않아 판정 보고가 무시됨)
+        val split = if (role == Role.Assistant) newAssistantLine else newUserLine
+        if (role == Role.Assistant) newAssistantLine = false else newUserLine = false
         // 사용자 말이 새 줄로 시작하면 한 번으로 셈 (이어 붙는 받아쓰기 조각은 세지 않음)
-        if (role == Role.User && _transcript.value.lastOrNull()?.role != Role.User) userTurnCount.incrementAndGet()
+        if (role == Role.User && (split || _transcript.value.lastOrNull()?.role != Role.User)) userTurnCount.incrementAndGet()
         _transcript.update { list ->
             val last = list.lastOrNull()
             if (last != null && last.role == role && !split) {
@@ -475,9 +542,10 @@ class LiveClient(context: Context) {
     // ---------------- 오디오 ----------------
 
     private fun ensureMic() {
-        if (micStarted || micPaused) return
-        micStarted = audioIn.start(scope) { chunk -> session.sendAudio(chunk) }
-        if (!micStarted) _message.value = "마이크를 열지 못했어요 (권한을 확인해 주세요)"
+        if (micStarted || (micPaused && !silentMic)) return
+        micStarted = audioIn.start(scope) { chunk -> if (!silentMic) session.sendAudio(chunk) }
+        // 소리를 보내지 않는 마이크는 음량 맞춤용이라, 열지 못해도 알리지 않음 (AI 말은 그대로 들림)
+        if (!micStarted && !silentMic) _message.value = "마이크를 열지 못했어요 (권한을 확인해 주세요)"
     }
 
     private fun startTicker() {

@@ -15,7 +15,6 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -47,8 +46,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.respeclive.ui.common.FitText
-import com.example.respeclive.ui.nexty.NextyCharacter
-import com.example.respeclive.ui.nexty.NextyMotion
 import com.example.respeclive.ui.theme.RespecColors
 import kotlin.math.PI
 import kotlin.math.sin
@@ -80,15 +77,13 @@ private val CARD_TEXT = Color(0xFF2B2118)
 private val CARD_SUB = Color(0xFF7A6650)
 
 /**
- * 아침 대화의 포춘 단계 화면. 닫힌 쿠키 + 넥스티 말풍선 → (AI가 문장을 읽기 시작하거나 탭하면) 열린 쿠키 + 포춘 카드.
- * aiLine: 넥스티가 지금 하는 말 (닫혀 있을 때 말풍선), onOpen: 쿠키를 탭함
+ * 아침 대화의 포춘 단계 화면. 닫힌 쿠키 → (AI가 문장을 읽기 시작하거나 탭하면) 열린 쿠키 + 포춘 카드.
+ * onOpen: 쿠키를 탭함
  */
 @Composable
 fun FortuneScene(
     fortune: FortuneShow?,
     opened: Boolean,
-    aiLine: String,
-    speaking: Boolean,
     onOpen: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -101,11 +96,6 @@ fun FortuneScene(
         } else value = false
     }
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        // 넥스티 말풍선 (쿠키를 열기 전). 열린 뒤에도 자리는 남겨 쿠키가 위아래로 움직이지 않게 함
-        Box(Modifier.fillMaxWidth().heightIn(min = 64.dp)) {
-            if (!opened) NextyBubble(aiLine, speaking)
-        }
-
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             val size = minOf(maxWidth, maxHeight, 300.dp).coerceAtLeast(0.dp)
             FortuneCookie(
@@ -151,28 +141,6 @@ fun FortuneScene(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun NextyBubble(text: String, speaking: Boolean) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        NextyCharacter(NextyMotion.IDLE, Modifier.size(52.dp), speaking = speaking)
-        Spacer(Modifier.width(8.dp))
-        val shape = RoundedCornerShape(topStart = 4.dp, topEnd = 18.dp, bottomEnd = 18.dp, bottomStart = 18.dp)
-        Text(
-            text,
-            color = RespecColors.Text,
-            fontSize = 14.sp,
-            lineHeight = 20.sp,
-            maxLines = 3,
-            modifier = Modifier
-                .weight(1f)
-                .clip(shape)
-                .background(RespecColors.Card)
-                .border(1.dp, RespecColors.CardBorder, shape)
-                .padding(horizontal = 14.dp, vertical = 10.dp)
-        )
     }
 }
 

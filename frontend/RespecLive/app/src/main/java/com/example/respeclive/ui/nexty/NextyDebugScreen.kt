@@ -90,8 +90,6 @@ private fun FortuneDemo() {
             FortuneScene(
                 fortune = fortune,
                 opened = opened,
-                aiLine = "오늘의 포춘쿠키를 가져왔어요. 같이 열어 볼까요?",
-                speaking = !opened,
                 onOpen = { opened = true },
                 modifier = Modifier
                     .fillMaxWidth()
