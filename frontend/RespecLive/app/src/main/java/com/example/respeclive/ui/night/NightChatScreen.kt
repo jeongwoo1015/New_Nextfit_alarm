@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.media.ToneGenerator
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -50,10 +51,12 @@ import com.example.respeclive.data.NightMessageStore
 import com.example.respeclive.data.RespecApi
 import com.example.respeclive.data.WakeOverrides
 import com.example.respeclive.live.LiveClient
+import com.example.respeclive.ui.common.CallLayout
 import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.common.SubtitleBox
 import com.example.respeclive.ui.common.rememberHeldUserLine
 import com.example.respeclive.ui.common.rememberScreenScale
+import com.example.respeclive.ui.common.rememberSubtitleHeight
 import com.example.respeclive.ui.common.rememberSpokenPage
 import com.example.respeclive.ui.common.typeSubtitlePages
 import com.example.respeclive.ui.nexty.NextyCharacter
@@ -80,16 +83,16 @@ import java.util.TimeZone
  * 대화(Live)가 끝난 뒤 앱이 읽는 고정 안내 문장. 사용자 설정의 어조(RS_USER_SETTING.TONE)에 맞춰 존댓말 / 반말.
  * closing: 마무리 인사, closingSaved: 한 마디를 저장했으면 아침에 들려준다는 말을 앞에 붙인 마무리 인사
  */
-private class NightLines(val saveQuestion: String, val retry: String, val closing: String, val closingSaved: String)
+private class NightLines(val saveIntro: String, val retry: String, val closing: String, val closingSaved: String)
 
 private val FORMAL_LINES = NightLines(
-    saveQuestion = "내일 아침의 나에게 들려줄 한 마디를 남겨 볼까요?",
+    saveIntro = "내일 아침의 나에게 들려줄 한 마디를 녹음해 볼게요.",
     retry = "잘 못 들었어요. 한 마디를 다시 들려주세요.",
     closing = "오늘 하루도 정말 수고했어요.",
     closingSaved = "내일 아침 모닝콜에서 오늘 남긴 한 마디를 들려 드릴게요. 오늘 하루도 정말 수고했어요."
 )
 private val CASUAL_LINES = NightLines(
-    saveQuestion = "내일 아침의 나에게 들려줄 한 마디를 남겨 볼까?",
+    saveIntro = "내일 아침의 나에게 들려줄 한 마디를 녹음해 볼게.",
     retry = "잘 못 들었어. 한 마디를 다시 들려줘.",
     closing = "오늘 하루도 정말 수고했어.",
     closingSaved = "내일 아침 모닝콜에서 오늘 남긴 한 마디를 들려줄게. 오늘 하루도 정말 수고했어."
@@ -97,6 +100,11 @@ private val CASUAL_LINES = NightLines(
 
 /** tone: FORMAL 존댓말 / CASUAL 반말. 모르거나 못 받았으면 존댓말 */
 private fun nightLines(tone: String?): NightLines = if (tone == "CASUAL") CASUAL_LINES else FORMAL_LINES
+
+/** 녹음 시작 알림음: 길이와 크기(0~100, 통화 볼륨 기준). 소리가 녹음에 섞이지 않도록 끝난 뒤 녹음을 시작 */
+private const val START_BEEP_MS = 180
+private const val START_BEEP_VOLUME = 50
+private const val START_BEEP_GAP_MS = 250L
 
 // 말 감지 설정 (한 마디 녹음용)
 private const val MIN_THRESHOLD = 2500
@@ -117,7 +125,15 @@ private const val EXTRACT_WAIT_MS = 3 * 60_000L
 private enum class Phase { AiSpeaking, Listening, Recording, Review }
 
 /** 동그라미 최대 크기 (자리가 모자라면 줄어듦) */
-private val ORB_SIZE = 230.dp
+private val ORB_SIZE = CallLayout.ORB_SIZE
+/** 원 아래 상태 문구(간격 포함) 높이 */
+private val ORB_STATUS_GAP = CallLayout.ORB_STATUS_GAP
+private val ORB_STATUS_HEIGHT = CallLayout.ORB_STATUS_HEIGHT
+/** 원·자막·버튼 사이 최소 간격 / 대답 버튼 한 줄 높이 / 원·자막 최소 크기는 아침 대화와 같은 값 (CallLayout) */
+private val MIN_GAP = CallLayout.GAP
+private val ANSWER_HEIGHT = CallLayout.ANSWER_HEIGHT
+private val ORB_MIN = CallLayout.ORB_MIN
+private val SUBTITLE_MIN = CallLayout.SUBTITLE_MIN
 
 private fun isoUtc(ms: Long): String? = if (ms <= 0L) null else
     SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(ms))
@@ -166,6 +182,9 @@ fun NightChatScreen(onClose: () -> Unit) {
     var sleeping by remember { mutableStateOf(false) }     // 마무리 뒤 수면 음악만 흐르는 상태
     val musicPlaying by SleepMusic.playing.collectAsState()
     var liveSaying by remember { mutableStateOf(false) }   // 안내 문장을 AI 목소리로 읽는 중 (자막은 AI가 실제로 한 말)
+    // 안내 문장을 다 읽은 뒤 자막 박스의 key: 읽는 동안 보여 준 박스의 key를 그대로 써서, 같은 글이 새 박스로 다시 올라오지 않게 함
+    var subtitleKey by remember { mutableStateOf<Any?>(null) }
+    val lastSpokenKey = remember { arrayOfNulls<Any>(1) }
 
     // ---- 마이크·캘린더 권한: 결과를 받은 뒤 Live 연결 (캘린더는 없어도 대화는 됨, 일정만 빠짐) ----
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -184,10 +203,14 @@ fun NightChatScreen(onClose: () -> Unit) {
     }
 
     // ---- 통화 볼륨으로 통일: 화면에 있는 동안 통화 모드 유지. 수면 음악만 남으면 풀고 미디어 볼륨으로 ----
+    // 통화 모드에서는 폰이 미디어 소리(수면 음악)를 아주 작게 줄이다가, 풀리는 순간 미디어 볼륨 그대로 커짐.
+    // 푼 뒤에는 앱에서 줄이지 않고 폰 미디어 볼륨 그대로 틂 (SleepLevel.NORMAL)
     val callAudioHeld = remember { booleanArrayOf(false) }
     fun releaseCallAudio() {
-        if (callAudioHeld[0]) CallAudio.release(context)
+        if (!callAudioHeld[0]) return
+        CallAudio.release(context)
         callAudioHeld[0] = false
+        SleepMusic.setLevel(context, SleepLevel.NORMAL)
     }
     LaunchedEffect(sleeping) {
         if (sleeping) {
@@ -212,10 +235,9 @@ fun NightChatScreen(onClose: () -> Unit) {
             recorder.cancel()
             previewHolder[0]?.release()
             speaker.shutdown()
-            // 화면을 나가도 수면 음악은 서비스에서 이어짐: 보통 볼륨으로 되돌리고 수면 타이머를 걸어 둠 (이미 걸었으면 그대로).
+            // 화면을 나가도 수면 음악은 서비스에서 이어짐: 보통 볼륨(폰 미디어 볼륨 그대로)은 releaseCallAudio가 맞추고, 수면 타이머를 걸어 둠 (이미 걸었으면 그대로).
             // 음악을 꺼 둔 채로 나가면 끝냄
             if (musicOnNow) {
-                SleepMusic.setLevel(context, SleepLevel.NORMAL)
                 SleepMusic.resume(context)
                 SleepMusic.startTimer(context, SLEEP_MUSIC_MS)
             } else {
@@ -260,12 +282,15 @@ fun NightChatScreen(onClose: () -> Unit) {
         suspend fun say(text: String) {
             phase = Phase.AiSpeaking
             subtitle = ""
+            subtitleKey = null
+            lastSpokenKey[0] = null
             skipAi = false
             liveSaying = true
             val byLive = client.speakExact(text)
             liveSaying = false
             if (byLive) {
                 subtitle = client.transcript.value.getOrNull(client.exactLineIndex)?.text ?: text
+                subtitleKey = lastSpokenKey[0]
                 return
             }
             coroutineScope {
@@ -283,6 +308,8 @@ fun NightChatScreen(onClose: () -> Unit) {
             phase = Phase.Listening
             delay(400)
             while (muted && !skipSave) delay(300)   // 음소거 중이면 해제할 때까지 대기
+            if (skipSave) return null
+            playStartBeep()                         // 띵: 이제부터 녹음
             if (skipSave) return null
 
             val file = NightMessageStore.newMessageFile(context)
@@ -422,12 +449,16 @@ fun NightChatScreen(onClose: () -> Unit) {
 
         // ===== 3) 내일의 한 마디 녹음 =====
         saveStep = true
-        // AI가 "내일의 나에게 남길 한마디를 녹음해 볼게요"로 마무리했으면 같은 안내를 다시 읽지 않고 자막만 보여 줌.
-        // 사용자가 먼저 "잘게요" 해서 AI가 인사만 하고 끝냈거나 버튼으로 끝냈으면 앱이 안내를 읽음
+        // AI가 "내일의 나에게 남길 한마디를 녹음해 볼게요"로 마무리했으면 안내를 다시 읽지 않고(자막만) 바로 띵 → 녹음.
+        // 사용자가 먼저 "잘게요" 해서 AI가 인사만 하고 끝냈거나 버튼으로 끝냈으면 앱이 "녹음해 볼게요"(어조에 맞춤)를 읽은 뒤 띵 → 녹음.
+        // 대답을 묻지 않음: 질문하면 사용자의 "응"이 한 마디로 녹음됨
         val lastAi = turns.lastOrNull { it.role == LiveClient.Role.Assistant }?.text.orEmpty()
         val aiAnnounced = endedByAi && ("녹음" in lastAi || "한마디" in lastAi || "한 마디" in lastAi)
         val texts = nightLines(withTimeoutOrNull(3_000) { toneJob.await() })
-        if (aiAnnounced) subtitle = texts.saveQuestion else say(texts.saveQuestion)
+        if (aiAnnounced) {
+            subtitle = texts.saveIntro
+            subtitleKey = null
+        } else say(texts.saveIntro)
 
         var voice: File? = null
         var voiceText: String? = null      // 저장한 한 마디를 받아쓴 글 (업로드 뒤 서버에 보냄)
@@ -495,6 +526,7 @@ fun NightChatScreen(onClose: () -> Unit) {
         if (musicOn && SleepMusic.playing.value) {
             sleeping = true      // 음악만 흐르는 상태. 수면 타이머를 걸고, 화면을 끄거나 나가도 음악은 이어짐
             SleepMusic.startTimer(context, SLEEP_MUSIC_MS, force = true)
+            subtitleKey = null
             subtitle = "수면 음악이 흐르고 있어요. 10분 뒤에 저절로 꺼져요. 화면을 꺼도 계속 들려요. 편히 주무세요."
         } else {
             onClose()
@@ -562,6 +594,7 @@ fun NightChatScreen(onClose: () -> Unit) {
         else -> null
     }
     val spokenPage = spokenLine?.let { rememberSpokenPage(it.atMs, it.text, spoken) }
+    if (liveSaying && spokenPage != null) lastSpokenKey[0] = spokenPage.key
     val shownSubtitle = when {
         spokenPage != null -> spokenPage.text
         !talking && phase == Phase.Review -> when {
@@ -587,38 +620,57 @@ fun NightChatScreen(onClose: () -> Unit) {
     ) {
         CallHeader(elapsed = elapsed, musicOn = musicOn, onMusicChange = { musicOn = it })
 
-        // 세로가 짧은 폰에서는 자막·버튼과 겹치지 않도록 남은 공간에 맞춰 줄임 (아래 상태 문구 자리 28dp)
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            VoiceOrb(
-                size = minOf(ORB_SIZE, maxHeight - 28.dp, maxWidth).coerceAtLeast(0.dp),
-                phase = shownPhase,
-                level = if (talking) userLevel else recLevel,
-                isSaveStep = saveStep,
-                onTap = { skipSpeech() }
-            )
+        // 헤더와 아래 통화 버튼 사이: 원 → 자막 박스 → 대답 버튼 한 줄. 높이는 단계와 관계없이 늘 같게 계산해 위치가 움직이지 않음.
+        // 자막 박스와 대답 버튼·통화 버튼은 아래쪽에 붙여 두고(간격 MIN_GAP), 남는 공간은 원 위·원과 자막 사이에 나눔.
+        // 자리가 모자라면 원을 먼저 줄이고(최소 ORB_MIN), 그래도 모자랄 때만 자막 박스를 줄임(최소 SUBTITLE_MIN)
+        val answerHeight = ANSWER_HEIGHT * scale
+        val subtitlePref = rememberSubtitleHeight()
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val free = maxHeight - answerHeight - ORB_STATUS_HEIGHT - MIN_GAP * 3
+            val subtitleHeight = minOf(subtitlePref, maxOf(SUBTITLE_MIN, free - ORB_MIN))
+            val orbSize = minOf(ORB_SIZE, free - subtitleHeight, maxWidth).coerceAtLeast(0.dp)
+            // 녹음 확인 단계: 버튼 두 줄이 들어가도록 이 단계에서만 자막 박스 세로를 줄이고 그만큼 버튼 자리를 늘림
+            // (박스 윗변·원·통화 버튼 위치는 그대로)
+            val reviewing = !talking && phase == Phase.Review
+            // 애니메이션 없이 바로 바꿈 (자리가 늘어나는 도중에는 버튼 글자가 작아 보였음)
+            val extra = if (reviewing) (CallLayout.REVIEW_ANSWER_HEIGHT - answerHeight)
+                .coerceAtMost(subtitleHeight - CallLayout.REVIEW_SUBTITLE_MIN).coerceAtLeast(0.dp) else 0.dp
+            Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Spacer(Modifier.heightIn(min = MIN_GAP).weight(1f))
+                VoiceOrb(
+                    size = orbSize,
+                    phase = shownPhase,
+                    level = if (talking) userLevel else recLevel,
+                    isSaveStep = saveStep,
+                    recordSeconds = recordSeconds,
+                    muted = muted,
+                    onTap = { skipSpeech() },
+                    onPreview = { preview() }
+                )
+                Spacer(Modifier.heightIn(min = MIN_GAP).weight(1f))
+                SubtitleBox(
+                    shownSubtitle,
+                    fromUser = shownFromUser,
+                    pageKey = spokenPage?.key ?: subtitleKey.takeIf { !talking && !liveSaying && phase != Phase.Review },
+                    height = subtitleHeight - extra
+                )
+                Spacer(Modifier.height(MIN_GAP))
+                AnswerArea(
+                    height = answerHeight + extra,
+                    visible = !talking && phase != Phase.AiSpeaking,
+                    phase = shownPhase,
+                    isSaveStep = saveStep,
+                    onSkip = {
+                        if (talking) endTalk.trySend(Unit)
+                        else if (saveStep) skipSave = true
+                    },
+                    onFinishNow = { finishNow = true },
+                    onSave = { reviewChoice.trySend(true) },
+                    onRetake = { reviewChoice.trySend(false) }
+                )
+            }
         }
-
-        SubtitleBox(shownSubtitle, fromUser = shownFromUser, pageKey = spokenPage?.key)
-        Spacer(Modifier.height(12.dp))
-
-        // 한 마디 녹음 단계에서만 버튼 표시 (대화 중에는 통화 종료 버튼으로 끝냄)
-        if (!talking && phase != Phase.AiSpeaking) AnswerArea(
-            minHeight = 120.dp * scale,
-            phase = shownPhase,
-            isSaveStep = saveStep,
-            sleeping = sleeping,
-            muted = muted,
-            recordSeconds = recordSeconds,
-            onSkip = {
-                if (talking) endTalk.trySend(Unit)
-                else if (saveStep) skipSave = true
-            },
-            onFinishNow = { finishNow = true },
-            onSave = { reviewChoice.trySend(true) },
-            onRetake = { reviewChoice.trySend(false) },
-            onPreview = { preview() }
-        )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(MIN_GAP))
 
         Row(
             Modifier.fillMaxWidth(),
@@ -654,7 +706,7 @@ fun NightChatScreen(onClose: () -> Unit) {
 @Composable
 private fun CallHeader(elapsed: Int, musicOn: Boolean, onMusicChange: (Boolean) -> Unit) {
     Row(
-        Modifier.fillMaxWidth(),
+        Modifier.fillMaxWidth().height(CallLayout.HEADER_HEIGHT),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -704,7 +756,7 @@ private fun CallHeader(elapsed: Int, musicOn: Boolean, onMusicChange: (Boolean) 
  * / 듣는 중(보라) / 말하는 중(음량 반응)
  */
 @Composable
-private fun VoiceOrb(size: Dp, phase: Phase, level: Float, isSaveStep: Boolean, onTap: () -> Unit) {
+private fun VoiceOrb(size: Dp, phase: Phase, level: Float, isSaveStep: Boolean, recordSeconds: Int, muted: Boolean, onTap: () -> Unit, onPreview: () -> Unit) {
     val infinite = rememberInfiniteTransition(label = "orb")
     val pulse by infinite.animateFloat(
         initialValue = 1f,
@@ -721,11 +773,15 @@ private fun VoiceOrb(size: Dp, phase: Phase, level: Float, isSaveStep: Boolean, 
     }
     val reactive = phase == Phase.Recording
     val outerScale = if (reactive) 1f + smoothLevel * 0.3f else pulse
+    val time = "%02d:%02d".format(recordSeconds / 60, recordSeconds % 60)
     val status = when (phase) {
+        Phase.Listening, Phase.Recording -> if (isSaveStep && muted) "음소거 중 · 해제하면 녹음돼요" else null
+        else -> null
+    } ?: when (phase) {
         Phase.AiSpeaking -> if (isSaveStep) "리스펙이 이야기하는 중 · 탭하면 건너뛰기" else "리스펙이 이야기하는 중"
         Phase.Listening -> "듣고 있어요"
-        Phase.Recording -> if (isSaveStep) "녹음 중" else "말씀을 듣고 있어요"
-        Phase.Review -> "녹음을 확인해 주세요"
+        Phase.Recording -> if (isSaveStep) "녹음 중  $time" else "말씀을 듣고 있어요"
+        Phase.Review -> "한 마디를 녹음했어요  $time"
     }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -735,20 +791,20 @@ private fun VoiceOrb(size: Dp, phase: Phase, level: Float, isSaveStep: Boolean, 
         ) {
             Box(
                 Modifier
-                    .size(size * 216 / 230)
+                    .size(size * CallLayout.ORB_RING)
                     .scale(outerScale)
                     .border(2.dp, tint.copy(alpha = 0.35f), CircleShape)
             )
             Box(
                 Modifier
-                    .size(size * 184 / 230)
+                    .size(size * CallLayout.ORB_GLOW)
                     .scale(if (reactive) 1f + smoothLevel * 0.15f else pulse)
                     .clip(CircleShape)
                     .background(tint.copy(alpha = 0.08f))
             )
             Box(
                 Modifier
-                    .size(size * 150 / 230)
+                    .size(size * CallLayout.ORB_INNER)
                     .clip(CircleShape)
                     .background(RespecColors.Card)
                     .border(2.dp, tint.copy(alpha = 0.7f), CircleShape)
@@ -758,7 +814,7 @@ private fun VoiceOrb(size: Dp, phase: Phase, level: Float, isSaveStep: Boolean, 
                 // 머리 위·발 아래 여백이 있는 캔버스라 원보다 크게 그려야 원을 알맞게 채움
                 NextyCharacter(
                     NextyMotion.IDLE,
-                    Modifier.requiredSize(size * 180 / 230),
+                    Modifier.requiredSize(size * 180 / 230),    // 수면모자까지 들어오도록 안쪽 원보다 크게
                     face = NextyFace.SLEEPY,
                     night = true,
                     speaking = phase == Phase.AiSpeaking
@@ -766,101 +822,71 @@ private fun VoiceOrb(size: Dp, phase: Phase, level: Float, isSaveStep: Boolean, 
             }
             NightDecor(RespecColors.AccentText, Modifier.fillMaxSize(), inRing = true)
         }
-        FitText(status, color = tint, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(ORB_STATUS_GAP))
+        if (phase == Phase.Review) {
+            // 녹음 확인: "한 마디를 녹음했어요  00:02" 옆에 들어보기 (상태 문구 자리 높이 안에서, 글자를 눌러 재생)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FitText(status, color = tint, fontSize = CallLayout.ORB_STATUS_TEXT, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "▶ 들어보기",
+                    color = RespecColors.AccentText,
+                    fontSize = CallLayout.ORB_STATUS_TEXT,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onPreview).padding(horizontal = 4.dp)
+                )
+            }
+        } else {
+            FitText(status, color = tint, fontSize = CallLayout.ORB_STATUS_TEXT, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
 
+/**
+ * 한 마디 녹음 단계의 버튼 한 줄 (자리는 늘 height만큼). 상태·시간·음소거 안내는 원 아래 상태 문구에 있음.
+ * 듣는 중: 다음에 남길게요 / 녹음 중: 말 끝났어요 / 확인: 다시 녹음 · 저장하기 (들어보기는 원 아래 상태 문구 옆)
+ */
 @Composable
 private fun AnswerArea(
-    minHeight: Dp,
+    height: Dp,
+    visible: Boolean,
     phase: Phase,
     isSaveStep: Boolean,
-    sleeping: Boolean,
-    muted: Boolean,
-    recordSeconds: Int,
     onSkip: () -> Unit,
     onFinishNow: () -> Unit,
     onSave: () -> Unit,
-    onRetake: () -> Unit,
-    onPreview: () -> Unit
+    onRetake: () -> Unit
 ) {
-    val time = "%02d:%02d".format(recordSeconds / 60, recordSeconds % 60)
-
-    Box(Modifier.fillMaxWidth().heightIn(min = minHeight), contentAlignment = Alignment.Center) {
-        when (phase) {
+    Box(Modifier.fillMaxWidth().height(height), contentAlignment = Alignment.Center) {
+        if (visible) when (phase) {
             Phase.AiSpeaking -> Unit
-
-            Phase.Listening, Phase.Recording -> {
-                val recording = phase == Phase.Recording
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    // 보라색 마이크 아이콘은 제거. 안내 문구와 버튼만 표시
-                    val hint = when {
-                        muted -> "음소거 중이에요. 해제하면 말할 수 있어요"
-                        recording && isSaveStep -> "녹음 중  $time"
-                        recording -> "듣고 있어요…"
-                        isSaveStep -> "내일의 나에게 남길 한 마디를 말해 주세요"
-                        else -> "편하게 대답해 주세요"
-                    }
-                    Text(
-                        text = hint,
-                        color = when {
-                            recording && isSaveStep -> RespecColors.Danger
-                            isSaveStep -> RespecColors.AccentText
-                            else -> RespecColors.TextSub
-                        },
-                        fontSize = 14.sp,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    if (recording) {
-                        TextButton(onClick = onFinishNow) {
-                            Text("말 끝났어요", color = RespecColors.Text, fontWeight = FontWeight.Bold)
-                        }
-                    } else {
-                        TextButton(onClick = onSkip) {
-                            Text(if (isSaveStep) "다음에 남길게요" else "대화 마치기", color = RespecColors.TextSub)
-                        }
-                    }
-                }
+            Phase.Listening -> TextButton(onClick = onSkip) {
+                Text(if (isSaveStep) "다음에 남길게요" else "대화 마치기", color = RespecColors.TextSub)
             }
-
-            Phase.Review -> {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        FitText(
-                            "한 마디를 녹음했어요 ($time)",
-                            color = RespecColors.Text,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        TextButton(onClick = onPreview) {
-                            Text("▶ 들어보기", color = RespecColors.AccentText, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
-                        }
+            Phase.Recording -> TextButton(onClick = onFinishNow) {
+                Text("말 끝났어요", color = RespecColors.Text, fontWeight = FontWeight.Bold)
+            }
+            Phase.Review -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                // 녹음 길이·들어보기는 원 아래 상태 문구 줄에 있음. 여기에는 버튼 두 개
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(
+                        onClick = onRetake,
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        shape = RoundedCornerShape(26.dp),
+                        border = BorderStroke(1.5.dp, RespecColors.Purple)
+                    ) {
+                        FitText("다시 녹음", color = RespecColors.Purple, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
-                    Text("내일 아침 모닝콜에서 들려드릴까요?", color = RespecColors.TextSub, fontSize = 14.sp, textAlign = TextAlign.Center)
-                    Spacer(Modifier.height(14.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        OutlinedButton(
-                            onClick = onRetake,
-                            modifier = Modifier.weight(1f).height(52.dp),
-                            shape = RoundedCornerShape(26.dp),
-                            border = BorderStroke(1.5.dp, RespecColors.Purple)
-                        ) {
-                            FitText("다시 녹음", color = RespecColors.Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        }
-                        Button(
-                            onClick = onSave,
-                            modifier = Modifier.weight(1f).height(52.dp),
-                            shape = RoundedCornerShape(26.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = RespecColors.Button,
-                                contentColor = RespecColors.OnButton
-                            )
-                        ) {
-                            FitText("저장하기", color = RespecColors.OnButton, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
-                        }
+                    Button(
+                        onClick = onSave,
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        shape = RoundedCornerShape(26.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = RespecColors.Button, contentColor = RespecColors.OnButton)
+                    ) {
+                        FitText("저장하기", color = RespecColors.OnButton, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
                     }
                 }
             }
@@ -884,5 +910,20 @@ private fun RoundControl(icon: ImageVector, label: String, size: Dp, active: Boo
         }
         Spacer(Modifier.height(8.dp))
         Text(label, color = RespecColors.TextSub, fontSize = 13.sp)
+    }
+}
+
+/** 녹음 시작 알림음 (띵). 통화 소리로 짧게 울리고 소리가 끝날 때까지 기다림 */
+private suspend fun playStartBeep() {
+    val tone = try {
+        ToneGenerator(AudioManager.STREAM_VOICE_CALL, START_BEEP_VOLUME)
+    } catch (e: RuntimeException) {
+        return      // 알림음을 못 내도 녹음은 그대로
+    }
+    try {
+        tone.startTone(ToneGenerator.TONE_PROP_BEEP, START_BEEP_MS)
+        delay(START_BEEP_MS + START_BEEP_GAP_MS)
+    } finally {
+        tone.release()
     }
 }
