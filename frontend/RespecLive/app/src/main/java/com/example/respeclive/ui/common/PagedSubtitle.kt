@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -165,15 +166,20 @@ fun rememberSpokenPage(lineKey: Any, text: String, fraction: Float): SpokenPage 
     return SpokenPage(lineKey to shown[0], pages[shown[0]])
 }
 
+/** 자막 박스의 기본 높이 (세로가 짧은 폰에서는 rememberScreenScale만큼 줄어듦) */
+@Composable
+fun rememberSubtitleHeight(): Dp = SUBTITLE_HEIGHT * rememberScreenScale()
+
 /**
  * 크기가 고정된 자막 박스 (아침/밤 공용). AI와 사용자의 말을 같은 자리에 보여 주고, 왼쪽 프로필과 박스 색으로 구분.
  * 글이 박스를 넘으면 스크롤하지 않고 다음 페이지(새 박스)로 넘어감: 늘어나는 글은 마지막 페이지만 보여 줌.
  * pageKey: rememberSpokenPage로 고른 박스면 그 key (없으면 페이지 수로 넘어감을 판단)
+ * height: 자리가 모자랄 때 줄인 높이 (없으면 기본 높이)
  */
 @Composable
-fun SubtitleBox(text: String, fromUser: Boolean = false, pageKey: Any? = null, modifier: Modifier = Modifier) {
+fun SubtitleBox(text: String, fromUser: Boolean = false, pageKey: Any? = null, modifier: Modifier = Modifier, height: Dp? = null) {
     val shape = RoundedCornerShape(24.dp)
-    val height = SUBTITLE_HEIGHT * rememberScreenScale()
+    val height = height ?: rememberSubtitleHeight()
     val pages = splitSubtitlePages(text)
     val page = pages.last()
     val accent = if (fromUser) RespecColors.Purple else RespecColors.AccentText
