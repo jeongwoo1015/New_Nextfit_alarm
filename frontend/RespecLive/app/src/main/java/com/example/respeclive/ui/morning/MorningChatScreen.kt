@@ -134,6 +134,7 @@ private fun morningPlan(view: JSONObject): List<String>? {
     return plan.takeIf { it.firstOrNull() == STAGE_BRIEFING }
 }
 
+
 /** 재기상 음악을 틀 때 AI에게 보내는 알림: 이름을 불러 깨우고 깨우는 말을 한 단계 강하게 함 (AI CONTRACTS B17) */
 private const val REWAKE_NOTICE = "(앱 알림: 재기상 음악 재생)"
 
@@ -145,6 +146,8 @@ private const val REPORT_SPEECH_WAIT_MS = 1_500L
  * 사용자 말 받아쓰기가 늦은 진짜 대답은 단계 시간만큼 지나서 오고, AI가 다음 단계를 안내하며 미리 보낸 보고는 몇 초 만에 옴
  */
 private const val HELD_ADVANCE_GAP_MS = 8_000L
+/** 판정을 보류한 뒤 이 시간 안에 들어온 사용자 말만 그 단계 대답의 늦은 받아쓰기로 봄 (그 뒤의 말은 다음 단계 대답) */
+private const val LATE_SPEECH_MS = 5_000L
 /** 단계를 마친 것으로 보는 판정 (ambiguous·other는 AI가 다시 물으므로 그 단계에 머묾) */
 private val FINAL_VERDICTS = setOf("done", "skipped", "not_done")
 
@@ -216,7 +219,6 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     // 서버 기록은 사용자 말 받아쓰기가 도착하거나 AI가 다음 단계를 보고하거나 코칭이 끝날 때 함 (B19)
     val heldReports = remember { mutableStateMapOf<Int, String>() }
     var heldShown by remember { mutableIntStateOf(0) }     // 보류한 보고로 화면을 넘긴 마지막 단계 번호 (화면은 그다음 단계)
-
     fun finish() {
         val sid = sessionId ?: initialSession?.optJSONObject("session")?.optString("session_id")?.takeIf { it.isNotBlank() }
         onFinish(sid, elapsed)
@@ -314,6 +316,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
         // 판정 보고 처리는 한 번에 하나씩 (보고·보류 기록·받아쓰기 도착이 서로 끼어들지 않게)
         val reportLock = Mutex()
         var lastReportAt = 0L           // 직전 판정 보고(또는 코칭 시작·부위 선택) 시각
+        var heldAt = 0L                 // 마지막으로 판정을 보류한 시각
 
         suspend fun record(order: Int, verdict: String) {
             val sid = RoutineRepository.sessionId ?: return
@@ -377,6 +380,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             }
             Log.w("Morning", "판정 보고 보류: step=$order verdict=$verdict current=$current spoke=$spoke")
             heldReports[order] = verdict
+            heldAt = now
             // 화면은 AI를 따라 다음 단계로. 단, 직전 보고 직후에 온 보고는 미리 보낸 것일 수 있어 화면은 그대로 둠
             if (verdict in FINAL_VERDICTS && gap >= HELD_ADVANCE_GAP_MS) {
                 heldShown = maxOf(heldShown, order)
@@ -385,13 +389,16 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             return true
         }
 
-        // 보류한 보고가 있을 때 사용자 말이 (늦게) 들어오면 그 말을 대답으로 보고 기록
+        // 보류한 보고가 있을 때 사용자 말이 들어오면 보류한 단계를 기록.
+        // 보류 직후(LATE_SPEECH_MS 안)에 온 말만 그 단계 대답의 늦은 받아쓰기로 보고 써 버림.
+        // 그보다 늦은 말은 AI가 이미 넘어간 다음 단계의 대답이므로 남겨 둬서 다음 판정의 근거로 씀
+        // (전부 써 버리면 한 번 보류된 뒤로 매 단계의 "했어"가 앞 단계 몫으로 쓰여 판정이 계속 보류됐음, 11/17 실기기)
         launch {
-            client.transcript.collect {
+            client.userTurnsFlow.collect {     // 받아쓰기 없이 끊김으로 센 말도 포함
                 if (heldReports.isEmpty() || client.userTurns <= acceptedUserTurns) return@collect
                 reportLock.withLock {
                     if (heldReports.isNotEmpty() && client.userTurns > acceptedUserTurns) {
-                        acceptedUserTurns = client.userTurns
+                        if (System.currentTimeMillis() - heldAt <= LATE_SPEECH_MS) acceptedUserTurns = client.userTurns
                         flushHeld()
                     }
                 }
@@ -406,7 +413,10 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                     val verdict = call.args.optString("verdict")
                     // 지난 단계의 보고는 기록·화면 갱신을 건너뛰고, AI에게는 똑같이 ok만 돌려줌
                     // (에러로 답하면 AI가 이유를 설명하려고 또 말함)
-                    if (order > 0 && verdict.isNotBlank()) withContext(Dispatchers.Main) {
+                    // AI는 함수 응답을 받아야 다음 말을 하므로 ok는 바로 돌려주고, 받아쓰기 대기·서버 기록은 뒤에서 함
+                    // (끝날 때까지 기다렸다 돌려주면 "했어" 한 마디에 받아쓰기 대기 1.5초 + 서버 왕복만큼 넥스티가 늦게 말했음).
+                    // 보고 순서는 reportLock(먼저 온 순서대로)이 지킴
+                    if (order > 0 && verdict.isNotBlank()) launch(Dispatchers.Main) {
                         val taken = reportLock.withLock { handleReport(order, verdict) }
                         // 퀴즈 콘텐츠: AI가 정답 여부를 함께 보냄 → 넥스티가 바로 O / X
                         if (taken && call.args.has("answer_correct")) {
@@ -642,6 +652,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                 STAGE_COACHING -> if (coachJob == null) coachJob = async { RespecApi.coachingToken(sid) }
             }
         }
+        var endedOnFortune = false      // 마지막 단계로 포춘을 들려줌 → 끝 안내 없이 포춘 화면에서 바로 리포트로
         for ((i, step) in rest.withIndex()) {
             val next = rest.getOrNull(i + 1)
             when (step) {
@@ -652,8 +663,9 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                 STAGE_FORTUNE -> {
                     prefetch(STAGE_FORTUNE)
                     prefetch(next)
-                    fortuneJob?.let { playFortune(it) }
+                    val played = fortuneJob?.let { playFortune(it) } == true
                     fortuneJob = null
+                    endedOnFortune = played && next == null
                 }
                 STAGE_COACHING -> {
                     runCoaching(sid, coachJob, hasNext = next != null)
@@ -664,9 +676,11 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
 
         client.stop()
 
-        stage = Stage.Finished
-        notice = "좋은 하루 보내세요!"
-        delay(1000)
+        if (!endedOnFortune) {
+            stage = Stage.Finished
+            notice = "좋은 하루 보내세요!"
+            delay(1000)
+        }
         finish()
     }
 

@@ -33,6 +33,15 @@ private const val TAG = "Live"
 private const val REPLY_START_WAIT_MS = 5_000L
 /** AI 음성이 끝난 뒤 이 시간 동안 새 응답이 없으면 말을 다 한 것으로 봄 */
 private const val QUIET_MS = 1_200L
+/**
+ * 함수 응답 뒤의 되풀이 응답을 버리는 범위: 버리기로 한 뒤 이 시간 안에 시작한 응답만 버림.
+ * 되풀이 응답은 함수 응답 직후 바로 오고, 그보다 늦게 시작한 응답은 사용자 대답("했어")에 대한 진짜 응답임.
+ * (기한 없이 버리면, AI가 되풀이 말을 하지 않은 날 "했어"의 받아쓰기가 빠졌을 때 그 대답에 대한 응답까지 버려져
+ *  넥스티가 아무 말도 하지 않았고, 버린 응답 안의 판정 때문에 그다음 응답도 연달아 버려졌음)
+ */
+private const val MUTE_REPLY_WINDOW_MS = 3_000L
+// 받아쓰기 없는 끊김을 사용자 말로 센 뒤 이 시간 안에 온 받아쓰기는 같은 말로 보고 한 번 더 세지 않음
+private const val VOICE_MERGE_MS = 3_000L
 
 /**
  * Gemini Live 통화 한 건을 관리: 연결, 마이크 송신, AI 음성 재생, 자막, 끼어들기, 함수 호출, 재연결.
@@ -103,7 +112,8 @@ class LiveClient(context: Context) {
         get() = turnOpenFlow.value
         set(v) { turnOpenFlow.value = v }
     @Volatile private var toolMark = 0             // 마지막 함수 호출이 왔을 때의 voicedTurns (awaitReplyEnd 기준)
-    private val userTurnCount = java.util.concurrent.atomic.AtomicInteger(0)
+    private val userTurnFlow = MutableStateFlow(0)
+    @Volatile private var silentVoiceAt = 0L       // 받아쓰기 없는 끊김을 사용자 말로 센 시각 (elapsedRealtime)
     @Volatile private var turnAudioMs = 0L         // 이번 응답에서 받은 음성 길이
     @Volatile private var newAssistantLine = false // 다음 AI 글자는 새 줄로 (응답마다 한 줄)
     // 다음 사용자 글자는 새 줄로 (AI 응답이 끝난 뒤). AI 받아쓰기가 오지 않은 응답이 있어도 사용자 말 횟수가 늘도록
@@ -114,14 +124,17 @@ class LiveClient(context: Context) {
     @Volatile private var mutedTurnOpen = false    // 버리는 응답의 음성·글자가 오는 중 (그 응답의 turnComplete 전)
     @Volatile private var muteAfterTurn = false    // 지금 응답이 끝나면 그다음 응답을 버림 (함수 응답에 대한 되풀이 말)
     @Volatile private var muteTurn = false         // 지금 응답의 음성·글자를 버리는 중
+    @Volatile private var muteArmedAt = 0L         // muteTurn을 켠 시각 (elapsedRealtime). MUTE_REPLY_WINDOW_MS 뒤 시작한 응답은 버리지 않음
     private val muteLock = Any()
     @Volatile private var lastUserAt = 0L          // 사용자 말(받아쓰기·버튼)이 마지막으로 들어온 시각 (elapsedRealtime)
 
     /**
-     * 사용자가 말한 횟수 (받아쓰기 새 줄 + 버튼 대답). start()로 초기화하지 않고 계속 늘어남.
+     * 사용자가 말한 횟수 (받아쓰기 새 줄 + 버튼 대답 + 받아쓰기 없이 사용자 목소리로 끊긴 응답).
+     * start()로 초기화하지 않고 계속 늘어남.
      * 판정 보고 검사(AI CONTRACTS B19)에서 "직전 보고 뒤에 사용자가 말했는가"를 볼 때 씀
      */
-    val userTurns: Int get() = userTurnCount.get()
+    val userTurns: Int get() = userTurnFlow.value
+    val userTurnsFlow: StateFlow<Int> = userTurnFlow.asStateFlow()
 
     /** speakExact로 읽게 한 문장의 받아쓰기 줄 번호 (화면이 이 줄을 보여 줌) */
     @Volatile var exactLineIndex = -1
@@ -258,7 +271,27 @@ class LiveClient(context: Context) {
             if (!t.spoke) return
             if (spokenMatches != null && !spokenMatches.containsMatchIn(t.text)) return
         }
-        synchronized(muteLock) { if (turnOpen || mutedTurnOpen) muteAfterTurn = true else muteTurn = true }
+        synchronized(muteLock) {
+            if (turnOpen || mutedTurnOpen) muteAfterTurn = true
+            else {
+                muteTurn = true
+                muteArmedAt = SystemClock.elapsedRealtime()
+            }
+        }
+    }
+
+    /**
+     * 지금 오는 AI 응답을 버리는 중인지. 버리기로 한 뒤 MUTE_REPLY_WINDOW_MS가 지나서야 시작한 응답이면
+     * 함수 응답에 대한 되풀이가 아니라 사용자 대답에 대한 응답이므로 버리기를 풀고 false
+     */
+    private fun muting(): Boolean = synchronized(muteLock) {
+        if (!muteTurn) return false
+        if (mutedTurnOpen) return true          // 이미 버리기 시작한 응답은 끝까지 버림
+        if (SystemClock.elapsedRealtime() - muteArmedAt <= MUTE_REPLY_WINDOW_MS) return true
+        Log.d(TAG, "버리기 기한이 지나 시작한 응답은 들려줌")
+        muteTurn = false
+        muteAfterTurn = false
+        false
     }
 
     /** 안내 문장 건너뛰기: 지금 나오는 음성과 이 응답의 남은 음성을 버림 */
@@ -419,21 +452,35 @@ class LiveClient(context: Context) {
                 startSignal?.takeIf { it.isNotBlank() }?.let { session.sendText(it) }
             }
 
-            is LiveEvent.Audio -> if (muteTurn) mutedTurnOpen = true else if (!dropAudio) {
+            is LiveEvent.Audio -> if (muting()) {
+                mutedTurnOpen = true
+            } else if (!dropAudio) {
                 openTurn()
                 turnAudioMs += e.pcm.size / (LiveConfig.OUTPUT_SAMPLE_RATE * 2 / 1000)
                 audioOut.write(e.pcm)
             }
             is LiveEvent.InputText -> {
+                Log.d(TAG, "사용자 받아쓰기: \"${e.text}\"")
                 clearMute()
                 lastUserAt = SystemClock.elapsedRealtime()
                 append(Role.User, e.text)
             }
-            is LiveEvent.OutputText -> if (muteTurn) mutedTurnOpen = true else {
+            is LiveEvent.OutputText -> if (muting()) {
+                mutedTurnOpen = true
+            } else {
                 openTurn()
                 append(Role.Assistant, e.text)
             }
             LiveEvent.Interrupted -> {
+                // 재생 중이 아닐 때 끊겼으면 넥스티 소리가 아니라 사용자 목소리가 들어온 것. 이렇게 숨은(버리는) 응답과 부딪친 말은
+                // 받아쓰기가 오지 않기도 해서, 받아쓰기를 기다리지 않고 사용자 말 한 번으로 셈 (판정 보고가 보류돼 다음 대답까지
+                // 기록이 늦던 문제, 11/17 실기기). 자막은 지어내지 않고 실제 받아쓰기가 오면 그때 보여 줌
+                // (받아쓰기가 끊김보다 먼저 온 말이면 이미 셌으므로 제외)
+                if (!_aiSpeaking.value && SystemClock.elapsedRealtime() - lastUserAt > VOICE_MERGE_MS) {
+                    Log.d(TAG, "받아쓰기 없이 사용자 목소리로 끊김 → 사용자 말로 셈")
+                    silentVoiceAt = SystemClock.elapsedRealtime()
+                    userTurnFlow.update { it + 1 }
+                }
                 audioOut.clear()
                 turnOpen = false
                 turnAudioMs = 0L
@@ -451,6 +498,7 @@ class LiveClient(context: Context) {
                 // 함수 응답 뒤의 되풀이 응답을 버렸으면 풀고, 버릴 응답이 이 다음이면 지금부터 버림
                 synchronized(muteLock) {
                     muteTurn = muteAfterTurn
+                    if (muteAfterTurn) muteArmedAt = SystemClock.elapsedRealtime()
                     muteAfterTurn = false
                 }
                 if (voiced) voicedTurns.update { it + 1 }
@@ -469,8 +517,9 @@ class LiveClient(context: Context) {
                 toolMark = voicedTurns.value      // 이벤트 순서대로 기록 (뒤따르는 turnComplete보다 먼저)
                 val last = _transcript.value.lastOrNull()
                 val turnText = if (turnOpen && !newAssistantLine && last?.role == Role.Assistant) last.text else ""
-                val ct = CallTurn(spoke = turnOpen && turnAudioMs > 0, text = turnText, inMuted = muteTurn)
-                if (muteTurn) {
+                val inMuted = muting()
+                val ct = CallTurn(spoke = turnOpen && turnAudioMs > 0, text = turnText, inMuted = inMuted)
+                if (inMuted) {
                     mutedTurnOpen = true      // 말 없이 함수만 온 응답도 그 응답의 turnComplete 뒤 응답을 버리도록
                     Log.d(TAG, "버리는 응답 안의 함수 호출: ${e.calls.joinToString { it.name }}")
                 }
@@ -508,7 +557,7 @@ class LiveClient(context: Context) {
         if (role == Role.User) {
             lastUserAt = SystemClock.elapsedRealtime()
             newUserLine = false
-            userTurnCount.incrementAndGet()
+            userTurnFlow.update { it + 1 }
         }
         _transcript.update { it + Line(role, text, System.currentTimeMillis()) }
     }
@@ -528,7 +577,12 @@ class LiveClient(context: Context) {
         val split = if (role == Role.Assistant) newAssistantLine else newUserLine
         if (role == Role.Assistant) newAssistantLine = false else newUserLine = false
         // 사용자 말이 새 줄로 시작하면 한 번으로 셈 (이어 붙는 받아쓰기 조각은 세지 않음)
-        if (role == Role.User && (split || _transcript.value.lastOrNull()?.role != Role.User)) userTurnCount.incrementAndGet()
+        if (role == Role.User && (split || _transcript.value.lastOrNull()?.role != Role.User)) {
+            // 방금 끊김으로 이미 센 말의 늦은 받아쓰기면 한 번 더 세지 않음
+            val now = SystemClock.elapsedRealtime()
+            if (now - silentVoiceAt > VOICE_MERGE_MS) userTurnFlow.update { it + 1 }
+            silentVoiceAt = 0L
+        }
         _transcript.update { list ->
             val last = list.lastOrNull()
             if (last != null && last.role == role && !split) {
