@@ -183,7 +183,8 @@ def test_every_fallback_is_valid(ctype):
         for day in (date(2026, 11, 9) + timedelta(k) for k in range(3)):
             steps = fallback_steps(ctype, option, day)
             resolved = resolve_option(ctype, option, day)
-            assert len(steps) >= (1 if resolved == "WORDCHAIN" else 2) and sum(s.planned_sec for s in steps) == CONTENT_TOTAL_SEC and all(s.script for s in steps), (ctype, option, day)
+            total = 180 if ctype == "EXERCISE" else CONTENT_TOTAL_SEC          # 스트레칭만 3분(11/18), 나머지는 5분
+            assert len(steps) >= (1 if resolved == "WORDCHAIN" else 2) and sum(s.planned_sec for s in steps) == total and all(s.script for s in steps), (ctype, option, day)
 
 
 def test_validate_steps_requires_script_and_name():

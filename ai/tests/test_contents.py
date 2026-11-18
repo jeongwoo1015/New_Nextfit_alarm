@@ -12,8 +12,8 @@ from ai.tasks.content_steps import (CONTENT_OPTIONS, CONTENT_TOTAL_SEC, ENGLISH_
                                     WORDCHAIN_START_WORDS, compose_content_steps, english_fallback, fallback_steps, resolve_option,
                                     validate_english, wordchain_steps)
 from ai.tasks.llm import LLMError
-from ai.tasks.stretch_sets import (AREA_NAMES, AREAS, LIE, MOVE_NAMES, MOVES, POSTURE_ORDER, ROUTINES, SIDE, STAND, all_area_steps, area_steps,
-                                   stretch_steps)
+from ai.tasks.stretch_sets import (AREA_NAMES, AREA_WORDS, AREAS, LIE, MOVE_NAMES, MOVES, NEW_MOVE_NAMES, POSTURE_ORDER, ROUTINES, SIDE, STAND,
+                                   TOTAL_SEC, all_area_steps, area_steps, normalize_area, stretch_steps)
 
 D0 = date(2026, 11, 9)           # 월요일
 
@@ -31,48 +31,49 @@ class FakeLLM:
         return r
 
 
-# ---------- 스트레칭 부위 5개 루틴 (11/13) ----------
-def test_five_areas_five_minutes_each():
-    assert AREAS == ("FULL", "NECK_SHOULDER", "ARM_WRIST", "BACK_HIP", "LEG") and set(ROUTINES) == set(AREAS) == set(AREA_NAMES)
+# ---------- 스트레칭 부위 12개 고정 루틴 (11/18) ----------
+def test_twelve_areas_three_minutes_each():
+    assert len(AREAS) == 12 and AREAS[0] == "FULL" and set(ROUTINES) == set(AREAS) == set(AREA_NAMES) == set(AREA_WORDS)
     for area, steps in all_area_steps().items():
         secs = [s.planned_sec for s in steps]
-        assert sum(secs) == CONTENT_TOTAL_SEC == 300 and len(steps) == 5 and secs[0] == 40, area
-        assert [s.order for s in steps] == [1, 2, 3, 4, 5] and all(s.response_type == "PLAY" and s.script for s in steps), area
+        assert sum(secs) == TOTAL_SEC == 180 and len(steps) == 4 and set(secs) == {45}, area       # 후보가 충분한 부위는 4단계 × 45초
+        assert [s.order for s in steps] == [1, 2, 3, 4] and all(s.response_type == "PLAY" and s.script for s in steps), area
 
 
 def test_moves_are_shared_by_exact_name():
-    """앱은 단계 이름 전체로 넥스티 시범 동작을 고른다: 23개 이름, 같은 이름은 어느 루틴에서나 같은 안내."""
+    """앱은 단계 이름 전체로 넥스티 시범 동작을 고른다: 34개 이름(기존 23 + 신규 11), 같은 이름은 어느 루틴에서나 같은 안내."""
     used = {n for names in ROUTINES.values() for n in names}
-    assert used == set(MOVE_NAMES) and len(MOVE_NAMES) == 23
-    assert ROUTINES["FULL"][3] == ROUTINES["NECK_SHOULDER"][3] == "목 옆으로 기울이기" and ROUTINES["BACK_HIP"][3] == ROUTINES["LEG"][3] == "4자 스트레칭"
+    assert used == set(MOVE_NAMES) and len(MOVE_NAMES) == 34 and len(NEW_MOVE_NAMES) == 11 and set(NEW_MOVE_NAMES) <= set(MOVE_NAMES)
+    assert ROUTINES["FULL"][2] == ROUTINES["NECK"][2] == "목 옆으로 기울이기" and ROUTINES["CALF"][2] == ROUTINES["THIGH"][3] == "앉아서 다리 뒤쪽 늘이기"
 
 
 def test_routines_follow_safety_design():
     for area, names in ROUTINES.items():
         postures = [MOVES[n].posture for n in names]
         assert postures[0] in (LIE, SIDE), area                                                            # 막 깬 직후라 누워서 시작
-        assert [POSTURE_ORDER[p] for p in postures] == sorted(POSTURE_ORDER[p] for p in postures), area     # 누워서 → 앉아서 → 서서로만 올라간다
+        assert [POSTURE_ORDER[p] for p in postures] == sorted(POSTURE_ORDER[p] for p in postures), area     # 누워서 → 네발·무릎 꿇고 → 앉아서 → 서서로만 올라간다
         for n in names:
             script = MOVES[n].script
             assert 15 <= len(script) <= 190 and script.endswith("."), (area, n)
             holds = [int(x) for x in re.findall(r"(\d+)초", script)]
             assert all(h <= 30 for h in holds), (area, n, holds)                                            # 한 번에 30초 이하 (ACSM 10~30초)
-            assert not re.search(r"숙|젖혀|엎드|뛰|점프|반동|세게 (당|누)", script), (area, n, script)         # 깊게 숙이기·반동 없음
+            assert not re.search(r"뛰|점프|반동|세게 (당|누)", script), (area, n, script)                      # 반동·점프 없음
             assert "병" not in script and "치료" not in script and "효과" not in script                      # 의학적 표현 없음
-        assert "깊은 숨" in MOVES[names[-1]].script, area                                                  # 호흡으로 마무리
     assert "손으로 당기지 말고" in MOVES["목 옆으로 기울이기"].script
     assert MOVES["만세 기지개"].posture == STAND and MOVES["종아리 늘이기"].posture == STAND
+    assert "목에는 힘을 주지 않아요" in MOVES["고양이 소 자세"].script and "무릎이 불편하면" in MOVES["아기 자세"].script      # 새 동작의 주의 문구
 
 
 def test_default_and_unknown_area_is_full_body():
     assert [s.name for s in stretch_steps(D0)] == list(ROUTINES["FULL"]) == [s.name for s in area_steps("모름")]
-    assert [s.name for s in area_steps("neck_shoulder")] == list(ROUTINES["NECK_SHOULDER"])
+    assert [s.name for s in area_steps("neck")] == list(ROUTINES["NECK"])
+    assert normalize_area("NECK_SHOULDER") == "NECK" and normalize_area("LEG") == "THIGH" and normalize_area(None) == "FULL"      # 옛 5개 값은 가까운 새 부위로
 
 
 def test_stretch_compose_needs_no_ai_and_reports_option():
     llm = FakeLLM(LLMError("never called"))
     r = compose_content_steps("EXERCISE", None, llm, today=D0)
-    assert llm.calls == 0 and r.source == "fixed" and r.option == "STRETCH" and sum(s.planned_sec for s in r.steps) == 300
+    assert llm.calls == 0 and r.source == "fixed" and r.option == "STRETCH" and sum(s.planned_sec for s in r.steps) == 180      # 스트레칭만 3분
     assert compose_content_steps("EXERCISE", "MASSAGE", llm, today=D0).option == "STRETCH"      # 옛 세부 값도 스트레칭으로
 
 
