@@ -64,8 +64,9 @@ def test_fortune_prepared_in_background_from_voice_text(client, clock, ai):
     body = r.json()
     assert body["token"] == "tok-fortune" and body["fortune_text"] == "포춘: 내일 발표 잘하자"
     assert [c[0] for c in ai.calls].count("fortune") == 1                      # 저장된 문장을 다시 씀
-    persona, fortune = ai.calls[-1][1]
+    persona, fortune, based_on = ai.calls[-1][1]
     assert fortune.text == body["fortune_text"] and persona.call_name
+    assert based_on == "ONE_LINER"                                              # 어젯밤 한마디로 만든 문장
 
     start(client, alarm(client))                                               # 재연결: 다시 만들지 않는다
     client.post(url(v, "/fortune-token"), headers=H)
@@ -110,3 +111,36 @@ def test_fortune_token_other_user(client, clock):
     clock.now = FRIDAY_7
     v = start(client, alarm(client)).json()
     assert client.post(url(v, "/fortune-token"), headers=auth(USER_B)).status_code == 404
+
+
+def test_fortune_based_on(client, clock, ai):
+    """소개에 밝힐 재료: 일기로 만들면 DIARY, 기본 문장이면 밝히지 않는다."""
+    onboard(client)
+    clock.now = NIGHT
+    ai.extract = ai.extract.__class__("DONE", {"diary_text": "바빴던 하루", "tomorrow_notes": []})
+    send(client)
+    clock.now = FRIDAY_7
+    v = start(client, alarm(client)).json()
+    client.post(url(v, "/fortune-token"), headers=H)
+    assert ai.calls[-1][1][2] == "DIARY"
+
+
+def test_fallback_fortune_does_not_claim_source(client, clock, ai):
+    onboard(client)
+    clock.now = FRIDAY_7
+    v = start(client, alarm(client)).json()
+    assert client.post(url(v, "/fortune-token"), headers=H).json()["fortune_source"] == "fallback"
+    assert ai.calls[-1][1][2] == ""
+
+
+def test_briefing_says_one_liner_follows(client, clock, ai):
+    """어젯밤 한마디 녹음이 있으면 브리핑이 '한마디 → 포춘 → 콘텐츠' 순서를 안내한다."""
+    onboard(client)
+    clock.now = FRIDAY_7
+    v = start(client, alarm(client)).json()
+    client.post(url(v, "/briefing-token"), json={}, headers=H)
+    assert ai.calls[-1][1].one_liner_follows is False                         # 밤 기록 없음
+    night_with_voice(client, clock)
+    clock.now = FRIDAY_7
+    client.post(url(v, "/briefing-token"), json={}, headers=H)
+    assert ai.calls[-1][1].one_liner_follows is True

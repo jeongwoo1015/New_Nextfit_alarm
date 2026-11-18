@@ -25,6 +25,7 @@ class CalendarDay:
     summary: ai_stats.Totals
     photo_url: str | None
     has_night_record: bool
+    condition_label: str | None = None     # 그날 밤 기록의 컨디션 (GOOD/NORMAL/TIRED/STRESSED), 없으면 None
 
 
 @dataclass(frozen=True)
@@ -63,8 +64,9 @@ class HistoryService:
         days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
         summaries = ai_stats.day_summaries(rec, days)
         photos = {p.diary_date: p for p in self.r.storage.list_photos(user_id, start, end)}
-        nights = {n.record_date for n in rec.nights}
-        return [CalendarDay(d, summaries[d], self._photo_url(photos[d].photo_path) if d in photos else None, d in nights)
+        nights = {n.record_date: n for n in rec.nights}
+        return [CalendarDay(d, summaries[d], self._photo_url(photos[d].photo_path) if d in photos else None, d in nights,
+                            nights[d].condition_label if d in nights else None)
                 for d in days]
 
     def diary(self, user_id: str, day: date) -> DiaryDay:

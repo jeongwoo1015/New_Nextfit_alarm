@@ -155,7 +155,7 @@ def test_content_invalid_input():
 
 def test_content_falls_back_when_ai_fails():
     llm = FakeLLM(LLMError("503"))
-    r = compose_content_steps("QUIZ", "GENERAL", llm)
+    r = compose_content_steps("QUIZ", "HISTORY", llm)
     assert r.source == "fallback" and llm.calls == 2 and len(r.steps) == 3 and sum(s.planned_sec for s in r.steps) == 300
     assert all("문제:" in s.script and "정답:" in s.script for s in r.steps)
 
@@ -163,22 +163,28 @@ def test_content_falls_back_when_ai_fails():
 def test_content_falls_back_on_bad_shape():
     bad_quiz = {"steps": [{"name": "퀴즈 1번", "seconds": 300, "response_type": "SPEECH", "script": "그냥 문제"},
                           {"name": "퀴즈 2번", "seconds": 300, "response_type": "SPEECH", "script": "그냥 문제2"}]}
-    assert compose_content_steps("QUIZ", None, FakeLLM(bad_quiz)).source == "fallback"
-    assert compose_content_steps("EXERCISE", "STRETCH", FakeLLM({"steps": [{"name": "x", "seconds": 600, "script": "y"}]})).source == "fallback"  # 1단계뿐
+    assert compose_content_steps("QUIZ", "HISTORY", FakeLLM(bad_quiz)).source == "fallback"
+    assert compose_content_steps("MEDITATION", "BREATH", FakeLLM({"steps": [{"name": "x", "seconds": 600, "script": "y"}]})).source == "fallback"  # 1단계뿐
 
 
 def test_content_unknown_response_type_gets_default():
     data = {"steps": [{"name": "목 돌리기", "seconds": 300, "response_type": "???", "script": "돌려요"},
                       {"name": "어깨", "seconds": 300, "script": "돌려요"}]}
-    steps = compose_content_steps("EXERCISE", "STRETCH", FakeLLM(data)).steps
+    steps = compose_content_steps("MEDITATION", "BREATH", FakeLLM(data)).steps
     assert [s.response_type for s in steps] == ["PLAY", "PLAY"]
 
 
 @pytest.mark.parametrize("ctype", CONTENT_OPTIONS)
 def test_every_fallback_is_valid(ctype):
+    # 세부 없는 퀴즈는 날짜마다 세부(인물·상식·끝말잇기)가 달라지므로 오늘 날짜에 기대지 않고 연속 사흘로 확인한다(끝말잇기는 1단계)
+    from datetime import date, timedelta
+    from ai.tasks.content_steps import resolve_option
     for option in (*CONTENT_OPTIONS[ctype], None):
-        steps = fallback_steps(ctype, option)
-        assert len(steps) >= 2 and sum(s.planned_sec for s in steps) == CONTENT_TOTAL_SEC and all(s.script for s in steps)
+        for day in (date(2026, 11, 9) + timedelta(k) for k in range(3)):
+            steps = fallback_steps(ctype, option, day)
+            resolved = resolve_option(ctype, option, day)
+            total = 180 if ctype == "EXERCISE" else CONTENT_TOTAL_SEC          # 스트레칭만 3분(11/18), 나머지는 5분
+            assert len(steps) >= (1 if resolved == "WORDCHAIN" else 2) and sum(s.planned_sec for s in steps) == total and all(s.script for s in steps), (ctype, option, day)
 
 
 def test_validate_steps_requires_script_and_name():

@@ -1,5 +1,11 @@
 """Live 대화에서 AI가 부르는 함수 선언. 판정 값은 정의서 RS_SESSION_STEP.AI_VERDICT와 같다."""
 
+from copy import deepcopy
+
+from ..tasks.morning_plan import BRIEFING, COACHING
+from ..tasks.stretch_sets import AREA_NAMES, AREAS
+from .inputs import content_kind
+
 VERDICTS = ("done", "not_done", "skipped", "ambiguous", "other")
 
 END_SESSION = {
@@ -27,6 +33,28 @@ REPORT_STEP_RESULT = {
     },
 }
 
+# 퀴즈 콘텐츠 전용: 앱이 AI의 말을 추측하지 않고 이 값으로 정답 여부(넥스티 O/X)를 알 수 있게 한다
+REPORT_STEP_RESULT_QUIZ = deepcopy(REPORT_STEP_RESULT)
+REPORT_STEP_RESULT_QUIZ["description"] = ("퀴즈 문제 하나에 대한 사용자의 답을 기록한다. 사용자가 답하거나 모르겠다고 말한 응답에서 한 번 호출한다. "
+                                          "답을 말했으면 verdict는 done이고, answer_correct에 맞고 틀림을 함께 넣는다.")
+REPORT_STEP_RESULT_QUIZ["parameters"]["properties"]["answer_correct"] = {
+    "type": "BOOLEAN", "description": "사용자의 답이 [고정 스크립트]의 정답 줄과 같은 뜻이면 true, 틀렸거나 모르겠다고 했으면 false"}
+REPORT_STEP_RESULT_QUIZ["parameters"]["required"] = ["step_order", "verdict", "answer_correct"]
+
+# 스트레칭 부위 고르기(11/12 회의, 11/18 부위 12개로 확대): 앱이 미리 받아 둔 부위별 루틴 중 이 부위로 화면·타이머·단계 기록을 바꾼다.
+# AI는 동작이 아니라 부위만 고른다(동작은 stretch_sets.ROUTINES에 고정)
+STRETCH_AREAS = AREAS
+SELECT_STRETCH_AREA = {
+    "name": "select_stretch_area",
+    "description": "\"오늘 어디가 불편하세요?\"에 대한 대답으로 오늘 스트레칭할 부위를 정했을 때 한 번 호출한다. 앱이 그 부위 루틴으로 화면과 단계를 바꾸고, 이후 step_order는 그 루틴의 번호다.",
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {"area": {"type": "STRING", "enum": list(STRETCH_AREAS),
+                                "description": " / ".join(f"{a} {AREA_NAMES[a]}" for a in STRETCH_AREAS)}},
+        "required": ["area"],
+    },
+}
+
 ADJUST_STEP_TIME = {
     "name": "adjust_step_time",
     "description": "사용자가 아직 하지 않은 단계를 오늘만 줄이거나 빼 달라고 했을 때 호출한다. seconds는 오늘 그 단계의 새 시간(초)이며 30초 단위이고, 0이면 오늘만 그 단계를 뺀다. 시간을 말하지 않았으면 먼저 사용자에게 묻고, 같은 단계의 판정(report_step_result)과 함께 부르지 않는다.",
@@ -51,12 +79,15 @@ _BY_KIND = {
 def tools_for(kind: str, inp=None) -> list[dict]:
     """kind: night / briefing / fortune / coaching → Live setup의 tools 값.
 
-    입력에 따라 다르다: 브리핑은 코칭을 하는 날에만 start_routine을 넣는다(코칭 안 하는 날은 브리핑만 한다).
+    입력에 따라 다르다: 브리핑은 순서표에 코칭이 있는 날에만 start_routine을 넣는다(코칭 안 하는 날·이미 다 마친 날은 end_session으로 다음 순서에 넘긴다).
     adjust_step_time은 루틴 세션에만 넣는다(콘텐츠는 고정 시간).
     """
     if kind == "briefing" and inp is not None:
-        follows = not getattr(inp, "coaching_skipped", False)
+        from .prompts.common import resolve_plan      # 순서표에 코칭이 있는 날에만 start_routine (코칭 안 하는 날·이미 다 마친 날은 end_session으로 넘긴다)
+        follows = COACHING in resolve_plan(inp, BRIEFING)
         return [{"functionDeclarations": ([START_ROUTINE] if follows else []) + [END_SESSION]}]
     if kind == "coaching" and getattr(inp, "morning_call_type", "ROUTINE") == "CONTENT":
-        return [{"functionDeclarations": [REPORT_STEP_RESULT, END_SESSION]}]
+        report = REPORT_STEP_RESULT_QUIZ if content_kind(inp) == "QUIZ" else REPORT_STEP_RESULT
+        area = [SELECT_STRETCH_AREA] if content_kind(inp) == "STRETCH" and getattr(inp, "stretch_routines", ()) else []
+        return [{"functionDeclarations": area + [report, END_SESSION]}]
     return [{"functionDeclarations": list(_BY_KIND[kind])}]

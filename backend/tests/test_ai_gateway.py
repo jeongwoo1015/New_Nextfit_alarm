@@ -7,6 +7,7 @@ from backend.clients.ai_gateway import (RealAIGateway, UnavailableAIGateway, bui
                                         to_night_record_fields)
 from backend.core.config import Settings
 from backend.core.errors import ServiceUnavailable
+from backend.domain import codes
 from backend.domain.models import NightRecord
 
 AI_ROW = {"ai_summary": "발표를 마쳤다", "tomorrow_goal": "보고서 끝내기", "tomorrow_notes": ["10시 회의"],
@@ -53,3 +54,47 @@ def test_night_view_only_for_extracted_record():
     assert night_view(rec) is None                                              # PENDING
     v = night_view(replace(rec, extract_status="DONE"))
     assert v.tomorrow_goal == "보고서" and v.tomorrow_notes == ("회의",) and v.ai_summary == ""
+
+
+# ---------- 11/16: 실제 ai 패키지에 새 입력이 들어가는지 (네트워크 없이 지시문만 만든다) ----------
+def _capture(gw):
+    setups = []
+    gw._issue = lambda kind, setup: setups.append((kind, setup)) or kind
+    return setups
+
+
+def test_real_gateway_passes_plan_persona_and_stretch_routines():
+    from backend.clients.ai_gateway import BriefingContext, CoachingContext, CoachStep, Persona
+    gw = RealAIGateway("k")
+    setups = _capture(gw)
+    persona = Persona("정우님", "CASUAL", "KIND", "MALE", "STRICT", 3, True)
+    plan = gw.morning_plan(True, True)
+    assert plan == ("BRIEFING", "ONE_LINER", "COACHING", "FORTUNE")
+    gw.issue_briefing_token(BriefingContext(persona, "07:00", content_name="스트레칭", plan=plan))
+    routines = gw.stretch_routines(codes.STRETCH_DURATION_SEC)
+    assert tuple(routines) == codes.STRETCH_AREAS                          # 부위 12개 (11/18)
+    assert all(len(steps) == 4 and sum(s.planned_sec for s in steps) == 180 for steps in routines.values())
+    coach = tuple((a, tuple(CoachStep(n, s.name, s.planned_sec, s.response_type, s.script) for n, s in enumerate(st, 1)))
+                  for a, st in routines.items())
+    full = coach[0][1]
+    gw.issue_coaching_token(CoachingContext(persona, "CONTENT", full, content_type="EXERCISE", content_option="STRETCH",
+                                            plan=plan, stretch_routines=coach))
+    text = str(setups[-1][1])
+    assert "select_stretch_area" in text and "턱 당기기" in text           # 부위 고르기 함수와 다른 부위 루틴이 지시문에
+
+
+def test_real_gateway_intensity_reads_morning_sessions():
+    from backend.domain.models import MorningSession
+    gw = RealAIGateway("k")
+    hard = MorningSession("s", "u", "a", date(2026, 11, 1), "CONTENT", None, "EXERCISE", "STRETCH", time(7), time(7),
+                          wake_success=False)
+    assert gw.today_intensity(1, [hard, hard, hard], True) == 2               # 3번 중 2번 이상 힘들면 한 단계
+    assert gw.today_intensity(1, [hard, hard, hard], False) == 1
+
+
+def test_stretch_area_codes_match_ai():
+    """서버 부위 목록·옛 값 변환이 AI stretch_sets와 같아야 select_stretch_area가 422 없이 통과한다 (11/18 부위 12개)."""
+    from ai.tasks.stretch_sets import AREAS, LEGACY_AREAS, TOTAL_SEC, normalize_area
+    assert codes.STRETCH_AREAS == AREAS and codes.LEGACY_STRETCH_AREAS == LEGACY_AREAS
+    assert codes.STRETCH_DURATION_SEC == TOTAL_SEC
+    assert all(codes.normalize_stretch_area(a) == normalize_area(a) for a in codes.STRETCH_AREA_INPUTS)

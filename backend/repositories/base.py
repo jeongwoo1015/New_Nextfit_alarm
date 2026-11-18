@@ -88,11 +88,13 @@ class SessionRepository(Protocol):
     """5. 모닝 세션·단계 — rs_morning_session, rs_session_step"""
     def get_or_create_session(self, snapshot: SessionSnapshot) -> MorningSession: ...   # 같은 알람·날짜가 있으면 그것(재연결)
     def get_session(self, user_id: str, session_id: str) -> MorningSession | None: ...
-    def update_session(self, user_id: str, session_id: str, changes: dict) -> MorningSession | None: ...  # alarm_rang_at, first_response_at, planned_total_sec, wake_checked_at, wake_success, session_end_at, fortune_*
+    def update_session(self, user_id: str, session_id: str, changes: dict) -> MorningSession | None: ...  # alarm_rang_at, first_response_at, planned_total_sec, wake_checked_at, wake_success, session_end_at, fortune_*, applied_intensity, stretch_area
     def add_rewake(self, user_id: str, session_id: str) -> int: ...                  # rewake_count + 1 (원자적으로), 바뀐 횟수
     def add_snooze(self, user_id: str, session_id: str) -> int: ...                  # snooze_count + 1 (원자적으로), 바뀐 횟수
     def create_steps(self, user_id: str, session_id: str, plans: list[StepPlan]) -> list[SessionStep]: ...  # 이미 있으면 만들지 않고 기존 단계
     def list_steps(self, user_id: str, session_id: str) -> list[SessionStep]: ...    # step_order 순
+    def replace_pending_steps(self, user_id: str, session_id: str,
+                              plans: list[StepPlan]) -> list[SessionStep] | None: ...  # DB 함수 rs_replace_pending_steps. PENDING만 지우고 남은 단계 다음 번호부터(plans의 step_order는 안 씀). 남의 세션 None, 빈 목록 ValidationFailed
     def save_step(self, user_id: str, step: SessionStep) -> SessionStep: ...         # step_status·checked_at·ai_verdict
     def update_step_duration(self, user_id: str, session_id: str, step_order: int,
                              duration_sec: int) -> SessionStep | None: ...          # 오늘 진행 중 변경(코칭 중). 0 이하는 막고 오늘 빼기는 save_step(SKIPPED)

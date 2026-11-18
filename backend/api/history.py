@@ -28,7 +28,8 @@ def get_calendar(month: str = Query(..., pattern=r"^\d{4}-(0[1-9]|1[0-2])$", des
     year, mon = map(int, month.split("-"))
     return [CalendarDayOut(date=d.day, photo_url=d.photo_url, routine_completion_rate=d.summary.routine_completion_rate,
                            routine_done=d.summary.routine_done, routine_total=d.summary.routine_total,
-                           has_session=d.summary.n_sessions > 0, has_night_record=d.has_night_record)
+                           has_session=d.summary.n_sessions > 0, has_night_record=d.has_night_record,
+                           condition_label=d.condition_label)
             for d in svc.calendar(user_id, year, mon)]
 
 
