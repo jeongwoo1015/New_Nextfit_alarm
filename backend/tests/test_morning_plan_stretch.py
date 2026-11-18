@@ -3,6 +3,7 @@ from datetime import date, datetime, time, timedelta
 
 from backend.clients.ai_gateway import NightExtract
 from backend.core.timeutil import KST
+from backend.domain import codes
 from backend.domain.models import SessionSnapshot
 
 from .conftest import USER_A, USER_B, auth
@@ -11,7 +12,7 @@ from .test_api_night import TALK
 from .test_api_users import onboard
 
 H = auth(USER_A)
-AREAS = ["FULL", "NECK_SHOULDER", "ARM_WRIST", "BACK_HIP", "LEG"]
+AREAS = list(codes.STRETCH_AREAS)                     # 부위 12개 (11/18)
 
 
 def stretch_alarm(client, clock):
@@ -68,38 +69,38 @@ def test_already_done_day(client, clock, ai):
 def test_start_gives_area_routines_and_coaching_asks_area(client, clock, ai):
     v = start(client, stretch_alarm(client, clock)).json()
     routines = v["stretch_routines"]
-    assert list(routines) == AREAS and [s["step_order"] for s in routines["LEG"]] == [1, 2, 3, 4, 5]
-    assert sum(s["planned_duration_sec"] for s in routines["LEG"]) == 300 and routines["LEG"][0]["response_type"] == "PLAY"
+    assert list(routines) == AREAS and [s["step_order"] for s in routines["THIGH"]] == [1, 2, 3, 4]
+    assert sum(s["planned_duration_sec"] for s in routines["THIGH"]) == 180 and routines["THIGH"][0]["response_type"] == "PLAY"
     client.post(url(v, "/coaching-token"), headers=H)
     ctx = last(ai, "coaching_token")
-    assert [a for a, _ in ctx.stretch_routines] == AREAS and ctx.stretch_routines[1][1][0].name == "NECK_SHOULDER 동작 1"
+    assert [a for a, _ in ctx.stretch_routines] == AREAS and ctx.stretch_routines[1][1][0].name == "NECK 동작 1"
 
 
 def test_select_area_replaces_steps_and_locks(client, clock, ai, repos):
     v = start(client, stretch_alarm(client, clock)).json()
     client.post(url(v, "/coaching-token"), headers=H)
-    r = client.post(url(v, "/stretch-area"), json={"area": "NECK_SHOULDER"}, headers=H)
+    r = client.post(url(v, "/stretch-area"), json={"area": "NECK"}, headers=H)
     assert r.status_code == 200
     body = r.json()
-    assert body["session"]["stretch_area"] == "NECK_SHOULDER" and body["session"]["planned_total_sec"] == 300
-    assert [(s["step_order"], s["step_name"]) for s in body["steps"]][:2] == [(1, "NECK_SHOULDER 동작 1"), (2, "NECK_SHOULDER 동작 2")]
-    assert len(body["steps"]) == 5
+    assert body["session"]["stretch_area"] == "NECK" and body["session"]["planned_total_sec"] == 180
+    assert [(s["step_order"], s["step_name"]) for s in body["steps"]][:2] == [(1, "NECK 동작 1"), (2, "NECK 동작 2")]
+    assert len(body["steps"]) == 4
     assert repos.sessions.list_steps(USER_A, v["session"]["session_id"])[0].step_detail == {
-        "response_type": "PLAY", "script": "NECK_SHOULDER 안내 1", "area": "NECK_SHOULDER"}
-    assert client.post(url(v, "/stretch-area"), json={"area": "NECK_SHOULDER"}, headers=H).status_code == 200   # 재시도
-    r = client.post(url(v, "/stretch-area"), json={"area": "LEG"}, headers=H)
+        "response_type": "PLAY", "script": "NECK 안내 1", "area": "NECK"}
+    assert client.post(url(v, "/stretch-area"), json={"area": "NECK"}, headers=H).status_code == 200   # 재시도
+    r = client.post(url(v, "/stretch-area"), json={"area": "THIGH"}, headers=H)
     assert r.status_code == 409 and r.json()["error"]["code"] == "STRETCH_AREA_LOCKED"                        # 이미 골랐음
 
     client.post(url(v, "/coaching-token"), headers=H)                         # 재연결: 다시 묻지 않고 고른 루틴으로
     ctx = last(ai, "coaching_token")
-    assert ctx.stretch_routines == () and ctx.steps[0].name == "NECK_SHOULDER 동작 1" and ctx.steps[0].script == "NECK_SHOULDER 안내 1"
+    assert ctx.stretch_routines == () and ctx.steps[0].name == "NECK 동작 1" and ctx.steps[0].script == "NECK 안내 1"
 
 
 def test_select_area_after_verdict_is_locked(client, clock):
     v = start(client, stretch_alarm(client, clock)).json()
     client.post(url(v, "/coaching-token"), headers=H)
     client.post(url(v, "/steps/1/verdict"), json={"verdict": "done"}, headers=H)
-    r = client.post(url(v, "/stretch-area"), json={"area": "LEG"}, headers=H)
+    r = client.post(url(v, "/stretch-area"), json={"area": "THIGH"}, headers=H)
     assert r.status_code == 409 and r.json()["error"]["code"] == "STRETCH_AREA_LOCKED"
 
 
@@ -107,14 +108,37 @@ def test_select_area_checks(client, clock):
     alarm = stretch_alarm(client, clock)
     v = start(client, alarm).json()
     assert client.post(url(v, "/stretch-area"), json={"area": "HEAD"}, headers=H).status_code == 422
-    assert client.post(url(v, "/stretch-area"), json={"area": "LEG"}, headers=auth(USER_B)).status_code == 404
-    r = client.post(url(v, "/stretch-area"), json={"area": "LEG"}, headers=H)           # 단계가 아직 없으면 만들고 바꾼다
-    assert r.status_code == 200 and r.json()["steps"][0]["step_name"] == "LEG 동작 1"
+    assert client.post(url(v, "/stretch-area"), json={"area": "THIGH"}, headers=auth(USER_B)).status_code == 404
+    r = client.post(url(v, "/stretch-area"), json={"area": "THIGH"}, headers=H)           # 단계가 아직 없으면 만들고 바꾼다
+    assert r.status_code == 200 and r.json()["steps"][0]["step_name"] == "THIGH 동작 1"
     routine_alarm = next(a for a in client.get("/alarms", headers=H).json() if a["morning_call_type"] == "ROUTINE")
     routine = start(client, routine_alarm).json()                                        # 루틴 알람에는 부위가 없다
     assert routine["stretch_routines"] is None
-    r = client.post(url(routine, "/stretch-area"), json={"area": "LEG"}, headers=H)
+    r = client.post(url(routine, "/stretch-area"), json={"area": "THIGH"}, headers=H)
     assert r.status_code == 409
+
+
+def test_select_legacy_area_is_saved_as_new_area(client, clock):
+    """11/13~17 앱이 옛 부위 값을 보내도 가까운 새 부위로 바꿔 저장한다 (AI normalize_area와 같게)."""
+    v = start(client, stretch_alarm(client, clock)).json()
+    r = client.post(url(v, "/stretch-area"), json={"area": "BACK_HIP"}, headers=H)
+    assert r.status_code == 200 and r.json()["session"]["stretch_area"] == "LOW_BACK"
+    assert r.json()["steps"][0]["step_name"] == "LOW_BACK 동작 1"
+    assert client.post(url(v, "/stretch-area"), json={"area": "LOW_BACK"}, headers=H).status_code == 200   # 같은 부위 재시도
+
+
+def test_stretch_content_is_3_minutes_but_others_keep_config(client, clock, ai):
+    """스트레칭만 180초(11/18 AI), 영어·퀴즈 등은 CONTENT_DURATION_SEC(300초)."""
+    v = start(client, stretch_alarm(client, clock)).json()
+    steps = client.post(url(v, "/coaching-token"), headers=H).json()["steps"]
+    assert sum(s["planned_duration_sec"] for s in steps) == 180
+    assert last(ai, "content")[2] == 180
+    quiz = client.post("/alarms", json={"alarm_time": "07:30", "morning_call_type": "CONTENT", "content_type": "QUIZ",
+                                        "content_option": "PERSON"}, headers=H).json()
+    clock.now = FRIDAY_7 + timedelta(minutes=60)
+    q = start(client, quiz).json()
+    client.post(url(q, "/coaching-token"), headers=H)
+    assert last(ai, "content")[2] == 300
 
 
 # ---------- 강도·성격 ----------

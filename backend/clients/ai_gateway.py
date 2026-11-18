@@ -220,7 +220,7 @@ class AIGateway(Protocol):
     def issue_coaching_token(self, ctx: CoachingContext) -> LiveToken: ...
     def compose_content_steps(self, content_type: str, content_option: str | None, duration_sec: int,
                               today: date, english_level: str = "", context: str = "") -> ContentPlan: ...  # 실패해도 AI 쪽 기본 단계를 돌려준다
-    def stretch_routines(self, duration_sec: int) -> dict[str, list[ContentStep]]: ...   # 부위 5개 루틴 {부위: 단계}
+    def stretch_routines(self, duration_sec: int) -> dict[str, list[ContentStep]]: ...   # 부위 12개 루틴 {부위: 단계} (스트레칭은 180초)
     def morning_plan(self, has_one_liner: bool, coaching: bool) -> tuple[str, ...]: ...   # 아침 순서표 (AI B15)
     def today_intensity(self, base: int, sessions: list, auto: bool) -> int: ...          # sessions = 지난 MorningSession(오래된 것부터)
     def decide_strategy(self, user_id: str, records: RecentRecords, today: date, condition: str | None,

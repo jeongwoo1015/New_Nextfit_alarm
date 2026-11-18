@@ -3,6 +3,7 @@
 from copy import deepcopy
 
 from ..tasks.morning_plan import BRIEFING, COACHING
+from ..tasks.stretch_sets import AREA_NAMES, AREAS
 from .inputs import content_kind
 
 VERDICTS = ("done", "not_done", "skipped", "ambiguous", "other")
@@ -40,15 +41,16 @@ REPORT_STEP_RESULT_QUIZ["parameters"]["properties"]["answer_correct"] = {
     "type": "BOOLEAN", "description": "사용자의 답이 [고정 스크립트]의 정답 줄과 같은 뜻이면 true, 틀렸거나 모르겠다고 했으면 false"}
 REPORT_STEP_RESULT_QUIZ["parameters"]["required"] = ["step_order", "verdict", "answer_correct"]
 
-# 스트레칭 부위 고르기(11/12 회의): 앱이 미리 받아 둔 5개 루틴 중 이 부위로 화면·타이머·단계 기록을 바꾼다
-STRETCH_AREAS = ("FULL", "NECK_SHOULDER", "ARM_WRIST", "BACK_HIP", "LEG")
+# 스트레칭 부위 고르기(11/12 회의, 11/18 부위 12개로 확대): 앱이 미리 받아 둔 부위별 루틴 중 이 부위로 화면·타이머·단계 기록을 바꾼다.
+# AI는 동작이 아니라 부위만 고른다(동작은 stretch_sets.ROUTINES에 고정)
+STRETCH_AREAS = AREAS
 SELECT_STRETCH_AREA = {
     "name": "select_stretch_area",
     "description": "\"오늘 어디가 불편하세요?\"에 대한 대답으로 오늘 스트레칭할 부위를 정했을 때 한 번 호출한다. 앱이 그 부위 루틴으로 화면과 단계를 바꾸고, 이후 step_order는 그 루틴의 번호다.",
     "parameters": {
         "type": "OBJECT",
         "properties": {"area": {"type": "STRING", "enum": list(STRETCH_AREAS),
-                                "description": "FULL 전신 / NECK_SHOULDER 목·어깨 / ARM_WRIST 팔·손목 / BACK_HIP 등·허리·골반 / LEG 다리"}},
+                                "description": " / ".join(f"{a} {AREA_NAMES[a]}" for a in STRETCH_AREAS)}},
         "required": ["area"],
     },
 }
