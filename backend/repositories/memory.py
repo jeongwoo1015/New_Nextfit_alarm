@@ -96,8 +96,9 @@ class MemoryAlarmRepository:
         a = self.alarms.get(alarm_id)
         return a if a and a.user_id == user_id else None
 
-    def list_alarms(self, user_id):
-        return sorted((a for a in self.alarms.values() if a.user_id == user_id), key=lambda a: (a.alarm_time, a.alarm_id))
+    def list_alarms(self, user_id, kind="WAKE"):
+        return sorted((a for a in self.alarms.values() if a.user_id == user_id and (kind is None or a.alarm_kind == kind)),
+                      key=lambda a: (a.alarm_time, a.alarm_id))
 
     def get_alarm(self, user_id, alarm_id):
         return self._own(user_id, alarm_id)
@@ -117,6 +118,11 @@ class MemoryAlarmRepository:
             self.overrides.pop(alarm_id, None)
             if self.nights:
                 self.nights.clear_night_items_for_alarm(alarm_id)
+        if alarm.alarm_kind == "BEDTIME" and current.alarm_kind != "BEDTIME":   # 트리거 rs_alarm_kind_changed
+            self.overrides.pop(alarm_id, None)
+            if self.nights:
+                self.nights.clear_night_items_for_alarm(alarm_id)
+                self.nights.detach_alarm(alarm_id)
         self.alarms[alarm_id] = alarm
         return alarm
 
@@ -179,6 +185,8 @@ class MemoryNightRepository:
         rec = self._own(user_id, night_record_id)
         if (fields.get("override_wake_time") or fields.get("override_skip_coaching")) and not override_alarm_id:
             raise ValidationFailed("하루 한정 변경에는 대상 알람이 필요해요")   # CHECK rs_night_override_alarm
+        if override_alarm_id and self._is_bedtime(override_alarm_id):            # 트리거 rs_night_override_alarm_check
+            raise ValidationFailed("굿나잇콜 알람은 하루 한정 변경 대상이 될 수 없습니다")
         if rec.override_alarm_id != override_alarm_id:        # 트리거 rs_night_alarm_changed
             self.night_items.pop(night_record_id, None)
         fields = {k: v for k, v in fields.items() if k not in _NIGHT_PROTECTED}   # 받아쓴 글·음성 경로는 추출로 덮어쓰지 않는다
@@ -218,6 +226,10 @@ class MemoryNightRepository:
         else:
             self.night_items.pop(night_record_id, None)
         return self.get_night_routine(user_id, night_record_id)
+
+    def _is_bedtime(self, alarm_id):
+        a = self._alarms.alarms.get(alarm_id) if self._alarms else None
+        return bool(a and a.alarm_kind == "BEDTIME")
 
     def clear_night_items_for_alarm(self, alarm_id):
         for r in self.records.values():
@@ -268,6 +280,8 @@ class MemorySessionRepository:
         return s if s and s.user_id == user_id else None
 
     def get_or_create_session(self, snapshot):
+        if snapshot.alarm_id and self._nights._is_bedtime(snapshot.alarm_id):   # 트리거 rs_session_alarm_check
+            raise ValidationFailed("굿나잇콜 알람으로는 모닝콜 세션을 만들 수 없습니다")
         found = next((s for s in self.sessions.values()
                       if s.alarm_id == snapshot.alarm_id and s.session_date == snapshot.session_date), None)   # UNIQUE(alarm_id, session_date)
         if found:

@@ -34,8 +34,11 @@ def routine_steps(items: Iterable[AlarmRoutineItem], coaching_skipped: bool = Fa
             for n, r in enumerate(chosen, 1)]
 
 
-def content_duration_sec(config: AppConfig) -> int:
-    """콘텐츠 고정 시간. 정의서에서 값이 정해지기 전(NULL)에는 기본안 600초."""
+def content_duration_sec(config: AppConfig, content_type: str | None = None) -> int:
+    """콘텐츠 고정 시간. 스트레칭(EXERCISE)은 STRETCH_DURATION_SEC(11/18, 3분), 나머지는 CONTENT_DURATION_SEC(5분).
+    설정이 비어 있으면 codes의 기본값."""
+    if content_type == "EXERCISE":
+        return config.stretch_duration_sec or codes.DEFAULT_STRETCH_DURATION_SEC
     return config.content_duration_sec or codes.DEFAULT_CONTENT_DURATION_SEC
 
 

@@ -107,6 +107,8 @@ class UserService:
             raise NotFound("온보딩을 먼저 마쳐 주세요", "SETTING_NOT_FOUND")
         if "speech_style" in changes and "personality" not in changes:       # 예전 앱: 말투만 바꾸면 성격도 같이
             changes = {**changes, "personality": _personality_of(changes["speech_style"])}
+        if "theme" in changes:                                                # 예전 앱의 SYSTEM → AUTO (11/18 DB가 SYSTEM을 거절)
+            changes = {**changes, "theme": codes.normalize_theme(changes["theme"])}
         validate_setting(replace(setting, **_pick(changes, SETTING_FIELDS)))
         return self.r.users.save_setting(user_id, changes)
 

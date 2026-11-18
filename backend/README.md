@@ -22,19 +22,19 @@
 | `POST /onboarding` | 온보딩 | 사용자·설정 저장 + 고른 유형(루틴 프리셋 / 콘텐츠 종류)으로 07:00 알람 생성 |
 | `PATCH /users/me` | 내 정보 | 이름·생년월일·성별 |
 | `DELETE /users/me` | 설정 | 탈퇴: 파일 먼저 지우고 Auth 계정 삭제(DB 행은 CASCADE), `jobs.maintenance.delete_account` |
-| `GET /settings` · `PATCH /settings` | 내 정보·설정 | 호칭·어조·성격(`personality`)·강도(`intensity` 1~3)·자동 강도(`auto_intensity`)·영어 수준(`english_level`)·목소리·음악 장르·취침 알림·테마·언어. 예전 `speech_style`만 보내면 성격도 같이 바뀜(FIRM → STRICT) |
-| `GET /alarms` · `POST /alarms` | 홈 | 알람 목록(시각 순)·추가 |
-| `GET` · `PATCH` · `DELETE /alarms/{id}` | 알람 설정 | 토글은 `PATCH {"enabled": false}` |
+| `GET /settings` · `PATCH /settings` | 내 정보·설정 | 호칭·어조·성격(`personality`)·강도(`intensity` 1~3)·자동 강도(`auto_intensity`)·영어 수준(`english_level`)·목소리·음악 장르·취침 알림(11/18부터 쓰지 않음, 굿나잇콜은 알람으로)·테마(`LIGHT`/`DARK`/`AUTO`, 예전 `SYSTEM`은 `AUTO`로 저장)·언어. 예전 `speech_style`만 보내면 성격도 같이 바뀜(FIRM → STRICT) |
+| `GET /alarms` · `POST /alarms` | 홈 | 알람 목록(시각 순, 모닝콜·굿나잇콜 모두)·추가. 각 알람에 `alarm_kind`(`WAKE` 모닝콜 / `BEDTIME` 굿나잇콜, 11/18). 굿나잇콜은 `{"alarm_kind": "BEDTIME", "alarm_time", "repeat_days"}`만 보낸다(모닝콜 칸은 null, `alarm_mode`는 `ON_TIME`만) |
+| `GET` · `PATCH` · `DELETE /alarms/{id}` | 알람 설정 | 토글은 `PATCH {"enabled": false}`. 굿나잇콜로 바꾸기는 `{"alarm_kind": "BEDTIME"}`(서버가 모닝콜 칸을 비우고, DB가 항목 설정과 그 알람의 하루 한정 변경을 지움). 모닝콜로 바꿀 때는 `morning_call_type`과 `template_id` 또는 `content_type`을 함께 |
 | `GET /alarms/{id}/routine-items` | 알람 세부 설정 | 항목별 시간(0 = 뺀 항목), 합계, 상한 |
 | `PUT /alarms/{id}/routine-items` | 알람 세부 설정 | 항목 시간 전체 교체(30초 단위, 합계 ≤ 900초, 최소 한 항목). 보내지 않은 항목은 기본 시간 |
 | `GET /presets` · `GET /presets/{id}` | 프리셋 선택 카드 | 활성 프리셋, 항목별 기본 시간(합계 600초) |
-| `GET /config/limits` | 알람 세부 설정 | 루틴 합계 상한, 시간 단위, 콘텐츠 고정 시간 |
+| `GET /config/limits` | 알람 세부 설정 | 루틴 합계 상한, 시간 단위, 콘텐츠 고정 시간(`content_duration_sec` 영어·게임, `stretch_duration_sec` 스트레칭 3분) |
 | `POST /night/token` | 굿나잇콜 시작 | 오늘·내일 일정을 보내면 지시문이 고정된 1회용 Live 토큰·시작 신호 |
 | `POST /night/transcript` | 굿나잇콜 종료 | 받아쓰기 저장(202, `extract_status: PENDING`), 추출은 백그라운드 |
 | `GET /night/records/{id}` · `GET /night/records?record_date=` | 밤 기록·일기 | 추출 결과, 하루 한정 변경, 목소리 서명 URL |
 | `PUT /night/records/{id}/voice` | 굿나잇콜 | 목소리 m4a를 본문 그대로(`Content-Type: audio/mp4`, 10MB 이하) |
 | `PATCH /night/records/{id}/voice-text` | 굿나잇콜 | 목소리 업로드 뒤 기기에서 받아쓴 '내일의 한마디' `{text}`(500자 이하, 빈 글 = 비우기). 목소리를 다시 올리면 비워지므로 다시 보낸다. 목소리가 없으면 409 `VOICE_NOT_UPLOADED` |
-| `POST /morning/sessions` | 알람 울림 | `{alarm_id}` → 오늘 세션 만들기(하루 한정 변경 반영) 또는 기존 세션(재연결). 응답 뒤 백그라운드에서 오늘의 포춘 문장을 만들어 세션에 저장. 이 응답에만 `morning_plan`(아침 순서표, AI B15)과 스트레칭 알람이면 `stretch_routines`(부위 12개 루틴, 루틴마다 4단계 180초, 부위를 아직 고를 수 있을 때만, AI B17)이 들어 있다. 처음 만들 때 그날 강도(`applied_intensity`, 자동 강도 반영)를 정해 저장 |
+| `POST /morning/sessions` | 알람 울림 | `{alarm_id}` → 오늘 세션 만들기(하루 한정 변경 반영) 또는 기존 세션(재연결). 응답 뒤 백그라운드에서 오늘의 포춘 문장을 만들어 세션에 저장. 이 응답에만 `morning_plan`(아침 순서표, AI B15)과 스트레칭 알람이면 `stretch_routines`(부위 12개 루틴, 루틴마다 4단계 180초, 부위를 아직 고를 수 있을 때만, AI B17)이 들어 있다. 처음 만들 때 그날 강도(`applied_intensity`, 자동 강도 반영)를 정해 저장. 굿나잇콜 알람이면 409 `NOT_WAKE_ALARM` |
 | `POST /morning/sessions/{id}/rewake` · `/response` | 모닝콜 | 8초 무응답 재기상(AI 음악) 횟수 +1 / 첫 음성 응답 시각(= 기상 성공 시각) |
 | `POST /morning/sessions/{id}/snooze` | 모닝콜 | "5분 뒤 다시 울리기" 횟수 +1 (제한 없음). 다시 울리면 `POST /morning/sessions`로 같은 세션 |
 | `POST /morning/sessions/{id}/wake-check` | 브리핑 | 확인 멘트(2~3개)를 모두 마침 — 브리핑 Live의 `wake_check_done`을 앱이 전달. 이때 기상 성공 판정 |

@@ -10,7 +10,7 @@ from .schemas import AlarmIn, AlarmOut, AlarmPatch, AlarmRoutineIn, AlarmRoutine
 
 router = APIRouter(prefix="/alarms", tags=["alarms"])
 
-NULLABLE = {"label", "template_id", "content_type", "content_option"}
+NULLABLE = {"label", "template_id", "content_type", "content_option", "morning_call_type"}   # morning_call_type: 굿나잇콜로 바꿀 때
 
 
 def _routine(r: AlarmRoutine) -> AlarmRoutineOut:

@@ -17,8 +17,9 @@ EnglishLevel = Literal[codes.ENGLISH_LEVELS]
 StretchArea = Literal[codes.STRETCH_AREA_INPUTS]   # 새 12개 + 옛 5개(서비스가 새 값으로 바꿈)
 VoiceType = Literal[codes.VOICE_TYPES]
 MusicGenre = Literal[codes.MUSIC_GENRES]
-Theme = Literal[codes.THEMES]
+Theme = Literal[codes.THEME_INPUTS]               # LIGHT/DARK/AUTO + 예전 SYSTEM(서비스가 AUTO로 바꿈)
 CallType = Literal[codes.MORNING_CALL_TYPES]
+AlarmKind = Literal[codes.ALARM_KINDS]
 ContentType = Literal[codes.CONTENT_TYPES]
 AlarmMode = Literal[codes.ALARM_MODES]
 
@@ -109,7 +110,8 @@ class AlarmOut(Out):
     repeat_days: str
     label: str | None
     alarm_mode: str
-    morning_call_type: str
+    alarm_kind: str                     # WAKE 모닝콜 / BEDTIME 굿나잇콜 (11/18)
+    morning_call_type: str | None       # 굿나잇콜이면 null
     template_id: str | None
     content_type: str | None
     content_option: str | None
@@ -119,9 +121,11 @@ class AlarmOut(Out):
 
 
 class AlarmIn(BaseModel):
+    """굿나잇콜은 {"alarm_kind": "BEDTIME", "alarm_time": ...}만 보낸다 (모닝콜 칸은 비우고 alarm_mode는 ON_TIME)."""
     model_config = ConfigDict(extra="forbid")
     alarm_time: time
-    morning_call_type: CallType
+    alarm_kind: AlarmKind = "WAKE"
+    morning_call_type: CallType | None = None   # 모닝콜이면 필수
     repeat_days: str = Field(default="1111111", pattern=r"^[01]{7}$")
     label: str | None = Field(default=None, max_length=20)
     alarm_mode: AlarmMode = "ON_TIME"
@@ -132,9 +136,12 @@ class AlarmIn(BaseModel):
 
 
 class AlarmPatch(BaseModel):
-    """보낸 항목만 바꾼다. 유형을 바꿀 때는 반대쪽 항목을 null로 함께 보낸다(예: CONTENT로 → template_id: null)."""
+    """보낸 항목만 바꾼다. 유형을 바꿀 때는 반대쪽 항목을 null로 함께 보낸다(예: CONTENT로 → template_id: null).
+    굿나잇콜로 바꿀 때는 {"alarm_kind": "BEDTIME"}만 보내면 서버가 모닝콜 칸을 비운다.
+    모닝콜로 바꿀 때는 alarm_kind와 함께 morning_call_type과 template_id 또는 content_type을 보낸다."""
     model_config = ConfigDict(extra="forbid")
     alarm_time: time | None = None
+    alarm_kind: AlarmKind | None = None
     morning_call_type: CallType | None = None
     repeat_days: str | None = Field(default=None, pattern=r"^[01]{7}$")
     label: str | None = Field(default=None, max_length=20)
@@ -166,7 +173,8 @@ class PresetOut(BaseModel):
 class LimitsOut(BaseModel):
     routine_max_sec: int                # 알람 루틴 합계 상한 (RS_APP_CONFIG)
     duration_step_sec: int              # 항목 시간 단위 (30초)
-    content_duration_sec: int           # 콘텐츠 알람 고정 시간
+    content_duration_sec: int           # 콘텐츠 알람 고정 시간 (영어·게임 등)
+    stretch_duration_sec: int           # 스트레칭 콘텐츠만 (11/18, 3분)
 
 
 class RoutineItemOut(TemplateItemOut):
