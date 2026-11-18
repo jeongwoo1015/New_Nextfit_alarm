@@ -80,6 +80,8 @@ def test_presets(repos):
     assert sum(i.default_duration_sec for i in items) == 600
     assert repos.presets.get_template(N).template_name
     assert repos.presets.get_app_config().routine_max_sec == 900
+    config = repos.presets.db.table("rs_app_config").select("content_duration_sec, stretch_duration_sec").execute().data[0]
+    assert config == {"content_duration_sec": 300, "stretch_duration_sec": 180}       # 영어·게임 5분, 스트레칭 3분
 
 
 def test_alarm_routine(repos, uid, other, alarm):
@@ -288,18 +290,23 @@ def test_stretch_area_and_intensity(repos, uid, other):
     with pytest.raises(ValidationFailed):
         repos.sessions.replace_pending_steps(uid, s.session_id, [])
 
-    repos.sessions.update_session(uid, s.session_id, {"applied_intensity": 3, "stretch_area": "NECK_SHOULDER"})
     db = repos.users.db
-    row = db.table("rs_morning_session").select("applied_intensity, stretch_area").eq("session_id", s.session_id).execute().data[0]
-    assert row == {"applied_intensity": 3, "stretch_area": "NECK_SHOULDER"}
+    area = lambda: db.table("rs_morning_session").select("stretch_area").eq("session_id", s.session_id).execute().data[0]["stretch_area"]
+    for code in ("NECK", "ANKLE_FOOT", "NECK_SHOULDER"):                              # 부위 12개 + 11/13 예전 값
+        repos.sessions.update_session(uid, s.session_id, {"stretch_area": code})
+        assert area() == code
+    repos.sessions.update_session(uid, s.session_id, {"applied_intensity": 3})
+    assert db.table("rs_morning_session").select("applied_intensity").eq("session_id", s.session_id).execute().data[0] \
+        == {"applied_intensity": 3}
     for bad in ({"applied_intensity": 4}, {"stretch_area": "HEAD"}):
         with pytest.raises(ValidationFailed):
             repos.sessions.update_session(uid, s.session_id, bad)
 
-    setting = db.table("rs_user_setting").select("personality, intensity, auto_intensity, english_level") \
+    setting = db.table("rs_user_setting").select("personality, intensity, auto_intensity, english_level, theme") \
         .eq("user_id", uid).execute().data[0]
-    assert setting == {"personality": "KIND", "intensity": 2, "auto_intensity": True, "english_level": "BEGINNER"}   # 기본값
-    for bad in ({"personality": "FIRM"}, {"intensity": 0}, {"english_level": "ADVANCED"}):
+    assert setting == {"personality": "KIND", "intensity": 2, "auto_intensity": True, "english_level": "BEGINNER",
+                       "theme": "AUTO"}                                                  # 기본값
+    for bad in ({"personality": "FIRM"}, {"intensity": 0}, {"english_level": "ADVANCED"}, {"theme": "SYSTEM"}):
         with pytest.raises(Exception, match="check constraint"):
             db.table("rs_user_setting").update(bad).eq("user_id", uid).execute()
     repos.alarms.delete_alarm(uid, a.alarm_id)

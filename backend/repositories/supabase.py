@@ -205,7 +205,7 @@ class SupabasePresetRepository(_Base):
         return _models(TemplateItem, self._run(q))
 
     def get_app_config(self):
-        row = _first(self._run(self._select("rs_app_config", "routine_max_sec, content_duration_sec").limit(1)))
+        row = _first(self._run(self._select("rs_app_config", "routine_max_sec, content_duration_sec, stretch_duration_sec").limit(1)))
         return _model(AppConfig, row) if row else AppConfig()
 
     def pick_music(self, music_type, genre=None, mood=None):

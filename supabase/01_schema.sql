@@ -28,6 +28,7 @@ create table if not exists rs_app_config (
   config_id             boolean primary key default true check (config_id),
   routine_max_sec       int not null default 900 check (routine_max_sec > 0),
   content_duration_sec  int check (content_duration_sec is null or content_duration_sec > 0),  -- 콘텐츠 고정 시간 (팀 확정 후)
+  stretch_duration_sec  int not null default 180 check (stretch_duration_sec > 0),             -- 스트레칭만 3분 (영어·게임은 위 값)
   updated_at            timestamptz not null default now()
 );
 insert into rs_app_config default values on conflict (config_id) do nothing;
@@ -69,8 +70,8 @@ create table if not exists rs_user_setting (
   sleep_time           time not null default '23:00',
   music_genre          varchar(30) not null
                        check (music_genre in ('POP', 'JAZZ', 'CLASSIC', 'DANCE', 'ACOUSTIC')),
-  theme                varchar(10) not null default 'SYSTEM'
-                       check (theme in ('LIGHT', 'DARK', 'SYSTEM')),
+  theme                varchar(10) not null default 'AUTO'   -- AUTO = 해가 떠 있으면 라이트, 지면 다크
+                       constraint rs_setting_theme check (theme in ('LIGHT', 'DARK', 'AUTO')),
   app_language         varchar(10) not null default 'ko',
   updated_at           timestamptz not null default now()
 );
@@ -313,8 +314,11 @@ create table if not exists rs_morning_session (
   fortune_style      varchar(10) check (fortune_style in ('COOKIE', 'HOROSCOPE')),
   fortune_source     varchar(10) check (fortune_source in ('ai', 'fallback', 'safe')),
   applied_intensity  smallint check (applied_intensity between 1 and 3),   -- 그날 실제로 쓴 강도 (자동 강도 반영 후)
-  stretch_area       varchar(20)                        -- 그날 고른 스트레칭 부위
-                     check (stretch_area in ('FULL', 'NECK_SHOULDER', 'ARM_WRIST', 'BACK_HIP', 'LEG')),
+  stretch_area       varchar(20)                        -- 그날 고른 스트레칭 부위 (아래 마지막 4개는 11/13 예전 값)
+                     constraint rs_session_stretch_area check (stretch_area in (
+                       'FULL', 'NECK', 'SHOULDER', 'CHEST_BACK', 'WRIST_HAND', 'ELBOW_ARM',
+                       'LOW_BACK', 'PELVIS', 'GLUTE', 'THIGH', 'CALF', 'ANKLE_FOOT',
+                       'NECK_SHOULDER', 'ARM_WRIST', 'BACK_HIP', 'LEG')),
   unique (alarm_id, session_date),
   constraint rs_session_type_fields check (
     (morning_call_type = 'ROUTINE' and template_id is not null and content_type is null)
