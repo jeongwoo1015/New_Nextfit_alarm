@@ -1,6 +1,8 @@
 """정의서(11/01 수정판) 값 목록 — DB의 CHECK 제약과 같은 값."""
 
 MORNING_CALL_TYPES = ("ROUTINE", "CONTENT")
+# 11/18 DB 14_bedtime_alarm.sql: 굿나잇콜도 RS_ALARM에 (방향 B). BEDTIME은 모닝콜 칸(종류·프리셋·콘텐츠)을 비우고 ON_TIME만
+ALARM_KINDS = ("WAKE", "BEDTIME")
 CONTENT_TYPES = ("MEDITATION", "EXERCISE", "LANGUAGE", "QUIZ")
 # 예시 값(팀 확정 전). 확정되면 여기만 고친다
 # 11/10 AI CONTRACTS B8·B14: 콘텐츠 3종 = 스트레칭(EXERCISE/STRETCH)·영어(LANGUAGE/ENGLISH)·퀴즈 게임(QUIZ/PERSON·GENERAL·WORDCHAIN).
@@ -39,15 +41,24 @@ STRETCH_AREAS = ("FULL", "NECK", "SHOULDER", "CHEST_BACK", "WRIST_HAND", "ELBOW_
 # 예전 앱이 보내면 바꿔 읽고, 이미 저장된 세션 값은 그대로 둔다
 LEGACY_STRETCH_AREAS = {"NECK_SHOULDER": "NECK", "ARM_WRIST": "WRIST_HAND", "BACK_HIP": "LOW_BACK", "LEG": "THIGH"}
 STRETCH_AREA_INPUTS = STRETCH_AREAS + tuple(LEGACY_STRETCH_AREAS)   # 요청에서 받는 값
-STRETCH_DURATION_SEC = 180          # 스트레칭 콘텐츠 합계(11/18 AI: 4단계 × 45초). 영어·퀴즈 등은 CONTENT_DURATION_SEC
+DEFAULT_STRETCH_DURATION_SEC = 180  # RS_APP_CONFIG.STRETCH_DURATION_SEC가 없을 때 (11/18 AI: 4단계 × 45초, DB 기본값과 같음). 영어·게임은 CONTENT_DURATION_SEC
+
+VOICE_TYPES = ("FEMALE", "MALE", "NEUTRAL")
+# 11/18 DB 13_stretch_theme.sql: SYSTEM → AUTO(해가 떠 있으면 라이트, 지면 다크). 예전 앱이 SYSTEM을 보내면 AUTO로 저장
+THEMES = ("LIGHT", "DARK", "AUTO")
+LEGACY_THEMES = {"SYSTEM": "AUTO"}
+THEME_INPUTS = THEMES + tuple(LEGACY_THEMES)
+MUSIC_GENRES = ("POP", "JAZZ", "CLASSIC", "DANCE", "ACOUSTIC")
+CONDITION_LABELS = ("GOOD", "NORMAL", "TIRED", "STRESSED")   # 임시, AI 파트와 확정
+MUSIC_TYPES = ("REWAKE", "SLEEP")
+EXTRACT_STATUSES = ("PENDING", "DONE", "FAILED")
 
 
 def normalize_stretch_area(area: str) -> str:
     """옛 부위 값을 새 부위로 (새 값은 그대로)."""
     return LEGACY_STRETCH_AREAS.get(area, area)
-VOICE_TYPES = ("FEMALE", "MALE", "NEUTRAL")
-THEMES = ("LIGHT", "DARK", "SYSTEM")
-MUSIC_GENRES = ("POP", "JAZZ", "CLASSIC", "DANCE", "ACOUSTIC")
-CONDITION_LABELS = ("GOOD", "NORMAL", "TIRED", "STRESSED")   # 임시, AI 파트와 확정
-MUSIC_TYPES = ("REWAKE", "SLEEP")
-EXTRACT_STATUSES = ("PENDING", "DONE", "FAILED")
+
+
+def normalize_theme(theme: str) -> str:
+    """예전 테마 값(SYSTEM)을 새 값(AUTO)으로."""
+    return LEGACY_THEMES.get(theme, theme)

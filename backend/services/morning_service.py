@@ -99,6 +99,8 @@ class MorningService:
         alarm = self.r.alarms.get_alarm(user_id, alarm_id)
         if not alarm:
             raise NotFound("알람을 찾을 수 없어요", "ALARM_NOT_FOUND")
+        if alarm.alarm_kind == "BEDTIME":   # DB 트리거도 막지만(일반 검증 오류) 앱이 알아보도록 먼저 409
+            raise Conflict("굿나잇콜 알람으로는 모닝콜을 시작할 수 없어요", "NOT_WAKE_ALARM")
         now = to_kst(self.clock())
         today = today_kst(now)
         snapshot = resolve_snapshot(alarm, self.r.nights.get_night_for_morning(user_id, today), today)
@@ -143,7 +145,7 @@ class MorningService:
                 and s.stretch_area is None and all(x.step_status == "PENDING" for x in steps))
 
     def _routines(self) -> dict[str, list[ContentStep]]:
-        return self.ai.stretch_routines(codes.STRETCH_DURATION_SEC)
+        return self.ai.stretch_routines(content_duration_sec(self.r.presets.get_app_config(), "EXERCISE"))
 
     def _stretch_routine_view(self, s: MorningSession, steps: list[SessionStep]) -> dict[str, list[StepPlan]] | None:
         if not self._can_choose_area(s, steps):
@@ -312,8 +314,7 @@ class MorningService:
         if s.morning_call_type == "ROUTINE":
             plans = routine_steps(self._routine_items(user_id, s))
         else:
-            duration = (codes.STRETCH_DURATION_SEC if s.content_type == "EXERCISE"   # 스트레칭만 3분(11/18 AI)
-                        else content_duration_sec(self.r.presets.get_app_config()))
+            duration = content_duration_sec(self.r.presets.get_app_config(), s.content_type)   # 스트레칭만 3분(11/18)
             setting = self.r.users.get_setting(user_id)
             night = self.r.nights.get_night_for_morning(user_id, s.session_date)
             plan = self.ai.compose_content_steps(s.content_type, s.content_option, duration, s.session_date,

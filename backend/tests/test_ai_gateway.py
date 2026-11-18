@@ -71,7 +71,7 @@ def test_real_gateway_passes_plan_persona_and_stretch_routines():
     plan = gw.morning_plan(True, True)
     assert plan == ("BRIEFING", "ONE_LINER", "COACHING", "FORTUNE")
     gw.issue_briefing_token(BriefingContext(persona, "07:00", content_name="스트레칭", plan=plan))
-    routines = gw.stretch_routines(codes.STRETCH_DURATION_SEC)
+    routines = gw.stretch_routines(codes.DEFAULT_STRETCH_DURATION_SEC)
     assert tuple(routines) == codes.STRETCH_AREAS                          # 부위 12개 (11/18)
     assert all(len(steps) == 4 and sum(s.planned_sec for s in steps) == 180 for steps in routines.values())
     coach = tuple((a, tuple(CoachStep(n, s.name, s.planned_sec, s.response_type, s.script) for n, s in enumerate(st, 1)))
@@ -96,5 +96,5 @@ def test_stretch_area_codes_match_ai():
     """서버 부위 목록·옛 값 변환이 AI stretch_sets와 같아야 select_stretch_area가 422 없이 통과한다 (11/18 부위 12개)."""
     from ai.tasks.stretch_sets import AREAS, LEGACY_AREAS, TOTAL_SEC, normalize_area
     assert codes.STRETCH_AREAS == AREAS and codes.LEGACY_STRETCH_AREAS == LEGACY_AREAS
-    assert codes.STRETCH_DURATION_SEC == TOTAL_SEC
+    assert codes.DEFAULT_STRETCH_DURATION_SEC == TOTAL_SEC
     assert all(codes.normalize_stretch_area(a) == normalize_area(a) for a in codes.STRETCH_AREA_INPUTS)

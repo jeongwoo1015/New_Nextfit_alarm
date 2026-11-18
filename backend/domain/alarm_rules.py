@@ -12,7 +12,8 @@ REPEAT_DAYS = re.compile(r"^[01]{7}$")
 LABEL_MAX = 20
 # 사용자가 정하는 RS_ALARM 컬럼 (id·user_id·시각 기록 제외)
 ALARM_FIELDS = ("alarm_time", "repeat_days", "label", "alarm_mode", "morning_call_type", "template_id",
-                "content_type", "content_option", "enabled")
+                "content_type", "content_option", "enabled", "alarm_kind")
+WAKE_ONLY_FIELDS = ("morning_call_type", "template_id", "content_type", "content_option")   # 굿나잇콜이면 비우는 칸
 
 
 def validate_alarm(a: Alarm) -> None:
@@ -25,7 +26,14 @@ def validate_alarm(a: Alarm) -> None:
     if a.alarm_mode not in codes.ALARM_MODES:
         errors.append(f"alarm_mode는 {'/'.join(codes.ALARM_MODES)} 중 하나예요")
 
-    if a.morning_call_type == "ROUTINE":
+    if a.alarm_kind == "BEDTIME":           # 11/18 DB rs_alarm_type_fields: 모닝콜 칸을 모두 비우고 정각에만
+        if any(getattr(a, f) is not None for f in WAKE_ONLY_FIELDS):
+            errors.append("굿나잇콜 알람은 " + "·".join(WAKE_ONLY_FIELDS) + "를 비워요")
+        if a.alarm_mode != "ON_TIME":
+            errors.append("굿나잇콜 알람은 alarm_mode가 ON_TIME이에요")
+    elif a.alarm_kind != "WAKE":
+        errors.append("alarm_kind는 " + "/".join(codes.ALARM_KINDS) + " 중 하나예요")
+    elif a.morning_call_type == "ROUTINE":
         if not a.template_id:
             errors.append("루틴 알람은 template_id가 필요해요")
         if a.content_type or a.content_option:

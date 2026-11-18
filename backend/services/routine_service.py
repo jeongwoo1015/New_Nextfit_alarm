@@ -23,6 +23,7 @@ class RoutineLimits:
     routine_max_sec: int
     duration_step_sec: int
     content_duration_sec: int
+    stretch_duration_sec: int
 
 
 class RoutineService:
@@ -40,4 +41,5 @@ class RoutineService:
 
     def limits(self) -> RoutineLimits:
         cfg = self.r.presets.get_app_config()
-        return RoutineLimits(cfg.routine_max_sec, codes.DURATION_STEP_SEC, content_duration_sec(cfg))
+        return RoutineLimits(cfg.routine_max_sec, codes.DURATION_STEP_SEC, content_duration_sec(cfg),
+                             content_duration_sec(cfg, "EXERCISE"))
