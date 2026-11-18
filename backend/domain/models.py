@@ -28,7 +28,7 @@ class UserSetting:
     voice_type: str = "FEMALE"
     sleep_alarm_enabled: bool = True
     sleep_time: time = time(23, 0)
-    theme: str = "SYSTEM"
+    theme: str = "AUTO"                    # 11/18 LIGHT / DARK / AUTO
     app_language: str = "ko"
     personality: str = "KIND"              # 11/16 KIND / FRIENDLY / STRICT / CHEERFUL (speech_style을 대신함)
     intensity: int = 2                     # 깨우는 말의 강도 1~3
@@ -39,9 +39,10 @@ class UserSetting:
 
 @dataclass(frozen=True)
 class AppConfig:
-    """RS_APP_CONFIG (1행). content_duration_sec는 팀 확정 전이라 비어 있을 수 있다."""
+    """RS_APP_CONFIG (1행). 비어 있으면 codes의 기본값을 쓴다."""
     routine_max_sec: int = 900
-    content_duration_sec: int | None = None
+    content_duration_sec: int | None = None   # 영어·게임 등 콘텐츠 시간
+    stretch_duration_sec: int | None = None   # 스트레칭만 (11/18, DB 기본 180)
 
 
 @dataclass(frozen=True)
@@ -57,11 +58,12 @@ class RoutineTemplate:
 
 @dataclass(frozen=True)
 class Alarm:
-    """RS_ALARM. 루틴 알람(template_id) 또는 콘텐츠 알람(content_type) 중 하나."""
+    """RS_ALARM. 모닝콜(WAKE)은 루틴 알람(template_id) 또는 콘텐츠 알람(content_type) 중 하나,
+    굿나잇콜(BEDTIME, 11/18)은 모닝콜 칸을 모두 비운다."""
     alarm_id: str
     user_id: str
     alarm_time: time
-    morning_call_type: str                 # ROUTINE / CONTENT
+    morning_call_type: str | None          # ROUTINE / CONTENT (굿나잇콜이면 None)
     repeat_days: str = "1111111"           # 월~일, 1 = 울림
     label: str | None = None
     alarm_mode: str = "ON_TIME"
@@ -69,6 +71,7 @@ class Alarm:
     content_type: str | None = None        # 콘텐츠 알람일 때 필수
     content_option: str | None = None
     enabled: bool = True
+    alarm_kind: str = "WAKE"               # WAKE 모닝콜 / BEDTIME 굿나잇콜
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

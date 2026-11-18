@@ -4,7 +4,7 @@ from __future__ import annotations   # 메서드 이름 list가 내장 list 어�
 from dataclasses import dataclass, replace
 
 from backend.core.errors import NotFound, ValidationFailed
-from backend.domain.alarm_rules import ALARM_FIELDS, validate_alarm
+from backend.domain.alarm_rules import ALARM_FIELDS, WAKE_ONLY_FIELDS, validate_alarm
 from backend.domain.models import Alarm, AlarmRoutineItem
 from backend.domain.routine_rules import apply_durations, total_sec
 from backend.repositories.registry import Repositories
@@ -27,7 +27,8 @@ class AlarmService:
         self.r = repos
 
     def list(self, user_id: str) -> list[Alarm]:
-        return self.r.alarms.list_alarms(user_id)
+        """알람 목록 화면: 모닝콜과 굿나잇콜 모두 (다른 곳은 Repository 기본값대로 모닝콜만)."""
+        return self.r.alarms.list_alarms(user_id, kind=None)
 
     def get(self, user_id: str, alarm_id: str) -> Alarm:
         """다른 사용자의 알람은 Repository가 None을 돌려주므로 없는 알람과 같이 404."""
@@ -37,14 +38,18 @@ class AlarmService:
         return alarm
 
     def create(self, user_id: str, fields: dict) -> Alarm:
-        values = _editable(fields)
+        values = _bedtime_cleared(_editable(fields))
         self._validate(Alarm(alarm_id="", user_id=user_id, **values), previous=None)
         return self.r.alarms.create_alarm(user_id, values)
 
     def update(self, user_id: str, alarm_id: str, changes: dict) -> Alarm:
-        """프리셋을 바꾸거나 콘텐츠 알람으로 바꾸면 예전 항목 시간 설정은 DB 트리거가 지운다."""
+        """프리셋을 바꾸거나 콘텐츠·굿나잇콜 알람으로 바꾸면 예전 항목 시간 설정은 DB 트리거가 지운다.
+        굿나잇콜로 바꾸면 그 알람을 대상으로 한 하루 한정 변경도 DB 트리거가 푼다(14_bedtime_alarm.sql)."""
         current = self.get(user_id, alarm_id)
-        self._validate(replace(current, **_editable(changes)), previous=current)
+        changes = _editable(changes)
+        if changes.get("alarm_kind") == "BEDTIME" and current.alarm_kind != "BEDTIME":
+            changes = _bedtime_cleared(changes)
+        self._validate(replace(current, **changes), previous=current)
         return self.r.alarms.update_alarm(user_id, alarm_id, changes)
 
     def delete(self, user_id: str, alarm_id: str) -> None:
@@ -80,7 +85,7 @@ class AlarmService:
 
     def _validate(self, alarm: Alarm, previous: Alarm | None) -> None:
         validate_alarm(alarm)
-        if alarm.morning_call_type != "ROUTINE":
+        if alarm.alarm_kind != "WAKE" or alarm.morning_call_type != "ROUTINE":
             return
         template = self.r.presets.get_template(alarm.template_id)
         if not template:
@@ -88,6 +93,13 @@ class AlarmService:
         # 비활성 프리셋은 새로 고를 수 없다. 이미 쓰던 알람은 그대로 둘 수 있다(정의서: 삭제 대신 비활성화)
         if not template.is_active and (previous is None or previous.template_id != alarm.template_id):
             raise ValidationFailed("더 이상 선택할 수 없는 루틴 프리셋이에요")
+
+
+def _bedtime_cleared(values: dict) -> dict:
+    """굿나잇콜이면 보내지 않은 모닝콜 칸을 비우고 정각으로 (보낸 값은 그대로 두어 검사에서 걸리게 한다)."""
+    if values.get("alarm_kind") != "BEDTIME":
+        return values
+    return {**{f: None for f in WAKE_ONLY_FIELDS}, "alarm_mode": "ON_TIME", **{k: v for k, v in values.items() if v is not None}}
 
 
 def _editable(fields: dict) -> dict:

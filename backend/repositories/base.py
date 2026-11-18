@@ -43,10 +43,10 @@ class PresetRepository(Protocol):
 
 class AlarmRepository(Protocol):
     """3. 알람 — rs_alarm, rs_alarm_routine_item, 함수 rs_alarm_routine_items"""
-    def list_alarms(self, user_id: str) -> list[Alarm]: ...                          # alarm_time 오름차순
+    def list_alarms(self, user_id: str, kind: str | None = "WAKE") -> list[Alarm]: ...   # alarm_time 오름차순. 기본은 모닝콜만, BEDTIME 굿나잇콜만, None 전체 (11/18)
     def get_alarm(self, user_id: str, alarm_id: str) -> Alarm | None: ...
     def create_alarm(self, user_id: str, values: dict) -> Alarm: ...
-    def update_alarm(self, user_id: str, alarm_id: str, changes: dict) -> Alarm | None: ...   # template_id가 바뀌면 DB가 항목 설정을 지움
+    def update_alarm(self, user_id: str, alarm_id: str, changes: dict) -> Alarm | None: ...   # template_id가 바뀌거나 굿나잇콜로 바뀌면 DB가 항목 설정을 지움(굿나잇콜은 하루 한정 변경도 해제)
     def delete_alarm(self, user_id: str, alarm_id: str) -> None: ...                 # 지난 세션은 남고(alarm_id NULL), 하루 한정 변경은 DB가 비움
     def get_alarm_routine(self, user_id: str, alarm_id: str) -> list[AlarmRoutineItem] | None: ...   # item_order 순. 알람이 없거나 남의 것이면 None
 
