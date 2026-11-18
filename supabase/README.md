@@ -21,6 +21,7 @@
 | (11) | `11_fortune.sql` | 오늘의 포춘 칸(fortune_text·style·source), 한마디 받아쓴 글(voice_text). 01을 이 변경 전에 실행한 DB에만 적용 |
 | (12) | `12_persona_stretch.sql` | 성격·강도·자동 강도·영어 수준 설정, 세션의 적용 강도·스트레칭 부위, 판정 안 한 단계 교체 함수. 01을 이 변경 전에 실행한 DB에만 적용 |
 | (13) | `13_stretch_theme.sql` | 스트레칭 부위 12개 허용, 스트레칭 시간 칸(180초), 테마 SYSTEM → AUTO. 01을 이 변경 전에 실행한 DB에만 적용 |
+| (14) | `14_bedtime_alarm.sql` | 굿나잇콜 알람 서버 저장(RS_ALARM.ALARM_KIND), 굿나잇콜을 모닝콜 세션·하루 한정 변경에 못 쓰게 막는 트리거. 01을 이 변경 전에 실행한 DB에만 적용 |
 
 ## 구조 요약
 - 앱은 DB에 직접 접근하지 않고 FastAPI 서버를 거칩니다. 서버는 service_role 키를 쓰고, 로그인 토큰의 user_id를 코드에서 확인합니다.

@@ -312,6 +312,41 @@ def test_stretch_area_and_intensity(repos, uid, other):
     repos.alarms.delete_alarm(uid, a.alarm_id)
 
 
+def test_bedtime_alarm(repos, uid, alarm):
+    """굿나잇콜 알람은 RS_ALARM에 BEDTIME으로 저장하고, 모닝콜 흐름(세션·하루 한정 변경)에는 쓰지 못한다."""
+    db = repos.users.db
+    new_alarm = lambda row: db.table("rs_alarm").insert({"user_id": uid, "alarm_time": "22:00:00", **row}).execute().data[0]["alarm_id"]
+    bed = new_alarm({"alarm_kind": "BEDTIME"})
+    with pytest.raises(Exception, match="rs_alarm_type_fields"):                      # 굿나잇콜에 콘텐츠를 넣으면 안 됨
+        new_alarm({"alarm_kind": "BEDTIME", "morning_call_type": "CONTENT", "content_type": "EXERCISE"})
+    with pytest.raises(Exception, match="rs_alarm_type_fields"):                      # 굿나잇콜은 정각에만
+        new_alarm({"alarm_kind": "BEDTIME", "alarm_mode": "BEFORE_10"})
+    with pytest.raises(Exception, match="rs_alarm_type_fields"):                      # 모닝콜은 종류가 꼭 있어야 함
+        new_alarm({"alarm_kind": "WAKE"})
+
+    assert [a.alarm_id for a in repos.alarms.list_alarms(uid)] == [alarm.alarm_id]   # 기본은 모닝콜만
+    assert [a.alarm_id for a in repos.alarms.list_alarms(uid, kind="BEDTIME")] == [bed]
+    assert {a.alarm_id for a in repos.alarms.list_alarms(uid, kind=None)} == {alarm.alarm_id, bed}
+
+    snap = SessionSnapshot(uid, bed, now_kst().date(), "CONTENT", None, "EXERCISE", None, time(22, 0), time(22, 0))
+    with pytest.raises(ValidationFailed, match="굿나잇콜"):
+        repos.sessions.get_or_create_session(snap)
+    nid = repos.nights.save_night_raw(uid, [{"role": "user", "text": "내일 6시 반에 깨워 줘", "at": ""}], None, None)
+    with pytest.raises(ValidationFailed, match="굿나잇콜"):
+        repos.nights.save_night_extract(uid, nid, {"override_wake_time": time(6, 30)}, bed)
+    assert repos.nights.save_night_extract(uid, nid, {"override_wake_time": time(6, 30)}, alarm.alarm_id) \
+        .override_alarm_id == alarm.alarm_id                                           # 모닝콜에는 그대로 붙음
+
+    items = repos.alarms.get_alarm_routine(uid, alarm.alarm_id)
+    repos.alarms.replace_alarm_routine(uid, alarm.alarm_id, {items[0].template_item_id: 300})
+    db.table("rs_alarm").update({"alarm_kind": "BEDTIME", "morning_call_type": None, "template_id": None}) \
+        .eq("alarm_id", alarm.alarm_id).execute()                                      # 모닝콜 → 굿나잇콜로 바꾸면
+    night = repos.nights.get_night(uid, nid)
+    assert (night.override_alarm_id, night.override_wake_time) == (None, None)       # 하루 한정 변경은 지워지고
+    assert db.table("rs_alarm_routine_item").select("alarm_id").eq("alarm_id", alarm.alarm_id).execute().data == []
+    repos.alarms.delete_alarm(uid, bed)
+
+
 def test_personalization(repos, uid):
     row = {"session_date": now_kst().date().isoformat(), "source": "rule", "mode": "rule", "strategy_id": "gentle",
            "strategy": json.dumps({"coaching": "soft"}), "rule_ids": json.dumps(["R1"]), "propensity": 1.0,
