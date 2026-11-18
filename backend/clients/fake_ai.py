@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 from .ai_gateway import (ContentPlan, ContentStep, Fortune, LiveToken, NightContext, NightExtract, RoutineChangeRequest,
                          StrategyDecision, fit_seconds)
 
-STRETCH_AREAS = ("FULL", "NECK_SHOULDER", "ARM_WRIST", "BACK_HIP", "LEG")
+STRETCH_AREAS = ("FULL", "NECK", "SHOULDER", "CHEST_BACK", "WRIST_HAND", "ELBOW_ARM", "LOW_BACK", "PELVIS", "GLUTE",
+                 "THIGH", "CALF", "ANKLE_FOOT")
 QUIZ = [ContentStep(f"퀴즈 {n}번", 120, "SPEECH", f"문제: 문제 {n}\n정답: 정답 {n}") for n in range(1, 4)]
 
 
@@ -78,8 +79,8 @@ class FakeAIGateway:
         return _token("fortune")
 
     def stretch_routines(self, duration_sec):
-        """AI stretch_sets처럼 부위마다 5단계 (이름에 부위를 붙여 구분)."""
-        secs = fit_seconds([40, 65, 65, 65, 65], duration_sec)
+        """AI stretch_sets처럼 부위 12개, 부위마다 4단계 (이름에 부위를 붙여 구분)."""
+        secs = fit_seconds([45, 45, 45, 45], duration_sec)
         return {area: [ContentStep(f"{area} 동작 {n}", sec, "PLAY", f"{area} 안내 {n}") for n, sec in enumerate(secs, 1)]
                 for area in STRETCH_AREAS}
 

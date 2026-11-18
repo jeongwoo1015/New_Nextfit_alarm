@@ -17,7 +17,9 @@ VOICE_TEXT_MAX = 500
 FORTUNE_STYLES = ("COOKIE", "HOROSCOPE")
 FORTUNE_SOURCES = ("ai", "fallback", "safe")
 INTENSITIES = (1, 2, 3)
-STRETCH_AREAS = ("FULL", "NECK_SHOULDER", "ARM_WRIST", "BACK_HIP", "LEG")
+# DB CHECK와 같게: 새 부위 12개 + 이미 저장된 옛 5개 값 (11/18, backend-db 제약 변경 요청)
+STRETCH_AREAS = ("FULL", "NECK", "SHOULDER", "CHEST_BACK", "WRIST_HAND", "ELBOW_ARM", "LOW_BACK", "PELVIS", "GLUTE",
+                 "THIGH", "CALF", "ANKLE_FOOT", "NECK_SHOULDER", "ARM_WRIST", "BACK_HIP", "LEG")
 
 _SETTING_FIELDS = {f.name for f in fields(UserSetting)} - {"user_id", "updated_at"}
 

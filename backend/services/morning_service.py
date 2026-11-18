@@ -143,7 +143,7 @@ class MorningService:
                 and s.stretch_area is None and all(x.step_status == "PENDING" for x in steps))
 
     def _routines(self) -> dict[str, list[ContentStep]]:
-        return self.ai.stretch_routines(content_duration_sec(self.r.presets.get_app_config()))
+        return self.ai.stretch_routines(codes.STRETCH_DURATION_SEC)
 
     def _stretch_routine_view(self, s: MorningSession, steps: list[SessionStep]) -> dict[str, list[StepPlan]] | None:
         if not self._can_choose_area(s, steps):
@@ -152,9 +152,10 @@ class MorningService:
 
     def select_stretch_area(self, user_id: str, session_id: str, area: str) -> SessionView:
         """통화 중 AI가 select_stretch_area(area)를 부르면 앱이 전달. 아직 판정하지 않은 단계를 그 부위 루틴으로 바꾼다.
-        같은 부위를 다시 보내면 그대로 돌려준다(앱 재시도)."""
-        if area not in codes.STRETCH_AREAS:
+        같은 부위를 다시 보내면 그대로 돌려준다(앱 재시도). 옛 부위 값(11/13~17)은 가까운 새 부위로 바꿔 읽는다."""
+        if area not in codes.STRETCH_AREA_INPUTS:
             raise ValidationFailed(f"area는 {'/'.join(codes.STRETCH_AREAS)} 중 하나예요")
+        area = codes.normalize_stretch_area(area)
         s = self._session(user_id, session_id)
         if s.stretch_area == area:
             return self.view(user_id, session_id)
@@ -311,7 +312,8 @@ class MorningService:
         if s.morning_call_type == "ROUTINE":
             plans = routine_steps(self._routine_items(user_id, s))
         else:
-            duration = content_duration_sec(self.r.presets.get_app_config())
+            duration = (codes.STRETCH_DURATION_SEC if s.content_type == "EXERCISE"   # 스트레칭만 3분(11/18 AI)
+                        else content_duration_sec(self.r.presets.get_app_config()))
             setting = self.r.users.get_setting(user_id)
             night = self.r.nights.get_night_for_morning(user_id, s.session_date)
             plan = self.ai.compose_content_steps(s.content_type, s.content_option, duration, s.session_date,

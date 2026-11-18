@@ -32,7 +32,19 @@ PERSONALITIES = ("KIND", "FRIENDLY", "STRICT", "CHEERFUL")
 SPEECH_TO_PERSONALITY = {"KIND": "KIND", "FRIENDLY": "FRIENDLY", "FIRM": "STRICT"}   # 예전 앱이 speech_style만 보낼 때
 INTENSITIES = (1, 2, 3)                          # 깨우는 말의 강도 1 약 / 2 중 / 3 강
 ENGLISH_LEVELS = ("BEGINNER", "INTERMEDIATE")
-STRETCH_AREAS = ("FULL", "NECK_SHOULDER", "ARM_WRIST", "BACK_HIP", "LEG")
+# 11/18 AI stretch_sets: 부위 12개 (ai.tasks.stretch_sets.AREAS와 같게)
+STRETCH_AREAS = ("FULL", "NECK", "SHOULDER", "CHEST_BACK", "WRIST_HAND", "ELBOW_ARM",
+                 "LOW_BACK", "PELVIS", "GLUTE", "THIGH", "CALF", "ANKLE_FOOT")
+# 11/13~17에 쓰던 부위 5개 → 가까운 새 부위 (ai.tasks.stretch_sets.LEGACY_AREAS와 같게).
+# 예전 앱이 보내면 바꿔 읽고, 이미 저장된 세션 값은 그대로 둔다
+LEGACY_STRETCH_AREAS = {"NECK_SHOULDER": "NECK", "ARM_WRIST": "WRIST_HAND", "BACK_HIP": "LOW_BACK", "LEG": "THIGH"}
+STRETCH_AREA_INPUTS = STRETCH_AREAS + tuple(LEGACY_STRETCH_AREAS)   # 요청에서 받는 값
+STRETCH_DURATION_SEC = 180          # 스트레칭 콘텐츠 합계(11/18 AI: 4단계 × 45초). 영어·퀴즈 등은 CONTENT_DURATION_SEC
+
+
+def normalize_stretch_area(area: str) -> str:
+    """옛 부위 값을 새 부위로 (새 값은 그대로)."""
+    return LEGACY_STRETCH_AREAS.get(area, area)
 VOICE_TYPES = ("FEMALE", "MALE", "NEUTRAL")
 THEMES = ("LIGHT", "DARK", "SYSTEM")
 MUSIC_GENRES = ("POP", "JAZZ", "CLASSIC", "DANCE", "ACOUSTIC")
