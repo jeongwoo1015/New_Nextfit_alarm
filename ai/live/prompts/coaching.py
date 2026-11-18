@@ -16,13 +16,13 @@ STEP_RULES = """[{label}]를 번호 순서대로 한 번에 하나씩 안내하�
 - 한 번의 안내에는 단계 하나만 담는다. 사용자의 답을 듣기 전에는 다음 단계를 안내하지 않는다.
 - 사용자가 그 단계에 대해 직접 말하기 전에는 report_step_result를 호출하지 않는다. 대화 시작 신호는 사용자의 답이 아니다.
 - report_step_result는 한 번의 응답에서 방금 사용자가 직접 답한 그 단계에 대해서만, 한 번만 호출한다(아래 '전체 건너뛰기'만 예외). 다음 단계를 안내하는 같은 응답에서 그 다음 단계를 미리 판정하거나 미리 안내하지 않는다.
-- 한 번의 안내는 최대 2문장이다: ① 직전 단계에 대한 짧은 반응(첫 단계이거나 필요 없으면 생략) ② 단계 이름과 시간, 답하는 방법을 합친 한 문장.
-- 첫 번째 단계에서만 전체 안내를 한다: 마치면 '했어요', 어려우면 '못 했어요'라고 말해 달라고 한다. 두 번째 단계부터는 "끝나면 '했어요'라고 말씀해 주세요"처럼 짧게만 말한다. {resume_line}
+- 한 번의 안내는 최대 2문장이다: ① 직전 단계에 대한 짧은 반응(첫 단계이거나 필요 없으면 생략) ② 단계 이름과 시간을 담은 한 문장. 그 뒤에 붙이는 '대답 안내 문장'은 이 문장 수에 넣지 않는다.
+- 첫 번째 단계에서만 전체 안내를 한다: 마치면 '했어요', 어려우면 '못 했어요'라고 말해 달라고 한다. 두 번째 단계부터는 아래 '대답 안내 문장'만 짧게 붙인다. {resume_line}
 - 사용자는 방금 잠에서 깬 상태일 수 있다. 짧고 또렷하게 말하고, 바로 몸을 움직여야 하는 행동을 먼저 말한다.
 - 단계에 적힌 내용 밖의 팁·준비물·목적을 덧붙이지 않는다. 사용자가 말하지 않은 이유나 상황(바쁘다, 시간이 없다 등)을 추측하지 않는다.
 - 수행하지 못했거나 건너뛴 단계는 탓하지 않고 가볍게 넘어간다. 안내가 끝난 단계를 다시 안내하지 않는다.
 - [고정 스크립트]가 있으면 순서와 내용을 바꾸거나 동작을 추가하지 않고 그대로 안내한다. 동작별로 줄을 나누어 말하듯 읽는다. 스크립트는 해요체로 적혀 있으므로 반말 설정이면 내용·숫자·순서는 그대로 두고 문장 끝만 반말로 바꿔 읽는다.
-- 대답하는 방법을 알려 줄 때도 어조에 맞춘다: 존댓말이면 "'했어요'라고 말해 주세요", 반말이면 "'했어'라고 말해 줘". 한 문장 안에서 존댓말과 반말을 섞지 않는다.
+- 대답 안내 문장(PLAY 단계의 모든 안내는 반드시 이 문장으로 끝낸다): 존댓말이면 정확히 "끝나면 '했어요'라고 말씀해 주세요.", 반말이면 정확히 "끝나면 '했어'라고 말해 줘."다. 첫 번째 단계는 "끝나면 '했어요', 어려우면 '못 했어요'라고 말씀해 주세요."(반말: "끝나면 '했어', 어려우면 '못 했어'라고 말해 줘.")로 끝낸다. 앱이 이 문장의 '라고 말'을 보고 안내가 끝났음을 알아보므로, '말씀해 주세요'만 쓰거나 '라고 해 주세요'로 바꾸거나 빼지 않고, 이 문장 뒤에 아무 말도 덧붙이지 않는다. PLAY 단계의 [고정 스크립트] 끝에 이 문장이 이미 붙어 있으니 스크립트를 마지막 문장까지 그대로 읽는다. 한 문장 안에서 존댓말과 반말을 섞지 않는다.
 
 응답 유형:
 - PLAY(따라 하기): 단계를 안내하고, 사용자가 끝났다고 말하면 판정한다.
@@ -110,7 +110,7 @@ STRETCH_RULES = """스트레칭 진행:
 - 첫 동작을 안내할 때만 안전 한마디를 먼저 한다: {safety} (이어서 하는 중이면 생략)
 - 모든 단계는 동작 이름만 말하지 말고 [고정 스크립트]의 문장을 처음부터 끝까지 읽어 방법을 알려 준다(위 '한 번의 안내는 최대 2문장, 단계 이름과 시간' 규칙의 예외: 직전 반응 한마디 + 스크립트 전체 + 대답 방법). 동작을 더하거나 강도를 높이지 않고, 말한 초와 횟수를 지킨다. 자세(누워서·앉아서·서서)는 스크립트에 적힌 대로만 바꾼다.
 - 사용자가 아프거나 불편하다고 하거나 건너뛰겠다고 하면, 같은 응답에서 방금 안내한 단계를 skipped로 기록하고(어느 부위가 아프다고 하든 방금 안내한 단계로 본다) 무리하지 않아도 된다고 짧게 말한 뒤 다음 단계를 안내한다. 계속 아프면 병원에서 확인해 보라고 한 번만 말한다.
-- 효과, 치료, 진단 같은 의학적인 말을 하지 않는다. 마치면 '했어요'(반말이면 '했어')라고 말해 달라고 안내한다."""
+- 효과, 치료, 진단 같은 의학적인 말을 하지 않는다. 모든 동작 안내의 맨 끝은 위 '대답 안내 문장'으로 끝낸다(스크립트 끝에 비슷한 말이 있어도 이 문장으로 끝낸다)."""
 STRETCH_SAFETY = {"FORMAL": "\"누워서 천천히 시작해요. 아프거나 저리면 바로 멈추세요.\"", "CASUAL": "\"누워서 천천히 시작하자. 아프거나 저리면 바로 멈춰.\""}
 
 # 부위 고르기(11/12 회의): 서버가 5개 루틴을 넘긴 날에만 붙는다
@@ -137,7 +137,8 @@ def stretch_rules(inp: CoachingInput) -> str:
 def routines_block(inp: CoachingInput) -> str:
     parts = []
     for area, steps in inp.stretch_routines:
-        parts.append(f"({area} {AREA_NAMES.get(area, area)})\n" + "\n".join(step_line(s) for s in steps))
+        parts.append(f"({area} {AREA_NAMES.get(area, area)})\n"
+                     + "\n".join(step_line(s, answer_guide(inp.persona.tone, i == 0 and not inp.resumed)) for i, s in enumerate(steps)))
     return "[부위별 스트레칭 루틴]\n" + "\n\n".join(parts)
 
 
@@ -198,16 +199,30 @@ def _duration(sec: int | None) -> str:
     return f", {m}분" + (f" {r}초" if r else "") if m else f", {sec}초"
 
 
-def step_line(s: Step) -> str:
+# PLAY(따라 하기) 단계의 [고정 스크립트] 끝에 붙이는 대답 안내 문장. 규칙으로만 시키면 3~5번째 동작에서 자주 빠졌고(11/18 시험), 앱은 이 문장의
+# '라고 말'을 보고 함수 호출 뒤 이어 말하기를 막는다(MorningChatScreen.kt GUIDE_SPOKEN). 모델은 스크립트를 그대로 읽으므로 스크립트에 넣는다.
+ANSWER_GUIDE = {"FORMAL": "끝나면 '했어요'라고 말씀해 주세요.", "CASUAL": "끝나면 '했어'라고 말해 줘."}
+ANSWER_GUIDE_FIRST = {"FORMAL": "끝나면 '했어요', 어려우면 '못 했어요'라고 말씀해 주세요.", "CASUAL": "끝나면 '했어', 어려우면 '못 했어'라고 말해 줘."}
+
+
+def answer_guide(tone: str, first: bool = False) -> str:
+    table = ANSWER_GUIDE_FIRST if first else ANSWER_GUIDE
+    return table.get(tone, table["FORMAL"])
+
+
+def step_line(s: Step, guide: str = "") -> str:
     minutes = _duration(s.planned_sec)
     line = f"{s.order}. {clean(s.name, 40)} ({s.response_type}{minutes})"
     if s.script:
-        line += f"\n   [고정 스크립트] {s.script.strip()[:600]}"
+        script = s.script.strip()[:600]
+        if guide and s.response_type == "PLAY" and "라고 말" not in script:
+            script = f"{script} {guide}"
+        line += f"\n   [고정 스크립트] {script}"
     return line
 
 
-def steps_block(label: str, steps) -> str:
-    return f"[{label}]\n" + "\n".join(step_line(s) for s in steps)
+def steps_block(label: str, steps, tone: str = "FORMAL", resumed: bool = False) -> str:
+    return f"[{label}]\n" + "\n".join(step_line(s, answer_guide(tone, i == 0 and not resumed)) for i, s in enumerate(steps))
 
 
 def coaching_prompt(inp: CoachingInput) -> str:
@@ -215,7 +230,7 @@ def coaching_prompt(inp: CoachingInput) -> str:
     kind = content_kind(inp)
     area_mode = kind == "STRETCH" and bool(inp.stretch_routines)
     label = "고른 부위의 스트레칭 루틴" if area_mode else ("오늘 콘텐츠 단계" if content else "오늘 코칭 단계")
-    steps = routines_block(inp) if area_mode else steps_block(label, inp.steps)
+    steps = routines_block(inp) if area_mode else steps_block(label, inp.steps, inp.persona.tone, inp.resumed)
     plan = resolve_plan(inp, COACHING)
     name = (content_label(inp) or "오늘의 콘텐츠") if content else "아침 루틴"
     return join_blocks(
