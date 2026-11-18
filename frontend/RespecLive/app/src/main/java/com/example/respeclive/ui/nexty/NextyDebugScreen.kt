@@ -101,7 +101,7 @@ private fun FortuneDemo() {
         }
         Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Label("종류")
-            ChipRow(listOf(Choice("COOKIE", "포춘쿠키"), Choice("HOROSCOPE", "오늘의 운세")), style) { style = it }
+            ChipRow(listOf(Choice("COOKIE", "포춘쿠키"), Choice("HOROSCOPE", "오늘의 포춘(운세)")), style) { style = it }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                 TextButton(onClick = { opened = true }, enabled = !opened) { Text("깨기", fontSize = 14.sp) }
                 Spacer(Modifier.width(12.dp))

@@ -740,6 +740,8 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     val currentStep = items.firstOrNull { !it.done && !it.skipped && (it.stepOrder ?: 0) > heldShown }?.takeUnless { choosingArea }
     val currentTitle = currentStep?.title
     val contentType = RoutineRepository.session?.contentType
+    // 끝말잇기는 정답·오답이 없는 게임이라 넥스티 말로 O / X를 추측하지 않음
+    val isWordChain = RoutineRepository.session?.contentOption == "WORDCHAIN"
 
     // 단계 타이머: AI가 코칭 안내를 시작한 뒤, 단계가 바뀔 때마다 그 단계의 계획 시간부터 줄어듦 (계획 시간이 없으면 없음)
     var stepStartMs by remember { mutableLongStateOf(0L) }
@@ -788,7 +790,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     // (말이 끝나기 전에도 분명한 표현이면 바로 반응)
     var judgedAt by remember { mutableLongStateOf(-1L) }
     LaunchedEffect(lines, aiSpeaking) {
-        if (quizByTool || contentType != "QUIZ" || !coachingStarted || lines.size < 2) return@LaunchedEffect
+        if (quizByTool || contentType != "QUIZ" || isWordChain || !coachingStarted || lines.size < 2) return@LaunchedEffect
         val line = lines.last()
         if (line.atMs == judgedAt || line.role != LiveClient.Role.Assistant || lines[lines.lastIndex - 1].role != LiveClient.Role.User) {
             return@LaunchedEffect

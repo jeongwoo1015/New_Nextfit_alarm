@@ -5,16 +5,18 @@ enum class AlarmType(val route: String) {
     BEDTIME("nightCall")     // 굿나잇콜 수신 화면
 }
 
-/** 테마 = 콘텐츠 종류 (서버 content_type → 화면 이름). 고르면 콘텐츠 알람, 안 고르면 루틴 알람. 명상·퀴즈는 예전에 만든 알람 표시용 */
-val THEMES = listOf("EXERCISE" to "스트레칭", "LANGUAGE" to "영어", "MEDITATION" to "명상", "QUIZ" to "퀴즈")
+/** 테마 = 콘텐츠 종류 (서버 content_type → 화면 이름). 고르면 콘텐츠 알람, 안 고르면 루틴 알람. 명상은 예전에 만든 알람 표시용.
+ *  QUIZ는 11/17 회의로 화면 이름을 "게임"으로 (서버 코드는 그대로 QUIZ) */
+val THEMES = listOf("EXERCISE" to "스트레칭", "LANGUAGE" to "영어", "MEDITATION" to "명상", "QUIZ" to "게임")
 
 fun themeLabel(code: String?): String? = THEMES.firstOrNull { it.first == code }?.second
 
 /**
- * 알람을 만들 때 고를 수 있는 아침 콘텐츠: 스트레칭·영어 (11/12 회의, AI CONTRACTS B17).
- * 명상·마사지·일본어·중국어는 새 알람에서 뺐고 퀴즈는 보류. 이미 만든 알람은 그대로 동작함
+ * 알람을 만들 때 고를 수 있는 아침 콘텐츠: 스트레칭·영어 (11/12 회의, AI CONTRACTS B17)·게임 (11/17 회의).
+ * 게임은 회의에서 초성게임만 두기로 했지만 AI·서버에 아직 없어서, 그동안 끝말잇기로 엶.
+ * 명상·마사지·일본어·중국어는 새 알람에서 뺐음. 이미 만든 알람은 그대로 동작함
  */
-val MORNING_CONTENTS = listOf("EXERCISE" to "스트레칭", "LANGUAGE" to "영어")
+val MORNING_CONTENTS = listOf("EXERCISE" to "스트레칭", "LANGUAGE" to "영어", "QUIZ" to "게임")
 
 /**
  * 고를 수 있는 콘텐츠의 세부는 하나로 고정 (세부 선택 없음). 스트레칭 부위는 통화 중에 AI가 물어 정함
@@ -22,6 +24,7 @@ val MORNING_CONTENTS = listOf("EXERCISE" to "스트레칭", "LANGUAGE" to "영�
 fun fixedContentOption(type: String?): String? = when (type) {
     "EXERCISE" -> "STRETCH"
     "LANGUAGE" -> "ENGLISH"
+    "QUIZ" -> "WORDCHAIN"      // 초성게임이 생기면 바꿈
     else -> null
 }
 

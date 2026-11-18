@@ -153,7 +153,7 @@ private fun ReportTitle(progress: JSONObject?, contentType: String?) {
     val (title, sub) = when {
         done > 0 && done == total -> "오늘 아침도 해냈어요!" to when (contentType) {
             "EXERCISE" -> "스트레칭으로 몸까지 활짝 깨웠어요"
-            "QUIZ" -> "퀴즈로 머리까지 말끔하게 깨웠어요"
+            "QUIZ" -> "게임으로 머리까지 말끔하게 깨웠어요"
             "LANGUAGE" -> "오늘의 영어 문장까지 챙겼어요"
             else -> "오늘 아침 할 일을 모두 마쳤어요"
         }

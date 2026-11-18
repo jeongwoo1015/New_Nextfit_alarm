@@ -87,7 +87,7 @@ fun FortuneScene(
     onOpen: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val title = if (fortune?.isHoroscope == true) "오늘의 운세" else "오늘의 포춘"
+    val title = "오늘의 포춘"     // 운세 스타일도 "오늘의 포춘"으로 (11/18)
     // 쿠키가 갈라지고 쪽지가 드러난 뒤에 카드를 보여 줌
     val revealed by produceState(false, opened) {
         if (opened) {
@@ -123,7 +123,7 @@ fun FortuneScene(
                     FitText(
                         when {
                             fortune == null -> "넥스티가 포춘쿠키를 굽고 있어요"
-                            fortune.isHoroscope -> "오늘의 운세가 도착했어요"
+                            fortune.isHoroscope -> "오늘의 포춘이 도착했어요"
                             else -> "오늘의 포춘쿠키가 도착했어요"
                         },
                         color = RespecColors.Text,

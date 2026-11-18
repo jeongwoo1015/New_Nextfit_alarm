@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.*
@@ -50,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import com.example.respeclive.data.ApiClient
 import com.example.respeclive.data.DeviceLocation
 import com.example.respeclive.data.RespecApi
+import com.example.respeclive.data.fixedContentOption
 import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.launch
@@ -80,7 +82,7 @@ internal const val DEFAULT_INTENSITY = 2
 internal const val DEFAULT_ENGLISH_LEVEL = "BEGINNER"
 
 /** 자동 강도 올리기 설명 (온보딩·내 정보) */
-internal const val AUTO_INTENSITY_DESC = "잘 일어나지 못한 날이 이어지면 깨우는 강도를 알아서 한 단계씩 올려요"
+internal const val AUTO_INTENSITY_DESC = "잘 일어나지 못한 날이 이어지면 깨우는 강도를 알아서 한 단계씩 올려요."
 internal val VOICES = listOf(Choice("FEMALE", "여성 목소리"), Choice("MALE", "남성 목소리"), Choice("NEUTRAL", "중성적인 목소리"))
 internal val GENRES = listOf(
     Choice("POP", "팝"), Choice("JAZZ", "재즈"), Choice("CLASSIC", "클래식"), Choice("DANCE", "댄스"), Choice("ACOUSTIC", "어쿠스틱")
@@ -89,8 +91,10 @@ internal val GENRES = listOf(
 private data class ContentKind(val code: String, val label: String, val desc: String, val icon: ImageVector)
 
 private val CONTENTS = listOf(
-    ContentKind("EXERCISE", "스트레칭", "넥스티와 함께 몸을 깨우며 건강한 아침을 시작해요", Icons.Filled.Accessibility),
-    ContentKind("LANGUAGE", "영어", "매일 다른 영어 문장을 듣고 소리 내어 따라 읽어요", Icons.Filled.Translate),
+    ContentKind("EXERCISE", "스트레칭", "넥스티와 함께 몸을 깨우며 건강한 아침을 시작해요.", Icons.Filled.Accessibility),
+    ContentKind("LANGUAGE", "영어", "매일 다른 영어 문장을 듣고 소리 내어 따라 읽어요.", Icons.Filled.Translate),
+    // 11/17 회의: 퀴즈 → 게임. 초성게임이 AI·서버에 생기기 전까지 끝말잇기 (fixedContentOption)
+    ContentKind("QUIZ", "게임", "넥스티와 끝말잇기를 주고받으며 머리를 깨워요.", Icons.Filled.SportsEsports),
 )
 
 private val STEP_TITLES = listOf("기본 정보", "페르소나 설정", "아침 콘텐츠", "시작하기")
@@ -184,9 +188,15 @@ fun OnboardingScreen(onDone: () -> Unit) {
         submitError = null
         scope.launch {
             val ok = RespecApi.onboard(body)
+            // 온보딩은 첫 알람을 세부(content_option) 없이 만듦. 게임은 세부가 없으면 AI가 퀴즈 중 아무거나 고르므로 끝말잇기로 맞춤
+            if (ok) fixedContentOption(contentType)?.takeIf { contentType == "QUIZ" }?.let { option ->
+                RespecApi.alarms()
+                    ?.filter { it.optString("content_type") == "QUIZ" && it.optString("content_option").let { o -> o.isBlank() || o == "null" } }
+                    ?.forEach { RespecApi.updateAlarm(it.optString("alarm_id"), JSONObject().put("content_option", option)) }
+            }
             submitting = false
             when {
-                !ok -> submitError = ApiClient.lastError ?: "저장하지 못했어요. 다시 시도해 주세요"
+                !ok -> submitError = ApiClient.lastError ?: "저장하지 못했어요. 다시 시도해 주세요."
                 DeviceLocation.hasPermission(context) -> onDone()
                 else -> locationPermission.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
             }
