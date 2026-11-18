@@ -1062,8 +1062,8 @@ private fun TimerRing(
 }
 
 /**
- * 스트레칭 단계 이름에 맞는 넥스티 시범 동작. 넥스티 동작 이름이 AI 동작 이름(ai/tasks/stretch_sets.py MOVE_NAMES 23개)과
- * 같아서 단계 이름 전체로 찾음. 모르는 이름이면 전신 루틴 동작을 단계 순서대로 돌아가며 보여 줌
+ * 스트레칭 단계 이름에 맞는 넥스티 시범 동작. 넥스티 동작 이름이 AI 동작 이름(ai/tasks/stretch_sets.py MOVE_NAMES 34개)과
+ * 같아서 단계 이름 전체로 찾음. 모르는 이름(나중에 AI에 동작이 더 생긴 경우)이면 멈추지 않고 전신 루틴 동작을 단계 순서대로 돌아가며 보여 줌
  */
 private fun stretchMotionFor(name: String, order: Int): NextyMotion {
     val key = name.trim()
