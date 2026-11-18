@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ 시작 화면에 앱 아이콘(로고)을 띄우지 않음. 로고는 팝업 알림 왼쪽 용도로만 씀 -->
+    <style name="Theme.RespecLive" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+    </style>
+</resources>
