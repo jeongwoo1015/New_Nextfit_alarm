@@ -31,6 +31,7 @@ import com.example.respeclive.alarm.AlarmExtras
 import com.example.respeclive.alarm.AlarmLaunch
 import com.example.respeclive.alarm.AlarmNotifier
 import com.example.respeclive.alarm.AlarmScheduler
+import com.example.respeclive.alarm.BedtimeReminder
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.navigation.AppNavHost
@@ -154,6 +155,12 @@ class MainActivity : ComponentActivity() {
         val label = intent.getStringExtra(AlarmExtras.LABEL) ?: ""
 
         NotificationManagerCompat.from(this).cancel(id)
+        // 굿나잇콜 미리 알림 팝업을 눌러 지금 받음: 팝업을 내리고 곧 울릴 이번 굿나잇콜은 건너뜀
+        if (intent.getBooleanExtra(BedtimeReminder.EXTRA_FROM_REMINDER, false)) {
+            intent.removeExtra(BedtimeReminder.EXTRA_FROM_REMINDER)
+            AlarmRepository.init(this)
+            AlarmRepository.get(id)?.let { BedtimeReminder.answerNow(this, it) }
+        }
         launchRequest = AlarmLaunch(route = type.route, label = label, alarmId = id)
     }
 

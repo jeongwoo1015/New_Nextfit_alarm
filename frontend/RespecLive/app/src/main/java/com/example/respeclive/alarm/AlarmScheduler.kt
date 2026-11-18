@@ -53,10 +53,20 @@ object AlarmScheduler {
         return null
     }
 
+    /** 실제로 울릴 시각: 굿나잇콜은 팝업에서 +10분으로 미룬 시각(BedtimeReminder)이 있으면 그 시각 */
+    fun callTimeMillis(context: Context, alarm: Alarm, now: Long = System.currentTimeMillis()): Long? {
+        if (alarm.type != AlarmType.BEDTIME) return nextTriggerMillis(alarm, now)
+        val normal = nextTriggerMillis(alarm, now)
+        return BedtimeReminder.shiftedTime(context, alarm.id, normal, now) ?: normal
+    }
+
     fun schedule(context: Context, alarm: Alarm) {
         cancel(context, alarm.id)
-        if (!alarm.enabled) return
-        val trigger = nextTriggerMillis(alarm) ?: return
+        if (!alarm.enabled) {
+            if (alarm.type == AlarmType.BEDTIME) BedtimeReminder.forget(context, alarm.id)
+            return
+        }
+        val trigger = callTimeMillis(context, alarm) ?: return
         // 수신 화면에 보일 시각: 하루만 바꾼 날이면 바뀐 시각
         val cal = Calendar.getInstance().apply { timeInMillis = trigger }
         val label = Alarm.timeLabelOf(cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
@@ -70,6 +80,7 @@ object AlarmScheduler {
     }
 
     fun cancel(context: Context, id: Int) {
+        BedtimeReminder.cancelLegacy(context, id)
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val pi = PendingIntent.getBroadcast(
             context, id, Intent(context, AlarmReceiver::class.java),

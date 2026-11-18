@@ -59,6 +59,7 @@
         </activity>
 
         <receiver android:name=".alarm.AlarmReceiver" android:exported="false" />
+        <receiver android:name=".alarm.BedtimeReminderReceiver" android:exported="false" />
 
         <service
             android:name=".audio.SleepMusicService"

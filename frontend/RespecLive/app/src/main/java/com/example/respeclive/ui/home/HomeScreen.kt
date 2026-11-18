@@ -1,5 +1,7 @@
 package com.example.respeclive.ui.home
 
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -22,8 +24,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.respeclive.alarm.AlarmNotifier
 import com.example.respeclive.alarm.AlarmScheduler
+import com.example.respeclive.alarm.BedtimeReminder
 import com.example.respeclive.data.Alarm
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
@@ -31,7 +33,6 @@ import com.example.respeclive.data.WakeOverrides
 import com.example.respeclive.ui.theme.AppTheme
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.launch
-import java.util.Calendar
 
 @Composable
 fun HomeScreen(
@@ -117,37 +118,43 @@ fun HomeScreen(
                     ) {
                         Text("+ 나만의 알람 만들기", color = RespecColors.Purple, fontWeight = FontWeight.Bold)
                     }
-                    // 디버그 (나만의 알람 만들기 바로 아래): 넥스티 디버그 화면 / 지금 바로 모닝콜 받기
+                    // 디버그 (나만의 알람 만들기 바로 아래): 넥스티 디버그 화면 / 굿나잇콜 미리 알림 팝업
                     Row(Modifier.align(Alignment.CenterHorizontally)) {
                         TextButton(onClick = onOpenDebug) {
                             Text("디버그", color = RespecColors.TextSub, fontSize = 13.sp)
                         }
                         TextButton(onClick = {
-                            // 다음에 울릴 모닝콜 알람(켜진 것 우선)으로 수신 화면을 바로 엶. 수신 화면의 시각은 지금 시각
-                            val wake = alarms.firstOrNull { it.type == AlarmType.WAKE }
-                            if (wake == null) {
-                                Toast.makeText(context, "모닝콜 알람을 먼저 만들어 주세요", Toast.LENGTH_SHORT).show()
+                            // 굿나잇콜 시각이 된 것처럼 팝업을 5초 뒤에 띄움 (앱 밖에서 뜨는지 보도록)
+                            val bedtime = alarms.firstOrNull { it.type == AlarmType.BEDTIME && it.enabled }
+                            if (bedtime == null) {
+                                Toast.makeText(context, "켜진 굿나잇콜 알람을 먼저 만들어 주세요", Toast.LENGTH_SHORT).show()
                             } else {
-                                val now = Calendar.getInstance()
-                                val label = Alarm.timeLabelOf(now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE))
-                                AlarmNotifier.ringNow(context, wake.id, AlarmType.WAKE.name, label)
+                                val app = context.applicationContext
+                                Toast.makeText(context, "5초 뒤에 굿나잇콜 알림이 떠요. 앱 밖으로 나가 보세요", Toast.LENGTH_SHORT).show()
+                                Handler(Looper.getMainLooper()).postDelayed({ BedtimeReminder.ringNow(app, bedtime) }, 5_000L)
                             }
                         }) {
-                            Text("모닝콜 받기", color = RespecColors.TextSub, fontSize = 13.sp)
+                            Text("굿나잇콜 알림", color = RespecColors.TextSub, fontSize = 13.sp)
                         }
                     }
                     // 떠 있는 대화 버튼이 마지막 카드의 스위치를 가리지 않도록 버튼 높이만큼 비워 둠
                     Spacer(Modifier.height(72.dp))
                 }
 
-                // 누르면 넥스티 전화가 걸려 오는 화면으로 (밤엔 굿나잇 대화, 낮엔 넥스티와 대화)
+                // 누르면 넥스티 전화가 걸려 오는 화면으로.
+                // 밝은 테마는 남색 버튼, 다크 테마는 남색 배경과 구분되도록 노란 주요 버튼 색 (남색 버튼은 배경에 묻혔음)
+                val dark = AppTheme.isDark
+                val fabContainer = if (dark) RespecColors.Button else RespecColors.Banner
+                val fabContent = if (dark) RespecColors.OnButton else RespecColors.OnBanner
                 ExtendedFloatingActionButton(
                     text = { Text("굿나잇콜", fontWeight = FontWeight.Bold) },
-                    icon = { Icon(Icons.Filled.Bedtime, contentDescription = null, tint = RespecColors.Sun) },
+                    icon = {
+                        Icon(Icons.Filled.Bedtime, contentDescription = null, tint = if (dark) fabContent else RespecColors.Sun)
+                    },
                     onClick = onStartNightChat,
                     expanded = fabExpanded,
-                    containerColor = RespecColors.Banner,
-                    contentColor = RespecColors.OnBanner,
+                    containerColor = fabContainer,
+                    contentColor = fabContent,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(bottom = 16.dp)

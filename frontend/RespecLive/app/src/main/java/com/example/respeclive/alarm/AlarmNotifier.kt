@@ -79,7 +79,7 @@ object AlarmNotifier {
         context.startActivity(launchIntent(context, id, type, label))
     }
 
-    private fun launchIntent(context: Context, id: Int, type: String, label: String) =
+    internal fun launchIntent(context: Context, id: Int, type: String, label: String) =
         Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra(AlarmExtras.FROM_ALARM, true)
