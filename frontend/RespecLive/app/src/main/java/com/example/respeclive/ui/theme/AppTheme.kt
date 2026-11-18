@@ -22,7 +22,8 @@ data class SunTimes(val riseMinute: Int, val setMinute: Int) {
 }
 
 /**
- * 앱 테마. 선택은 기기에 저장함 (SharedPreferences).
+ * 앱 테마. 선택은 기기(SharedPreferences)와 서버 설정(PATCH /settings의 theme)에 저장하고,
+ * 앱을 시작할 때 서버 값으로 맞춤 (서버에 연결되지 않으면 기기 값).
  * 자동: 해가 떠 있으면 라이트, 진 뒤에는 다크. 위치는 기기가 마지막으로 알던 위치, 권한이나 위치가 없으면 서울 기준.
  */
 object AppTheme {
@@ -54,6 +55,15 @@ object AppTheme {
         mode = selected
         refresh(context)
     }
+
+    /** 서버 설정의 theme 값(LIGHT / DARK / AUTO, 11/18 전의 SYSTEM = AUTO)을 기기에 맞춤. 모르는 값이면 그대로 둠 */
+    fun applyServer(context: Context, theme: String?) {
+        val server = fromCode(theme) ?: return
+        if (server != mode) select(context, server)
+    }
+
+    private fun fromCode(code: String?): ThemeMode? =
+        if (code == "SYSTEM") ThemeMode.AUTO else ThemeMode.entries.firstOrNull { it.name == code }
 
     /** 지금 시각 기준으로 테마를 맞추고, 다음에 확인할 때까지 남은 시간(ms)을 돌려줌 */
     fun refresh(context: Context): Long {

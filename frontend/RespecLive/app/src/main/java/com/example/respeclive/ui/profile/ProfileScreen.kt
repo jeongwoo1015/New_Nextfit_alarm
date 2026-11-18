@@ -60,6 +60,7 @@ private const val FIELD_INTENSITY = "intensity"
 private const val FIELD_AUTO_INTENSITY = "auto_intensity"
 private const val FIELD_ENGLISH_LEVEL = "english_level"
 private const val FIELD_VOICE = "voice_type"
+private const val FIELD_THEME = "theme"
 
 /** 기본 정보(PATCH /users/me)에 저장하는 항목. 나머지는 페르소나(PATCH /settings) */
 private val USER_FIELDS = setOf("user_name", FIELD_BIRTH, "gender")
@@ -171,8 +172,14 @@ fun ProfileScreen() {
                 }
 
                 SectionTitle("화면 테마")
+                // 화면은 바로 바꾸고 서버에 저장. 저장이 안 되면 기기에는 남기고 알림만 (다음 시작 때 서버 값으로 돌아갈 수 있음)
                 ChipRow(ThemeMode.entries.map { Choice(it.name, it.label) }, AppTheme.mode.name) { code ->
                     AppTheme.select(context, ThemeMode.valueOf(code))
+                    scope.launch {
+                        if (!save(FIELD_THEME, code)) {
+                            Toast.makeText(context, ApiClient.lastError ?: "테마를 서버에 저장하지 못했어요", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 }
                 if (AppTheme.mode == ThemeMode.AUTO) {
                     val sun = AppTheme.sun

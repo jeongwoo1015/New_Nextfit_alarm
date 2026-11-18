@@ -13,6 +13,7 @@ import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -40,6 +41,7 @@ import com.example.respeclive.ui.profile.ProfileScreen
 import com.example.respeclive.ui.report.ReportScreen
 import com.example.respeclive.ui.routine.RoutineScreen
 import com.example.respeclive.ui.settings.SettingsScreen
+import com.example.respeclive.ui.theme.AppTheme
 import com.example.respeclive.ui.start.StartScreen
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.delay
@@ -73,10 +75,13 @@ fun AppNavHost(
     launch: AlarmLaunch? = null,
     onLaunchHandled: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     var needOnboarding by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(Unit) {
         val profile = withTimeoutOrNull(8_000) { RespecApi.profile() }
         needOnboarding = profile != null && !profile.optBoolean("onboarding_done", true)
+        // 다른 기기에서 바꾼 테마도 따라가도록 서버 설정 값으로 맞춤
+        profile?.optJSONObject("setting")?.optString("theme")?.let { AppTheme.applyServer(context, it) }
     }
     // 서버 응답이 빨라도 시작 화면이 보이도록 잠깐 유지. 알람으로 열렸으면 기다리지 않음
     var startShown by remember { mutableStateOf(launch != null) }

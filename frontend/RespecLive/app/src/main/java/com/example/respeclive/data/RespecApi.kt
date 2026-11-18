@@ -48,7 +48,7 @@ object RespecApi {
     }
 
     /**
-     * 페르소나 수정 (user_call_name, tone, personality, intensity, auto_intensity, english_level, voice_type, music_genre 중
+     * 설정 수정 (user_call_name, tone, personality, intensity, auto_intensity, english_level, voice_type, music_genre, theme 중
      * 보낸 항목만) → SettingOut
      */
     suspend fun updateSetting(changes: JSONObject): JSONObject? {
@@ -71,14 +71,14 @@ object RespecApi {
 
     // ---------------- 알람 ----------------
 
-    /** 내 알람 목록 (AlarmOut: alarm_id, alarm_time "HH:MM", repeat_days "1111100", label, alarm_mode, morning_call_type, ...) */
+    /** 내 알람 목록 (AlarmOut: alarm_id, alarm_time "HH:MM", repeat_days "1111100", label, alarm_mode, alarm_kind WAKE/BEDTIME, morning_call_type, ...) */
     suspend fun alarms(): List<JSONObject>? {
         val r = ApiClient.get("/alarms") ?: return null
         val arr = if (r.ok) r.array() else null
         return arr?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }
     }
 
-    /** 알람 만들기 (morning_call_type 필수, 루틴이면 template_id, 콘텐츠면 content_type) → AlarmOut */
+    /** 알람 만들기 (모닝콜: morning_call_type 필수, 루틴이면 template_id, 콘텐츠면 content_type / 굿나잇콜: alarm_kind BEDTIME과 시각만) → AlarmOut */
     suspend fun createAlarm(body: JSONObject): JSONObject? {
         val r = ApiClient.post("/alarms", body) ?: return null
         return if (r.ok) r.json() else null
@@ -164,10 +164,10 @@ object RespecApi {
 
     /**
      * 서버와 연결되지 않은 로컬 알람(동기화 전)에 대응하는 서버 alarm_id.
-     * 시각이 같은 켜진 알람을 먼저 찾고, 없으면 첫 번째 켜진 알람.
+     * 시각이 같은 켜진 모닝콜 알람을 먼저 찾고, 없으면 첫 번째 켜진 모닝콜 알람 (굿나잇콜로는 모닝콜을 시작할 수 없음).
      */
     private suspend fun serverAlarmId(hour: Int?, minute: Int?): String? {
-        val alarms = alarms()?.filter { it.optBoolean("enabled", true) } ?: return null
+        val alarms = alarms()?.filter { it.optBoolean("enabled", true) && it.optString("alarm_kind", "WAKE") != "BEDTIME" } ?: return null
         val hhmm = if (hour != null && minute != null) "%02d:%02d".format(hour, minute) else null
         val match = alarms.firstOrNull { hhmm != null && it.optString("alarm_time") == hhmm } ?: alarms.firstOrNull()
         return match?.optString("alarm_id")?.takeIf { it.isNotBlank() }
@@ -252,7 +252,8 @@ object RespecApi {
 
     /**
      * 코칭 중 select_stretch_area 전달: 아직 판정하지 않은 단계를 그 부위 루틴으로 바꿈 → SessionViewOut.
-     * area: FULL / NECK_SHOULDER / ARM_WRIST / BACK_HIP / LEG. 이미 판정한 단계가 있거나 부위를 골랐으면 409 → null
+     * area: AI가 고른 값을 그대로 보냄 (11/18부터 12개: FULL / NECK / SHOULDER / CHEST_BACK / WRIST_HAND / ELBOW_ARM / LOW_BACK /
+     * PELVIS / GLUTE / THIGH / CALF / ANKLE_FOOT, 옛 5개 값은 서버가 바꿔 읽음). 이미 판정한 단계가 있거나 부위를 골랐으면 409 → null
      */
     suspend fun selectStretchArea(sessionId: String, area: String): JSONObject? {
         val r = ApiClient.post("/morning/sessions/$sessionId/stretch-area", JSONObject().put("area", area)) ?: return null
