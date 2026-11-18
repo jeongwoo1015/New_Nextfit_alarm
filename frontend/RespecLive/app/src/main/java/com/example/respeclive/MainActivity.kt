@@ -1,15 +1,11 @@
 package com.example.respeclive
 
 import android.Manifest
-import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import android.view.WindowManager
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -35,6 +31,7 @@ import com.example.respeclive.alarm.BedtimeReminder
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.navigation.AppNavHost
+import com.example.respeclive.ui.common.StartupPermissions
 import com.example.respeclive.ui.theme.AppTheme
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.delay
@@ -45,10 +42,10 @@ private const val MAX_FONT_SCALE = 1.2f
 class MainActivity : ComponentActivity() {
 
     private var launchRequest by mutableStateOf<AlarmLaunch?>(null)
-    private var askedFullScreenIntent = false
+    private var notificationDenied by mutableStateOf(false)   // 알림 권한 창에서 거절 → 영향 안내
 
     private val notificationPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (!granted) notificationDenied = true }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -101,6 +98,12 @@ class MainActivity : ComponentActivity() {
                         launch = launchRequest,
                         onLaunchHandled = { launchRequest = null }
                     )
+                    // 앱 시작 때 전체 화면 알림·다른 앱 위에 표시를 묻고, 거절하면 영향을 알려 줌 (알람으로 열린 수신 화면에서는 띄우지 않음)
+                    StartupPermissions(
+                        enabled = launchRequest == null,
+                        notificationDenied = notificationDenied,
+                        onNotificationExplained = { notificationDenied = false }
+                    )
                 }
             }
         }
@@ -125,16 +128,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         AppTheme.refresh(applicationContext)   // 앱을 다시 열었을 때 그사이 해가 뜨거나 졌을 수 있음
-        if (Build.VERSION.SDK_INT >= 34 && !askedFullScreenIntent) {
-            val nm = getSystemService(NotificationManager::class.java)
-            if (!nm.canUseFullScreenIntent()) {
-                askedFullScreenIntent = true
-                Toast.makeText(this, "잠금화면에서 알람이 뜨도록 '전체 화면 알림'을 허용해 주세요", Toast.LENGTH_LONG).show()
-                startActivity(
-                    Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName"))
-                )
-            }
-        }
     }
 
     override fun onStop() {
