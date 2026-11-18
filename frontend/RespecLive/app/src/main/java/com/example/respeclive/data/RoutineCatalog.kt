@@ -31,10 +31,14 @@ object RoutineCatalog {
         val activeItems: List<Item> get() = items.filter { it.durationSec > 0 }
     }
 
-    data class Limits(val routineMaxSec: Int, val stepSec: Int, val contentSec: Int)
+    /** contentSec: 영어·게임 콘텐츠 알람 시간, stretchSec: 스트레칭(EXERCISE)만 (11/18, 4단계 × 45초) */
+    data class Limits(val routineMaxSec: Int, val stepSec: Int, val contentSec: Int, val stretchSec: Int) {
+        /** 콘텐츠 종류별 고정 시간 */
+        fun contentSecFor(contentType: String?): Int = if (contentType == "EXERCISE") stretchSec else contentSec
+    }
 
     /** 서버에서 받기 전 기본값 (codes.py와 같은 값) */
-    var limits by mutableStateOf(Limits(routineMaxSec = 900, stepSec = 30, contentSec = 300))
+    var limits by mutableStateOf(Limits(routineMaxSec = 900, stepSec = 30, contentSec = 300, stretchSec = 180))
         private set
 
     /** TEMPLATE_ID → TEMPLATE_NAME */
@@ -74,7 +78,8 @@ object RoutineCatalog {
             limits = Limits(
                 routineMaxSec = o.optInt("routine_max_sec", limits.routineMaxSec),
                 stepSec = o.optInt("duration_step_sec", limits.stepSec),
-                contentSec = o.optInt("content_duration_sec", limits.contentSec)
+                contentSec = o.optInt("content_duration_sec", limits.contentSec),
+                stretchSec = o.optInt("stretch_duration_sec", limits.stretchSec)
             )
         }
         limitsLoaded = true

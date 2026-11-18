@@ -179,7 +179,7 @@ object RoutineRepository {
         if (alarm.isContent) return listOf(
             Routine(
                 listOfNotNull(alarm.themeLabel ?: "콘텐츠", alarm.contentOptionLabel).joinToString(" · "),
-                durationSec = RoutineCatalog.limits.contentSec
+                durationSec = RoutineCatalog.limits.contentSecFor(alarm.contentType)
             )
         )
         alarm.templateId?.let { RoutineCatalog.ensurePreset(it) }

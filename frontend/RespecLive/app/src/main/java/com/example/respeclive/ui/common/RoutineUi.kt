@@ -10,7 +10,7 @@ import com.example.respeclive.data.durationText
  */
 fun alarmSummary(alarm: Alarm): String {
     val parts = if (alarm.isContent) {
-        listOfNotNull(alarm.themeLabel, alarm.contentOptionLabel, durationText(RoutineCatalog.limits.contentSec))
+        listOfNotNull(alarm.themeLabel, alarm.contentOptionLabel, durationText(RoutineCatalog.limits.contentSecFor(alarm.contentType)))
     } else {
         val routine = alarm.serverId?.let { RoutineCatalog.routines[it] }
         listOfNotNull(
