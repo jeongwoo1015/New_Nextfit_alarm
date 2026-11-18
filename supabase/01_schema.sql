@@ -28,6 +28,7 @@ create table if not exists rs_app_config (
   config_id             boolean primary key default true check (config_id),
   routine_max_sec       int not null default 900 check (routine_max_sec > 0),
   content_duration_sec  int check (content_duration_sec is null or content_duration_sec > 0),  -- 콘텐츠 고정 시간 (팀 확정 후)
+  stretch_duration_sec  int not null default 180 check (stretch_duration_sec > 0),             -- 스트레칭만 3분 (영어·게임은 위 값)
   updated_at            timestamptz not null default now()
 );
 insert into rs_app_config default values on conflict (config_id) do nothing;
@@ -69,8 +70,8 @@ create table if not exists rs_user_setting (
   sleep_time           time not null default '23:00',
   music_genre          varchar(30) not null
                        check (music_genre in ('POP', 'JAZZ', 'CLASSIC', 'DANCE', 'ACOUSTIC')),
-  theme                varchar(10) not null default 'SYSTEM'
-                       check (theme in ('LIGHT', 'DARK', 'SYSTEM')),
+  theme                varchar(10) not null default 'AUTO'   -- AUTO = 해가 떠 있으면 라이트, 지면 다크
+                       constraint rs_setting_theme check (theme in ('LIGHT', 'DARK', 'AUTO')),
   app_language         varchar(10) not null default 'ko',
   updated_at           timestamptz not null default now()
 );
@@ -115,18 +116,24 @@ create table if not exists rs_alarm (
   label              varchar(20),
   alarm_mode         varchar(20) not null default 'ON_TIME'
                      check (alarm_mode in ('ON_TIME', 'BEFORE_10', 'BEFORE_30')),
-  morning_call_type  varchar(10) not null check (morning_call_type in ('ROUTINE', 'CONTENT')),
+  alarm_kind         varchar(10) not null default 'WAKE'   -- WAKE 모닝콜 / BEDTIME 굿나잇콜
+                     constraint rs_alarm_kind check (alarm_kind in ('WAKE', 'BEDTIME')),
+  morning_call_type  varchar(10) check (morning_call_type in ('ROUTINE', 'CONTENT')),   -- 굿나잇콜은 비움
   template_id        uuid references rs_routine_template(template_id) on delete restrict,
   content_type       varchar(20) check (content_type in ('MEDITATION', 'EXERCISE', 'LANGUAGE', 'QUIZ')),
-  content_option     varchar(30),   -- 값 목록은 팀 확정 후 CHECK 추가
+  content_option     varchar(30),   -- 값 목록이 바뀔 수 있어 CHECK 없음
   enabled            boolean not null default true,
   created_at         timestamptz not null default now(),
   updated_at         timestamptz not null default now(),
   constraint rs_alarm_type_fields check (
-    (morning_call_type = 'ROUTINE' and template_id is not null
-       and content_type is null and content_option is null)
+    (alarm_kind = 'WAKE' and (
+       (morning_call_type = 'ROUTINE' and template_id is not null
+          and content_type is null and content_option is null)
+       or
+       (morning_call_type = 'CONTENT' and content_type is not null and template_id is null)))
     or
-    (morning_call_type = 'CONTENT' and content_type is not null and template_id is null)
+    (alarm_kind = 'BEDTIME' and morning_call_type is null and template_id is null
+       and content_type is null and content_option is null and alarm_mode = 'ON_TIME')
   )
 );
 create index if not exists idx_alarm_user on rs_alarm (user_id);
@@ -313,8 +320,11 @@ create table if not exists rs_morning_session (
   fortune_style      varchar(10) check (fortune_style in ('COOKIE', 'HOROSCOPE')),
   fortune_source     varchar(10) check (fortune_source in ('ai', 'fallback', 'safe')),
   applied_intensity  smallint check (applied_intensity between 1 and 3),   -- 그날 실제로 쓴 강도 (자동 강도 반영 후)
-  stretch_area       varchar(20)                        -- 그날 고른 스트레칭 부위
-                     check (stretch_area in ('FULL', 'NECK_SHOULDER', 'ARM_WRIST', 'BACK_HIP', 'LEG')),
+  stretch_area       varchar(20)                        -- 그날 고른 스트레칭 부위 (아래 마지막 4개는 11/13 예전 값)
+                     constraint rs_session_stretch_area check (stretch_area in (
+                       'FULL', 'NECK', 'SHOULDER', 'CHEST_BACK', 'WRIST_HAND', 'ELBOW_ARM',
+                       'LOW_BACK', 'PELVIS', 'GLUTE', 'THIGH', 'CALF', 'ANKLE_FOOT',
+                       'NECK_SHOULDER', 'ARM_WRIST', 'BACK_HIP', 'LEG')),
   unique (alarm_id, session_date),
   constraint rs_session_type_fields check (
     (morning_call_type = 'ROUTINE' and template_id is not null and content_type is null)
@@ -509,6 +519,54 @@ end $$;
 drop trigger if exists trg_alarm_clear_overrides on rs_alarm;
 create trigger trg_alarm_clear_overrides before delete on rs_alarm
   for each row execute function rs_alarm_clear_overrides();
+
+-- 굿나잇콜 알람(BEDTIME)을 모닝콜 자리에 쓰지 못하게 막기: 아침 세션, 밤 대화의 하루 한정 변경 대상
+create or replace function rs_session_alarm_check() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.alarm_id is not null
+     and exists (select 1 from rs_alarm where alarm_id = new.alarm_id and alarm_kind = 'BEDTIME') then
+    raise exception '굿나잇콜 알람으로는 모닝콜 세션을 만들 수 없습니다';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_session_alarm_check on rs_morning_session;
+create trigger trg_session_alarm_check before insert or update of alarm_id on rs_morning_session
+  for each row execute function rs_session_alarm_check();
+
+create or replace function rs_night_override_alarm_check() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.override_alarm_id is not null
+     and exists (select 1 from rs_alarm where alarm_id = new.override_alarm_id and alarm_kind = 'BEDTIME') then
+    raise exception '굿나잇콜 알람은 하루 한정 변경 대상이 될 수 없습니다';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_night_override_alarm_check on rs_night_record;
+create trigger trg_night_override_alarm_check before insert or update of override_alarm_id on rs_night_record
+  for each row execute function rs_night_override_alarm_check();
+
+-- 모닝콜을 굿나잇콜로 바꾸면 그 알람의 항목 설정과, 그 알람을 대상으로 한 하루 한정 변경을 지운다
+create or replace function rs_alarm_kind_changed() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.alarm_kind = 'BEDTIME' and old.alarm_kind is distinct from 'BEDTIME' then
+    delete from rs_alarm_routine_item where alarm_id = new.alarm_id;
+    delete from rs_night_routine_item
+    where night_record_id in (select night_record_id from rs_night_record where override_alarm_id = new.alarm_id);
+    update rs_night_record
+    set override_alarm_id = null, override_wake_time = null, override_skip_coaching = false
+    where override_alarm_id = new.alarm_id;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_alarm_kind_changed on rs_alarm;
+create trigger trg_alarm_kind_changed after update of alarm_kind on rs_alarm
+  for each row execute function rs_alarm_kind_changed();
 
 
 -- 10-1. 내일 하루만 바꾸는 루틴 항목 시간 (밤 대화로 "내일 스트레칭 줄여 줘", "내일 이불 정리 빼 줘")

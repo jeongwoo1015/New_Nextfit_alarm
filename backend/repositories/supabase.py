@@ -205,7 +205,7 @@ class SupabasePresetRepository(_Base):
         return _models(TemplateItem, self._run(q))
 
     def get_app_config(self):
-        row = _first(self._run(self._select("rs_app_config", "routine_max_sec, content_duration_sec").limit(1)))
+        row = _first(self._run(self._select("rs_app_config", "routine_max_sec, content_duration_sec, stretch_duration_sec").limit(1)))
         return _model(AppConfig, row) if row else AppConfig()
 
     def pick_music(self, music_type, genre=None, mood=None):
@@ -223,9 +223,13 @@ _ALARM_FIELDS = _columns(Alarm, ("alarm_id", "user_id", "created_at", "updated_a
 
 
 class SupabaseAlarmRepository(_Base):
-    def list_alarms(self, user_id):
-        q = self._select("rs_alarm").eq("user_id", user_id).order("alarm_time").order("alarm_id")
-        return _models(Alarm, self._run(q))
+    def list_alarms(self, user_id, kind="WAKE"):
+        """kind: WAKE 모닝콜(기본) / BEDTIME 굿나잇콜 / None 전체. 기본이 모닝콜이라 '다음 날 알람 고르기' 같은
+        모닝콜 흐름에는 굿나잇콜이 섞이지 않는다. 알람 목록 화면처럼 전부 필요할 때만 None."""
+        q = self._select("rs_alarm").eq("user_id", user_id)
+        if kind:
+            q = q.eq("alarm_kind", kind)
+        return _models(Alarm, self._run(q.order("alarm_time").order("alarm_id")))
 
     def get_alarm(self, user_id, alarm_id):
         if not _is_uuid(alarm_id):
