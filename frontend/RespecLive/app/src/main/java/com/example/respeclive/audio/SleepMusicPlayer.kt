@@ -16,6 +16,7 @@ class SleepMusicPlayer(private val context: Context) {
     private var base = 0f          // 상황별 기본 볼륨
     private var fade = 1f          // 페이드 배율 (0~1)
     private var paused = false
+    private var incoming: MediaPlayer? = null   // 곡을 바꾸는 중에 들어오는 새 곡 (멈춤·다시 틀기를 이 곡에도 적용)
 
     /** 지금 곡의 서버 music_id (앱 내 파일이면 null) */
     var musicId: String? = null
@@ -43,30 +44,44 @@ class SleepMusicPlayer(private val context: Context) {
      * 새 곡을 준비하지 못하면 이전 곡을 그대로 둠 (false)
      */
     suspend fun crossfadeTo(url: String, id: String, ms: Long): Boolean {
+        if (incoming != null) return false     // 이미 바꾸는 중
         val old = player ?: return play(url, id, base)
         val next = createUrl(url, startVolume = 0f) ?: return false
-        // 준비(prepareAsync)를 기다림. 오래 걸리면 포기하고 이전 곡 유지
-        var waited = 0L
-        while (!next.preparedFlag && !next.failedFlag && waited < PREPARE_TIMEOUT_MS) {
-            delay(100)
-            waited += 100
+        incoming = next.mp
+        try {
+            // 준비(prepareAsync)를 기다림. 오래 걸리면 포기하고 이전 곡 유지
+            var waited = 0L
+            while (!next.preparedFlag && !next.failedFlag && waited < PREPARE_TIMEOUT_MS) {
+                delay(100)
+                waited += 100
+            }
+            if (!next.preparedFlag || player !== old) {    // 준비 실패, 또는 기다리는 동안 꺼지거나 새로 틂
+                prepared.remove(next.mp)
+                next.mp.release()
+                return false
+            }
+            val steps = 20
+            for (i in 1..steps) {
+                val t = i / steps.toFloat()
+                volume(next.mp, current() * t)
+                volume(old, current() * (1 - t))
+                delay(ms / steps)
+                if (player !== old) {
+                    prepared.remove(next.mp)
+                    next.mp.release()
+                    return false
+                }
+            }
+            prepared.remove(old)
+            old.release()
+            player = next.mp
+            musicId = id
+            // 바꾸는 동안 멈췄다 다시 틀었으면 새 곡이 시작되지 않은 채 남아 소리가 끊기던 문제 (11/18 시연): 지금 상태에 맞춤
+            if (paused) pause() else resume()
+            return true
+        } finally {
+            incoming = null
         }
-        if (!next.preparedFlag) {
-            next.mp.release()
-            return false
-        }
-        val steps = 20
-        for (i in 1..steps) {
-            val t = i / steps.toFloat()
-            volume(next.mp, current() * t)
-            volume(old, current() * (1 - t))
-            delay(ms / steps)
-        }
-        old.release()
-        player = next.mp
-        musicId = id
-        if (paused) pause()
-        return true
     }
 
     /** 상황별 기본 볼륨 바꾸기 (대화 중 작게, 끝나면 보통) */
@@ -77,17 +92,21 @@ class SleepMusicPlayer(private val context: Context) {
 
     fun pause() {
         paused = true
-        try {
-            player?.takeIf { it.isPlaying }?.pause()
-        } catch (_: IllegalStateException) {
+        listOfNotNull(player, incoming).forEach {
+            try {
+                if (it.isPlaying) it.pause()
+            } catch (_: IllegalStateException) {
+            }
         }
     }
 
     fun resume() {
         paused = false
-        try {
-            player?.takeIf { !it.isPlaying && prepared.contains(it) }?.start()
-        } catch (_: IllegalStateException) {
+        listOfNotNull(player, incoming).forEach {
+            try {
+                if (!it.isPlaying && prepared.contains(it)) it.start()
+            } catch (_: IllegalStateException) {
+            }
         }
     }
 
@@ -143,8 +162,9 @@ class SleepMusicPlayer(private val context: Context) {
                 pending.failedFlag = true
                 prepared.remove(p)
                 if (player === p) {
+                    // 재생 중 서버 음악을 못 불러오면(연결 끊김 등) 소리 없이 끝나지 않게 앱 내 파일로 이어 감
                     p.release()
-                    player = null
+                    player = createFallback()
                     musicId = null
                 }
                 true

@@ -43,6 +43,9 @@ private const val MUTE_REPLY_WINDOW_MS = 3_000L
 // 받아쓰기 없는 끊김을 사용자 말로 센 뒤 이 시간 안에 온 받아쓰기는 같은 말로 보고 한 번 더 세지 않음
 private const val VOICE_MERGE_MS = 3_000L
 
+/** AI 받아쓰기 안의 모델 표기: <...> 또는 {...} (자막에서 뺌) */
+private val MODEL_MARKUP = Regex("<[^<>]{0,40}>|[{][^{}]{0,40}[}]")
+
 /**
  * Gemini Live 통화 한 건을 관리: 연결, 마이크 송신, AI 음성 재생, 자막, 끼어들기, 함수 호출, 재연결.
  *
@@ -586,12 +589,19 @@ class LiveClient(context: Context) {
         _transcript.update { list ->
             val last = list.lastOrNull()
             if (last != null && last.role == role && !split) {
-                list.dropLast(1) + last.copy(text = last.text + text)
+                list.dropLast(1) + last.copy(text = clean(role, last.text + text))
             } else {
-                list + Line(role, text, System.currentTimeMillis())
+                list + Line(role, clean(role, text), System.currentTimeMillis())
             }
         }
     }
+
+    /**
+     * AI 받아쓰기에 섞여 오는 모델의 표기(<no speech>, {pause} 등)를 뺌. 말로는 나오지 않는데 자막에 그대로 떴음
+     * (11/18 실기기, 재기상 알림 직후). 조각으로 나뉘어 오므로 줄을 이어 붙인 뒤에 닫힌 표기만 지움
+     */
+    private fun clean(role: Role, text: String): String =
+        if (role == Role.Assistant) text.replace(MODEL_MARKUP, "") else text
 
     // ---------------- 오디오 ----------------
 

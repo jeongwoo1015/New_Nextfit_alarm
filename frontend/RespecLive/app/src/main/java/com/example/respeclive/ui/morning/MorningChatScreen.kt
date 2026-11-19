@@ -193,6 +193,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     val lines by client.transcript.collectAsState()
     val liveMessage by client.message.collectAsState()
     val spoken by client.spokenFraction.collectAsState()
+    val userTurns by client.userTurnsFlow.collectAsState()   // 받아쓰기 없이 끊김으로 센 말도 포함
 
     var stage by remember { mutableStateOf(Stage.Preparing) }
     var notice by remember { mutableStateOf("리스펙이 준비하는 중…") }
@@ -202,6 +203,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     var elapsed by remember { mutableIntStateOf(0) }
     var muted by remember { mutableStateOf(false) }
     var rewaking by remember { mutableStateOf(false) }
+    var rewakeTurns by remember { mutableIntStateOf(0) }    // 재기상 음악을 튼 때의 사용자 말 횟수
     var messageText by remember { mutableStateOf<String?>(null) }   // 어젯밤 한 마디를 받아쓴 글자
     var wrapText by remember { mutableStateOf("") }        // 마무리 안내 문장
     var coachingStarted by remember { mutableStateOf(false) }   // 이번 통화의 단계를 받아 코칭 세션을 열었음
@@ -758,6 +760,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     val timerFraction = if (remainingMs != null && stepTotalMs != null) remainingMs.toFloat() / stepTotalMs else null
 
     // ---- 재기상: AI가 말을 마친 뒤 8초 동안 대답이 없으면 음악 + POST /rewake. 사용자가 말하면(버튼 포함) 멈춤 ----
+    // 멈춤은 말 횟수로 봄: 사용자 줄과 AI 줄이 거의 같이 들어오면 마지막 줄만 보고는 사용자 말을 놓쳐 음악이 계속 남 (11/18 시연, 스트레칭)
     // 한 번 대답한 뒤에도 브리핑·코칭 내내 다시 8초를 셈 (한 마디 재생·포춘처럼 듣기만 하는 단계는 제외).
     // 스트레칭은 동작하는 동안 말이 없는 게 정상이라, 단계 타이머가 도는 동안은 세지 않고 타이머가 끝난 뒤부터 셈
     val lastRole = lines.lastOrNull()?.role
@@ -768,6 +771,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
         if (!talkStage || status != LiveClient.Status.Live || aiSpeaking || stretchTimerRunning || rewaking) return@LaunchedEffect
         if (lastRole != LiveClient.Role.Assistant) return@LaunchedEffect
         delay(REWAKE_SILENCE_MS)
+        rewakeTurns = client.userTurns
         rewaking = true
         scope.launch {
             // 밤에 받아 둔 파일 → 서버 URL → (둘 다 없으면) 기기 기본 알람음
@@ -779,8 +783,8 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             RespecApi.rewake(sid)
         }
     }
-    LaunchedEffect(lastRole, talkStage, rewaking) {
-        if (rewaking && (lastRole == LiveClient.Role.User || !talkStage)) {
+    LaunchedEffect(lastRole, userTurns, talkStage, rewaking) {
+        if (rewaking && (lastRole == LiveClient.Role.User || userTurns > rewakeTurns || !talkStage)) {
             rewakePlayer.stop()
             rewaking = false
         }
@@ -813,8 +817,10 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
         contentType == "EXERCISE" && currentStep != null -> stretchMotionFor(currentStep.title, currentStep.stepOrder ?: 1)
         else -> NextyMotion.IDLE
     }
-    // 루틴을 모두 판정했으면 완료/건너뛰기 버튼을 숨기고, 코칭을 끌지 않고 바로 마무리로
-    val routineOver = stage == Stage.Coaching && !choosingArea && items.isNotEmpty() && currentTitle == null
+    // 루틴을 모두 판정했으면 완료/건너뛰기 버튼을 숨기고, 코칭을 끌지 않고 바로 마무리로.
+    // 세션 단계가 들어온 뒤에만 봄: 코칭 토큰을 기다리는 동안은 단계 번호 없는 알람 미리보기만 있어 currentStep이 null이라,
+    // 여기서 ROUTINE_OVER가 큐에 들어가 토큰이 오자마자 코칭이 끝나던 문제 (영어는 단계를 AI로 만들어 토큰이 7~10초 걸려 늘 걸림, 11/18 시연)
+    val routineOver = stage == Stage.Coaching && !choosingArea && RoutineRepository.hasSteps && currentTitle == null
     // AI가 루틴을 마친 것으로 보는 중: 모든 단계를 판정(보류 포함)했거나, 마무리 말(포춘으로 넘기기 등)을 함
     val aiWrapping = stage == Stage.Coaching && coachSpoke && (
         (items.isNotEmpty() && items.all { it.done || it.skipped || it.stepOrder in heldReports.keys }) ||
