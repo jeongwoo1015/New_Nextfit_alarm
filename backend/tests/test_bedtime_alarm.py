@@ -50,6 +50,16 @@ def test_switch_wake_to_bedtime_clears_wake_fields_and_back(client):
     assert r.status_code == 200 and (r.json()["alarm_kind"], r.json()["content_type"]) == ("WAKE", "QUIZ")
 
 
+def test_switch_to_bedtime_keeps_sent_label_change(client):
+    """굿나잇콜로 바꾸면서 보낸 라벨(지우기 포함)은 그대로 반영한다 (앱은 바꿀 때 label을 함께 보냄)."""
+    w = create(client, ROUTINE).json()                                  # label "평일 기상"
+    r = client.patch(f"/alarms/{w['alarm_id']}", json={"alarm_kind": "BEDTIME", "label": None}, headers=H)
+    assert r.status_code == 200 and (r.json()["alarm_kind"], r.json()["label"]) == ("BEDTIME", None)
+    w = create(client, ROUTINE).json()
+    r = client.patch(f"/alarms/{w['alarm_id']}", json={"alarm_kind": "BEDTIME", "label": "자기 전"}, headers=H)
+    assert r.json()["label"] == "자기 전" and r.json()["template_id"] is None
+
+
 def test_bedtime_alarm_cannot_start_morning_session(client):
     onboard(client)
     b = create(client, BEDTIME).json()

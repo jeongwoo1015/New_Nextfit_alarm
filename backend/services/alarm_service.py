@@ -99,7 +99,7 @@ def _bedtime_cleared(values: dict) -> dict:
     """굿나잇콜이면 보내지 않은 모닝콜 칸을 비우고 정각으로 (보낸 값은 그대로 두어 검사에서 걸리게 한다)."""
     if values.get("alarm_kind") != "BEDTIME":
         return values
-    return {**{f: None for f in WAKE_ONLY_FIELDS}, "alarm_mode": "ON_TIME", **{k: v for k, v in values.items() if v is not None}}
+    return {**{f: None for f in WAKE_ONLY_FIELDS}, "alarm_mode": "ON_TIME", **values}   # 보낸 null(라벨 지우기 등)도 그대로
 
 
 def _editable(fields: dict) -> dict:
