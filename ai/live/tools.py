@@ -68,9 +68,27 @@ ADJUST_STEP_TIME = {
     },
 }
 
+# 모닝콜 말로 미루기(11/20 회의 1): 전화를 받은 뒤 "~분 뒤에 다시 울려 줘", "9시에 다시 맞춰 줘"라고 하면 오늘만 알람을 다시 맞춘다. 브리핑(전화를 받은 직후의 세션)에만 둔다.
+# 앱은 end_session처럼 응답하지 않고 안내 음성이 끝나면 연결을 닫고 알람을 다시 예약한다(사용자가 지금 울리는 알람은 직접 종료한다).
+SNOOZE_MAX_MINUTES = 60
+SNOOZE_MAX_PER_DAY = 3
+RESCHEDULE_ALARM = {
+    "name": "reschedule_alarm",
+    "description": ("전화를 받은 뒤 사용자가 오늘만 알람을 미루고 싶다고 분명히 말했을 때(예: '10분 뒤에 다시 울려 줘', '9시에 다시 맞춰 줘') 호출한다. "
+                    "minutes_later(지금부터 몇 분 뒤, 1~60)와 at_time(오늘 몇 시, 'HH:MM') 중 사용자가 말한 쪽 하나만 넣는다. "
+                    "시간을 말하지 않았으면 먼저 한 번 묻고, 말한 뒤에 호출한다. 단순히 졸리다는 말은 미루는 요청이 아니다. 같은 응답에서 다시 맞췄다고 안내하고 직접 종료하도록 먼저 말한 뒤, 그 응답의 맨 끝에서 호출한다(호출하면 앱이 응답 없이 안내 음성이 끝나면 연결을 닫으므로, 호출한 뒤에는 어떤 말도 하지 않는다)."),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "minutes_later": {"type": "INTEGER", "description": f"지금부터 몇 분 뒤에 다시 울릴지(1~{SNOOZE_MAX_MINUTES}). at_time과 함께 쓰지 않는다"},
+            "at_time": {"type": "STRING", "description": "오늘 다시 울릴 시각 'HH:MM'(24시간). 지금보다 뒤이고 60분 안이어야 한다. minutes_later와 함께 쓰지 않는다"},
+        },
+    },
+}
+
 _BY_KIND = {
     "night": [END_SESSION],
-    "briefing": [START_ROUTINE, END_SESSION],
+    "briefing": [START_ROUTINE, RESCHEDULE_ALARM, END_SESSION],
     "fortune": [END_SESSION],        # 읽고 멈추는 세션이라 사용자가 끝내겠다고 할 때만 쓴다. 앱이 음성이 끝나면 다음 단계로 넘어간다
     "coaching": [REPORT_STEP_RESULT, ADJUST_STEP_TIME, END_SESSION],
 }
@@ -85,7 +103,8 @@ def tools_for(kind: str, inp=None) -> list[dict]:
     if kind == "briefing" and inp is not None:
         from .prompts.common import resolve_plan      # 순서표에 코칭이 있는 날에만 start_routine (코칭 안 하는 날·이미 다 마친 날은 end_session으로 넘긴다)
         follows = COACHING in resolve_plan(inp, BRIEFING)
-        return [{"functionDeclarations": ([START_ROUTINE] if follows else []) + [END_SESSION]}]
+        can_snooze = int(getattr(inp, "snoozes_today", 0) or 0) < SNOOZE_MAX_PER_DAY      # 하루 한도를 넘은 날은 함수를 빼서 호출할 수 없게 한다
+        return [{"functionDeclarations": ([START_ROUTINE] if follows else []) + ([RESCHEDULE_ALARM] if can_snooze else []) + [END_SESSION]}]
     if kind == "coaching" and getattr(inp, "morning_call_type", "ROUTINE") == "CONTENT":
         report = REPORT_STEP_RESULT_QUIZ if content_kind(inp) == "QUIZ" else REPORT_STEP_RESULT
         area = [SELECT_STRETCH_AREA] if content_kind(inp) == "STRETCH" and getattr(inp, "stretch_routines", ()) else []

@@ -93,6 +93,7 @@ class BriefingInput:
     strategy_block: str = ""           # 개인화 Agent가 만든 [오늘의 전략] 문장(AgentDecision.briefing_block). 비어 있으면 프롬프트가 달라지지 않는다
     plan: tuple[str, ...] = ()         # 모닝콜 순서표(ai.tasks.morning_plan). 비어 있으면 지금 앱 순서(LEGACY_ORDER)를 one_liner_follows·coaching_skipped·already_done으로 만든다
     already_done: bool = False         # 오늘 루틴·콘텐츠를 이미 모두 마친 날(앱 재진입 등). 브리핑에서 루틴 안내·시작 질문 없이 짧게 칭찬만 한다
+    snoozes_today: int = 0             # 오늘 이미 말로 미룬 횟수(11/20 회의 1). 하루 3번을 넘으면 더 미루지 않는다. 서버가 오늘 스누즈 횟수를 넘긴다
 
 
 @dataclass(frozen=True)
