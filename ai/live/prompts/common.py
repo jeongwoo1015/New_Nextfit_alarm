@@ -191,6 +191,66 @@ def snooze_block(inp) -> str:
             "이 안내 뒤에는 브리핑·루틴·콘텐츠를 이어 하지 않고, 다음 순서로 넘기는 함수나 end_session도 부르지 않는다. 미루기는 오늘만이고 기본 알람 설정은 그대로다.")
 
 
+SETTING_NAMES = {
+    "music_genre": {"POP": "팝", "JAZZ": "재즈", "CLASSIC": "클래식", "DANCE": "댄스", "ACOUSTIC": "어쿠스틱"},
+    "personality": {"KIND": "다정한", "FRIENDLY": "친근한", "STRICT": "엄격한", "CHEERFUL": "유쾌한"},
+    "intensity": {1: "약하게", 2: "보통", 3: "강하게"},
+}
+WAKE_STATE_WORDS = {"RECOMMENDED": "개인화가 정한 값", "EXPLORING": "아직 맞는 단계를 찾는 중", "USER": "사용자가 정한 값"}
+
+
+def settings_block(inp) -> str:
+    """굿나잇콜(밤)·모닝콜(브리핑)에서 AI 음악·성격·강도·기상 볼륨을 말로 바꾸는 규칙(11/20 회의 4). 사용자 설정이 항상 우선이고 개인화 추천은 알려 주기만 한다."""
+    s = getattr(inp, "settings", None)
+    casual = inp.persona.tone == "CASUAL"
+    lines = []
+    if s is not None:
+        lines.append("[현재 설정]")
+        if s.music_genre:
+            lines.append(f"- AI 음악(장르): {SETTING_NAMES['music_genre'].get(s.music_genre, s.music_genre)}")
+        lines.append(f"- AI 성격: {SETTING_NAMES['personality'][personality_of(inp.persona)]}")
+        lines.append(f"- AI 강도: {SETTING_NAMES['intensity'][intensity_of(inp.persona)]}")
+        if s.wake_start_level:
+            lines.append(f"- 기상 알람 볼륨: 시작 {s.wake_start_level}단계" + (f" ({WAKE_STATE_WORDS[s.wake_state]})" if s.wake_state in WAKE_STATE_WORDS else ""))
+        elif s.wake_state == "EXPLORING":
+            lines.append("- 기상 알람 볼륨: 아직 맞는 단계를 찾는 중")
+        if s.wake_max_level:
+            lines.append(f"- 사용자가 정한 시작 단계 상한: {s.wake_max_level}단계")
+    confirm = "AI 성격을 엄격한으로 바꿀까?" if casual else "AI 성격을 엄격한으로 바꿀까요?"
+    done = "엄격한으로 바꿨어. 다음 모닝콜부터 적용돼." if casual else "엄격한으로 바꿨어요. 다음 모닝콜부터 적용돼요."
+    rec = "지금은 3단계가 가장 잘 맞는 것 같지만, 원하면 바꿀 수 있어." if casual else "현재는 3단계가 가장 잘 맞는 것으로 보이지만, 원하시면 바꿀 수 있어요."
+    explore = "아직 가장 잘 맞는 볼륨을 찾는 중이야. 그래도 원하는 값으로 바꿀까?" if casual else "아직 가장 잘 맞는 볼륨을 찾는 중이에요. 그래도 원하시는 값으로 바꿀까요?"
+    lines.append("[설정 변경(대화로)]")
+    lines.append("- 사용자가 AI 음악(장르), AI 성격, AI 강도, 기상 알람 볼륨을 바꾸고 싶다고 분명히 말하면 update_setting으로 바꿀 수 있다. "
+                 "값: 음악 POP 팝·JAZZ 재즈·CLASSIC 클래식·DANCE 댄스·ACOUSTIC 어쿠스틱 / 성격 KIND 다정한·FRIENDLY 친근한·STRICT 엄격한·CHEERFUL 유쾌한 / 강도 1 약하게·2 보통·3 강하게 / 기상 볼륨 1~5단계. "
+                 "이 네 가지 말고 다른 설정(어조·호칭·알람 시각 등)은 바꾸지 않고 설정 화면에서 바꿀 수 있다고만 안내한다. 사용자가 말하지 않은 값으로 바꾸지 않는다.")
+    lines.append(f"- 호출하기 전에 바꿀 값을 한 번 말해 확인받는다(\"{confirm}\"). 사용자가 확인하면 먼저 update_setting을 호출하고, 호출한 뒤에 바꿨다고 한 문장으로 알린다(\"{done}\"). 확인받기 전에는 호출하지 않는다. 바꿨다고 말하는 응답에서는 반드시 update_setting을 호출하며, 호출하지 않고 바꿨다고 말하지 않는다(실제로 바뀌지 않았는데 바뀌었다고 말하는 것이 된다). 사용자가 확인한 내용은 다시 묻지 않는다. "
+                 "이 요청을 처리하는 응답은 다른 문장 수 제한의 예외다.")
+    lines.append(f"- 기상 볼륨을 바꾸려는 경우에는 [현재 설정]의 상태를 먼저 한 번만 짧게 알린다. 개인화가 정한 값이면 \"{rec}\", 아직 찾는 중이면 \"{explore}\"처럼 말한다. "
+                 "설득하지 않는다. 결정은 사용자에게 있고, 사용자가 원하면 그 값으로 바꾼다. \"내일 알람은 4단계로\"처럼 다음 알람 한 번만이라고 말했으면 scope=TODAY, \"앞으로\"·\"계속\"·\"~보다 높게는 시작하지 마\"처럼 말했으면 scope=ALWAYS로 보고 되묻지 않는다. "
+                 "어느 쪽인지 분명하지 않을 때만 한 번 묻는다. \"한 단계 낮춰 줘\"처럼 상대적인 말은 [현재 설정]의 시작 단계로 계산하고, 모르면 몇 단계인지 묻는다.")
+    lines.append("- 음악·성격·강도는 scope를 ALWAYS로 호출하고, 바뀐 값은 다음 모닝콜부터 적용된다고 알린다. 지금 통화의 말투와 강도는 그대로다.")
+    return "\n".join(lines)
+
+
+def wake_raise_block(inp) -> str:
+    """밤 대화: 내일 기상 알람 시작 볼륨이 올라가는 날, 말해 알리고 반대가 없을 때만 적용한다(11/21 결정 4). 반대하면 이전 단계를 유지한다."""
+    s = getattr(inp, "settings", None)
+    if s is None or not s.wake_raise_from or not s.wake_start_level or s.wake_start_level <= s.wake_raise_from:
+        return ""
+    casual = inp.persona.tone == "CASUAL"
+    new, old = s.wake_start_level, s.wake_raise_from
+    say = (f"내일 아침 알람은 소리를 {old}단계 대신 {new}단계에서 시작해 볼게. 너무 크면 말해 줘, 그대로 둘게." if casual
+           else f"내일 아침 알람은 소리를 {old}단계 대신 {new}단계에서 시작해 볼게요. 너무 크게 느껴지시면 말씀해 주세요, 그대로 둘게요.")
+    keep = (f"알겠어, {old}단계 그대로 둘게." if casual else f"알겠어요, {old}단계 그대로 둘게요.")
+    return ("[내일 알람 볼륨 상승 알림]\n"
+            f"- 개인화가 내일 아침 알람 시작 볼륨을 {old}단계에서 {new}단계로 올리기로 했다. 이 변화는 사용자가 반대하지 않을 때만 적용된다. 그래서 마무리하기 전에 반드시 한 번 알려야 하고, 알리지 않고 마무리하지 않는다.\n"
+            f"- 순서: 내일 이야기(목표·특이사항)에 대한 사용자의 답을 들은 다음 응답은 바로 이 알림 하나만이다. 예) \"{say}\" 이 응답에서는 마무리 인사나 end_session을 하지 않고, 설득하거나 이유를 설명하지 않는다. 알림은 한 번만 한다.\n"
+            f"- 알림에 대한 사용자의 답을 들은 뒤: 괜찮다고 하거나 별말이 없으면 아무것도 호출하지 않고 평소처럼 마무리한다(적용된다). "
+            f"싫다·크다·그대로 두라고 하면, 이 알림이 이미 확인 질문이므로 다시 확인받지 않고 바로 update_setting(field=wake_volume, value={old}, scope=TODAY)을 호출한 뒤 \"{keep}\"처럼 한 문장으로만 알린다(이 응답에는 마무리 인사를 덧붙이지 않고, 사용자의 다음 말을 들은 뒤 평소처럼 마무리한다). "
+            f"\"앞으로 계속\"·\"더 높게는 하지 마\"처럼 말했으면 scope=ALWAYS로 부른다. 호출하지 않고 그대로 두겠다고만 말하지 않는다. 이 요청을 처리하는 응답은 문장 수 제한의 예외다.")
+
+
 def format_event(e: CalendarEvent) -> str:
     if e.all_day or not e.start:
         when = "종일" if e.all_day else "시간 미정"

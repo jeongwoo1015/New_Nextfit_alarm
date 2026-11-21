@@ -86,9 +86,35 @@ RESCHEDULE_ALARM = {
     },
 }
 
+# 대화로 설정 바꾸기(11/20 회의 4): 굿나잇콜·모닝콜(브리핑)에서 AI 음악·성격·강도·기상 볼륨만 바꾼다. 어조·호칭 등 다른 설정은 바꾸지 않는다.
+# 앱은 평소처럼 {"result":"ok"}로 응답하고 서버 설정을 바꾼다(성격·강도·음악은 다음 모닝콜부터, 기상 볼륨은 scope에 따라 다음 알람 한 번 또는 앞으로의 상한).
+SETTING_VALUES = {
+    "music_genre": ("POP", "JAZZ", "CLASSIC", "DANCE", "ACOUSTIC"),
+    "personality": ("KIND", "FRIENDLY", "STRICT", "CHEERFUL"),
+    "intensity": ("1", "2", "3"),
+    "wake_volume": ("1", "2", "3", "4", "5"),
+}
+SETTING_SCOPES = ("ALWAYS", "TODAY")
+UPDATE_SETTING = {
+    "name": "update_setting",
+    "description": ("사용자가 AI 음악(music_genre), AI 성격(personality), AI 강도(intensity), 기상 알람 볼륨(wake_volume)을 바꾸고 싶다고 분명히 말했고, "
+                    "바꿀 값을 한 번 말해 확인받은 다음에만 호출한다. 다른 설정(어조·호칭·알람 시각 등)은 바꾸지 않는다. 사용자가 말하지 않은 값으로 바꾸지 않는다. 바꿨다고 말하려면 먼저 이 함수를 호출해야 한다."),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "field": {"type": "STRING", "enum": list(SETTING_VALUES), "description": "music_genre 음악 / personality 성격 / intensity 깨우는 말 강도 / wake_volume 기상 알람 시작 볼륨 단계"},
+            "value": {"type": "STRING", "description": ("music_genre: POP·JAZZ·CLASSIC·DANCE·ACOUSTIC / personality: KIND 다정한·FRIENDLY 친근한·STRICT 엄격한·CHEERFUL 유쾌한 / "
+                                                       "intensity: 1 약하게·2 보통·3 강하게 / wake_volume: 1~5단계")},
+            "scope": {"type": "STRING", "enum": list(SETTING_SCOPES),
+                      "description": "wake_volume만 구분한다: TODAY = 다음 알람 한 번만 이 단계로 시작, ALWAYS = 앞으로 이 단계보다 높게 시작하지 않는 상한. 나머지 설정은 ALWAYS"},
+        },
+        "required": ["field", "value"],
+    },
+}
+
 _BY_KIND = {
-    "night": [END_SESSION],
-    "briefing": [START_ROUTINE, RESCHEDULE_ALARM, END_SESSION],
+    "night": [UPDATE_SETTING, END_SESSION],
+    "briefing": [START_ROUTINE, RESCHEDULE_ALARM, UPDATE_SETTING, END_SESSION],
     "fortune": [END_SESSION],        # 읽고 멈추는 세션이라 사용자가 끝내겠다고 할 때만 쓴다. 앱이 음성이 끝나면 다음 단계로 넘어간다
     "coaching": [REPORT_STEP_RESULT, ADJUST_STEP_TIME, END_SESSION],
 }
@@ -104,7 +130,7 @@ def tools_for(kind: str, inp=None) -> list[dict]:
         from .prompts.common import resolve_plan      # 순서표에 코칭이 있는 날에만 start_routine (코칭 안 하는 날·이미 다 마친 날은 end_session으로 넘긴다)
         follows = COACHING in resolve_plan(inp, BRIEFING)
         can_snooze = int(getattr(inp, "snoozes_today", 0) or 0) < SNOOZE_MAX_PER_DAY      # 하루 한도를 넘은 날은 함수를 빼서 호출할 수 없게 한다
-        return [{"functionDeclarations": ([START_ROUTINE] if follows else []) + ([RESCHEDULE_ALARM] if can_snooze else []) + [END_SESSION]}]
+        return [{"functionDeclarations": ([START_ROUTINE] if follows else []) + ([RESCHEDULE_ALARM] if can_snooze else []) + [UPDATE_SETTING, END_SESSION]}]
     if kind == "coaching" and getattr(inp, "morning_call_type", "ROUTINE") == "CONTENT":
         report = REPORT_STEP_RESULT_QUIZ if content_kind(inp) == "QUIZ" else REPORT_STEP_RESULT
         area = [SELECT_STRETCH_AREA] if content_kind(inp) == "STRETCH" and getattr(inp, "stretch_routines", ()) else []

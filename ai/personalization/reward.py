@@ -16,6 +16,15 @@ class RewardConfig:
     rewake_penalty: float = 0.0     # 재기상 1회당 감점 (기본은 사용 안 함)
 
 
+def coaching_reward(session: SessionRecord) -> float | None:
+    """코칭 강도 Bandit의 보상(11/21: 기상 볼륨과 보상을 분리). 말하는 방식(코칭 강도)이 영향을 줄 수 있는 결과인 '단계 수행 비율'만 본다.
+    코칭을 안 한 날과 단계가 없는 날은 None(학습하지 않는다). 기상 성공은 알람 소리의 몫이라 여기에 넣지 않는다(wake_volume.WakeLadder)."""
+    steps = session.active_steps
+    if session.coaching_skipped or not steps:
+        return None
+    return session.steps_done / len(steps)
+
+
 def session_reward(session: SessionRecord, config: RewardConfig = RewardConfig()) -> float:
     wake = 1.0 if session.wake_success else 0.0
     steps = session.active_steps

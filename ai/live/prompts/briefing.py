@@ -4,7 +4,7 @@ from ...personalization.strategy import SHORT_BRIEFING_MARK
 from ..inputs import BriefingInput
 from ...tasks.morning_plan import BRIEFING, COACHING, LISTENING
 from .common import (MORNING_RULE, SAFETY_RULES, VOICE_RULES, clean, eul, events_block, join_blocks, night_record_block,
-                     persona_block, resolve_plan, snooze_block, stage_name, wa, wake_intensity_block, weather_block)
+                     persona_block, resolve_plan, settings_block, snooze_block, stage_name, wa, wake_intensity_block, weather_block)
 
 BRIEFING_RULES = """당신은 사용자의 아침 루틴 시작 전에 브리핑을 해 주는 친근한 아침 파트너입니다. 알람이 울린 직후라 사용자는 막 일어나는 중입니다.
 
@@ -95,7 +95,7 @@ def briefing_prompt(inp: BriefingInput) -> str:
     now = f"[현재 시각]\n- {inp.now_hhmm}" if inp.now_hhmm else ""
     return join_blocks(
         BRIEFING_RULES.format(closing_item=closing, length_rule=LENGTH_SHORT if SHORT_BRIEFING_MARK in inp.strategy_block else LENGTH_NORMAL), END_RULE, MORNING_RULE, SAFETY_RULES, VOICE_RULES,
-        persona_block(inp.persona), wake_intensity_block(inp.persona), snooze_block(inp), now,
+        persona_block(inp.persona), wake_intensity_block(inp.persona), snooze_block(inp), settings_block(inp), now,
         events_block("오늘 일정", inp.events_today, "없음 (등록된 일정이 없거나 가져오지 못했다)"),
         weather_block(inp.weather) or "[오늘 날씨]\n없음 (날씨를 가져오지 못했다)",
         night_record_block(inp.night),
