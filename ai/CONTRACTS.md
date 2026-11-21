@@ -368,6 +368,81 @@ var lastAcceptedUserTurns = -1
 ```
 - **한계:** 이 검사는 화면이 잘못 넘어가는 것을 막아 준다. AI가 같은 말을 반복하거나 다음 동작 안내를 먼저 말해 버리는 것은 막지 못한다. 그쪽은 AI 쪽에서 계속 줄여 본다.
 
+### B20. 스트레칭 부위 12개 개편 (11/18 AI 반영 완료, 서버·DB·앱 반영 대기)
+- **AI가 바꾼 것:** 스트레칭을 "부위 12개 × 부위마다 정해진 4단계 루틴(45초씩, 합계 180초)"으로 바꿨다. AI는 동작을 고르지 않고 사용자의 말을 12개 부위 중 하나로 정해 `select_stretch_area(area)`만 부른다(`ai/tasks/stretch_sets.py`, `all_area_steps()`가 12개 루틴을 돌려준다). 그림은 `설계/스트레칭_부위별_루틴.png`, 동작 스크립트와 근거는 `설계/스트레칭_부위별_루틴_초안.md`.
+- **부위 코드 12개:** `FULL`(전신) `NECK`(목) `SHOULDER`(어깨) `CHEST_BACK`(가슴·윗등) `WRIST_HAND`(손목·손) `ELBOW_ARM`(팔꿈치·위팔) `LOW_BACK`(허리) `PELVIS`(골반) `GLUTE`(엉덩이) `THIGH`(허벅지) `CALF`(종아리) `ANKLE_FOOT`(발목·발). 옛 5개 값(`NECK_SHOULDER`, `ARM_WRIST`, `BACK_HIP`, `LEG`)은 이미 만든 기록을 위해 허용 값에 남기고, 옛 값이 오면 `normalize_area()`가 가까운 새 부위로 바꿔 읽는다(NECK_SHOULDER→NECK, ARM_WRIST→WRIST_HAND, BACK_HIP→LOW_BACK, LEG→THIGH).
+- **반영 전에 일어나는 일:** 서버·DB가 옛 5개만 받으면 ① 새 부위로 부위 변경 API가 거절되어 앱은 전신 루틴을 유지하는데 AI는 고른 부위 루틴으로 안내해 어긋나고, ② 스트레칭 단계 시간이 서버 기본 300초에 맞춰 늘어나(단계당 75초), ③ `backend/tests/test_ai_gateway.py`의 5개 루틴 확인 테스트가 실패한다.
+- **서버가 할 일:**
+  1. 부위 코드 12개 허용: `backend/domain/codes.py`의 `STRETCH_AREAS`를 12개로, 옛 5개는 허용만(`LEGACY_STRETCH_AREAS`). 요청 검증(`schemas.py`의 `StretchArea`)과 `morning_service.py`의 `select_stretch_area` 값 검사가 같은 목록을 쓰는지 확인.
+  2. 스트레칭만 180초: 콘텐츠 종류별 시간이 필요하다. 스트레칭(`EXERCISE`)은 180초(AI가 이미 합계 180초로 줌, `ai.tasks.stretch_sets.TOTAL_SEC`), 영어·퀴즈는 300초 그대로. `planned_total_sec`도 함께 확인.
+  3. 세션 시작 응답의 부위별 루틴이 5개에서 12개(루틴마다 4단계)로 늘고 단계 번호(`step_order`)는 1~4다. `STRETCH_AREA_LOCKED` 규칙(이미 판정한 단계가 있으면 부위 변경 불가)은 그대로.
+  4. 테스트: 12개 목록과 부위별 4단계·45초·합계 180초 확인.
+- **DB가 할 일:** `rs_morning_session.stretch_area`의 허용 값 검사에 새 코드 추가(칸 추가는 없다). 새 마이그레이션 예:
+
+```sql
+alter table rs_morning_session drop constraint if exists rs_morning_session_stretch_area_check;
+alter table rs_morning_session add constraint rs_morning_session_stretch_area_check
+  check (stretch_area in ('FULL','NECK','SHOULDER','CHEST_BACK','WRIST_HAND','ELBOW_ARM','LOW_BACK','PELVIS','GLUTE','THIGH','CALF','ANKLE_FOOT',
+                          'NECK_SHOULDER','ARM_WRIST','BACK_HIP','LEG'));
+```
+  (제약 이름은 Postgres 기본 이름을 가정했다. `\d rs_morning_session`으로 확인.) 열 설명과 정의서의 값 목록도 12개로 바꾼다.
+- **앱이 할 일:**
+  1. 새 동작 11개 그림 + 새 자세 2개. 단계 이름 전체로 동작을 고르는 방식 그대로다. 앉아서(9): 목 앞으로 숙이기, 어깨 으쓱 내리기, 날개뼈 모으기, 가슴 펴기, 앉아서 상체 비틀기, 앉아서 4자 스트레칭, 앉아서 다리 뒤쪽 늘이기, 앉아서 발끝 당기기, 앉아서 발목 돌리기 / **네발로**(새 자세): 고양이 소 자세 / **무릎 꿇고**(새 자세): 아기 자세. 그림이 준비되기 전에는 모르는 이름이면 기본 자세를 보여 주고 멈추지 않게 한다.
+  2. 부위 코드는 서버가 준 값을 그대로 전달(`RespecApi.kt`의 `selectStretchArea` 주석을 12개로). 부위 고르는 중 화면(`areaPending`)과 단계 표시가 5단계를 가정하고 있지 않은지 확인.
+  3. 루틴은 4단계 × 45초이고, 한 동작 안내 끝에는 항상 "끝나면 '했어요'라고 말씀해 주세요."(반말은 "'했어'라고 말해 줘")가 붙는다.
+- **확인 순서:** ① DB 허용 값 검사 → ② 서버 코드 목록·시간·테스트 → ③ 앱 그림 → ④ 실제 기기에서 "뒷목이 결려요", "허리가 뻐근해요", "없어요"로 확인.
+- **한계:** 신규 동작 11개의 근거는 ◎ 7개(의료기관 원문 확인) · ○ 4개(검색된 의료기관·영국 NHS 안내지 요약으로만 확인: 앉아서 4자 스트레칭, 목 앞으로 숙이기, 어깨 으쓱 내리기, 앉아서 발목 돌리기, 초안 문서 3장)다. 원문을 전부 읽은 것은 아니다. 의학적 효과는 말하지 않고 가벼운 아침 몸풀기로만 쓰며 전문가 검토는 하지 않기로 한 기존 결정(11/12)을 따른다.
+
+### B21. 말로 알람 미루기 (11/20 회의, 11/21 AI 반영 완료, 앱·서버 대기)
+- **AI가 바꾼 것:** 아침 브리핑 Live에서 사용자가 "10분만 더", "9시에 다시 울려 줘"처럼 **오늘만** 알람을 미루고 싶다고 분명히 말하면 새 함수 `reschedule_alarm`을 부른다. 인자는 `minutes_later`(지금부터 1~60분) 또는 `at_time`(오늘 `"HH:MM"`, 지금보다 뒤이고 60분 안) 중 하나만. 단순히 졸리다는 말은 미루는 요청이 아니고, 시간을 말하지 않으면 한 번만 되묻는다. 60분을 넘게 말하면 한도를 알리고 되묻는다.
+- **호출 방식(`end_session`과 같다):** AI는 "알람을 10분 뒤에 다시 맞췄어요. 지금 울리는 알람은 직접 종료해 주세요."를 **먼저 말한 뒤 그 응답의 맨 끝에서** 호출한다. 앱은 이 함수에 `toolResponse`를 보내지 않고, 안내 음성이 끝나면 연결을 닫는다(응답을 보내면 AI가 이어서 말해 브리핑이 시작될 수 있다).
+- **하루 3번 한도:** 서버가 오늘 이미 미룬 횟수를 `BriefingInput.snoozes_today`로 넘긴다. 3번 이상이면 함수 목록에서 `reschedule_alarm`이 빠지고, AI는 더 미룰 수 없다고만 알린다.
+- **앱이 할 일:** `reschedule_alarm` 호출을 받으면 안내 음성이 끝날 때까지 기다렸다가 연결을 닫고 서버에 미루기를 요청한다. 인자 검증(둘 중 하나만, 1~60분)도 앱이 한 번 더 한다. 지금 울리는 알람은 사용자가 직접 끈다(AI가 그렇게 안내한다).
+- **서버가 할 일:** 미루기 요청을 받으면 **오늘만** 1회 다시 울리는 알람을 만든다(예: `POST /morning/sessions/{id}/snooze {"minutes_later": 10}` 또는 `{"at_time": "09:00"}`). 세션의 `snooze_count`를 1 올리고, 미루기 응답은 기상 성공으로 세지 않는다. **기상 성공은 다시 울린 알람 뒤 첫 대답으로 판정한다.** 하루 한도는 서버에서도 한 번 더 검사한다.
+- **DB가 할 일:** `rs_morning_session.snooze_count smallint not null default 0`(오늘 말로 미룬 횟수). 선택: 다시 울릴 시각 기록용 `snoozed_until timestamptz`.
+- **확인한 것:** 실제 모델로 6가지(분 지정·시각 지정·되묻기·60분 초과·한도 초과·졸리다만 말함) 시나리오와 점검 규칙(함수 호출 형식, 안내 후 호출 순서, 호출 없이 "맞췄어요"라고 말하지 않기)을 통과시켰다. 사람 목소리로 한 확인은 아직 없다.
+
+### B22. 대화로 설정 바꾸기 (11/20 회의, 11/21 AI 반영 완료, 앱·서버 대기)
+- **AI가 바꾼 것:** 굿나잇콜(밤)과 아침 브리핑에서 사용자가 말로 **AI 음악·AI 성격·AI 강도·기상 알람 볼륨**만 바꿀 수 있다(어조·호칭·알람 시각 등 다른 설정은 설정 화면을 안내). 새 함수 `update_setting(field, value, scope)`.
+
+| field | value | scope |
+|---|---|---|
+| `music_genre` | POP / JAZZ / CLASSIC / DANCE / ACOUSTIC | 항상 ALWAYS |
+| `personality` | KIND / FRIENDLY / STRICT / CHEERFUL | 항상 ALWAYS |
+| `intensity` | 1 / 2 / 3 | 항상 ALWAYS |
+| `wake_volume` | 1~5 | `TODAY` = 다음 알람 한 번만 그 단계로 시작, `ALWAYS` = 앞으로 그 단계보다 높게 시작하지 않는 상한 |
+
+- **대화 규칙:** 바꿀 값을 한 번 말해 확인받고, 확인하면 **먼저 함수를 호출한 뒤** 바꿨다고 알린다(호출 없이 바꿨다고 말하지 않는다). 음악·성격·강도는 "다음 모닝콜부터 적용"이라고 알리고 지금 통화의 말투는 바꾸지 않는다. 기상 볼륨은 개인화가 정한 값이 있으면 현재 상태를 한 번만 알리되 설득하지 않고 사용자 결정을 따른다("내일은 4단계로"는 TODAY, "앞으로 ~보다 높게는 시작하지 마"는 ALWAYS, 분명하지 않을 때만 한 번 묻는다).
+- **앱이 할 일:** 함수를 받으면 서버에 설정 변경을 요청하고 AI에는 평소처럼 `{"result":"ok"}`를 돌려준다(끝내는 함수가 아니라 통화는 이어진다). 설정 화면의 값도 같이 바뀌게 한다.
+- **서버가 할 일:**
+  1. `music_genre`·`personality`·`intensity`는 `RS_USER_SETTING`의 해당 칸을 바꾼다(성격 `PERSONALITY`, 강도 `INTENSITY`는 B17). 다음 모닝콜부터 적용. 허용 값 밖이면 거절하고 기록만 남긴다.
+  2. `wake_volume` + `ALWAYS`는 사용자 상한 `max_start_level`로 저장하고, `TODAY`는 다음 알람 한 번의 시작 단계(`next_alarm_level`)로 저장한다(B23의 `UserWakePrefs`). 사용자가 바꾼 값은 개인화 추천보다 항상 우선한다.
+  3. 입력: 밤·브리핑 입력의 `settings=SettingsView(music_genre, wake_start_level, wake_state, wake_max_level, wake_raise_from)`로 현재 값을 넘겨야 AI가 상태를 알리고 상대적인 말("한 단계 낮춰 줘")을 계산한다. `wake_state`는 `RECOMMENDED`(개인화가 정한 값) / `EXPLORING`(아직 맞는 단계를 찾는 중) / `USER`(사용자가 정한 값).
+- **DB가 할 일:** `RS_USER_SETTING`에 기상 볼륨 상한(예: `WAKE_MAX_START_LEVEL smallint null`)과 다음 알람 한 번의 시작 단계(`WAKE_NEXT_LEVEL smallint null`, 사용 뒤 비움). 음악 장르 칸은 이미 있는 것을 쓴다.
+- **확인한 것:** 실제 모델로 성격(밤)·음악·볼륨 상한·볼륨 일시 변경·지원하지 않는 설정·반말 설정 6가지 시나리오와 점검 규칙(확인 전 호출 금지, 허용 값만, 호출 없이 "바꿨어요" 금지)을 통과시켰다.
+
+### B23. 기상 알람 볼륨 개인화와 코칭 강도 Bandit (11/20 회의 2·3, 11/21 AI 구현 완료, 서버·앱·DB 대기)
+- **방향(11/20 회의 결론):** 기상 성공은 AI 대화가 아니라 **알람 소리**가 좌우한다(알람 → 전화 받기 → AI 첫 대답). 그래서 개인화를 둘로 나눈다. ① 기상 알람 **시작 볼륨 단계**(기상 성공으로 학습) ② 코칭 강도(단계 수행 비율로 학습). 둘은 서로 다른 Bandit이고 보상도 분리한다. 지금 앱은 알람이 1단계에서 시작해 10초마다 한 단계씩 5단계까지 오르므로, **시작 단계만** 사용자별로 정한다.
+- **AI가 만든 것(`ai/personalization/wake_volume.py`, DB를 읽지 않는 순수 함수):**
+  - 시작 단계 후보는 1단계·3단계(상한 3). 재기상 알람은 기상 알람보다 한 단계 큰 2~6단계(`rewake_level()`).
+  - 상황 칸은 추정 수면 가능 시간 하나(짧음 6시간 미만 / 보통 / 모름, `sleep_bucket()`).
+  - 학습(사다리): 시작 단계 k에서 w단계에 받았으면 k~w-1단계는 실패, w단계는 성공으로 센다(`WakeLadder.learn`). 받고도 AI 확인에 답하지 않았거나 재기상이 있었으면 w단계도 실패, 끝까지 받지 않았으면 시작~마지막이 모두 실패.
+  - 선택: Thompson Sampling. 단계마다 성공 확률을 뽑아 0.7 이상인 가장 낮은 후보로 시작하고, 확실한 후보가 없으면 가장 좋아 보이는 값과 비슷한 후보 중 낮은 단계를 고른다. 전체 사용자 기록은 약한 prior로만 쓴다.
+  - 사용자 우선: 일시 변경(`next_alarm_level`) > 지속 상한(`max_start_level`) > 추천. 추천값(`recommended`)과 적용값(`applied`)을 따로 기록하고 사용자가 바꾼 날도 학습한다.
+  - 안전: 시작 단계는 3을 넘기지 않고(사용자가 직접 정한 값은 예외), **올리는 날은 밤 대화로 알리고 반대가 없을 때만 적용**한다. 밤 대화가 없었던 날은 올리지 않고 이전 단계를 유지한다(`hold_no_notice`). 중요한 날(`important_day=True`)은 탐색하지 않는다.
+- **서버가 할 일(밤 대화 전 → 아침 → 아침 뒤):**
+  1. 밤 대화 시작 전: `d = decide_start_level(personal, global_, sleep_minutes, prefs, previous_level, notified, important_day)`로 내일 시작 단계를 정한다. `personal`은 사용자별 사다리(`rs_bandit_state` 같은 저장 위치의 `WakeLadder.to_dict()`), `global_`은 전체 합산(`WakeLadder.merge`). 사용자가 대화로 정한 값은 `UserWakePrefs(max_start_level, next_alarm_level)`로 넘긴다. `notified`는 "AI가 올린다고 실제로 말했는가"다. 밤 대화 글에서 `raise_announced(AI 발화 글, d.applied)`로 확인한다(AI가 알림을 빠뜨리는 날이 실제 모델 시험에서 5번 중 1~2번 있었다). False면 같은 날 다시 `decide_start_level(..., notified=False)`를 불러 이전 단계를 유지한다. 올린다고 알린 뒤 사용자가 반대하면 AI가 `update_setting(wake_volume, 이전 단계, TODAY)`(지속이면 ALWAYS)를 부른다(B22). `d.raise_pending`이 True면 밤 입력의 `SettingsView(wake_start_level=d.applied, wake_raise_from=previous_level, wake_state=d.state)`를 채운다.
+  2. 알람 예약: `d.applied`를 내일 기상 알람의 시작 단계로 앱에 전달한다. 재기상 알람은 `rewake_level(d.applied)`.
+  3. 아침 뒤: 앱이 알려 준 값으로 `learn_wake(ladder, d.context_key, 시작 단계, 받은 단계 또는 None, confirmed)`를 부르고 저장한다. 전략 로그는 `make_log(d, user_id, 날짜, prefs, previous_level).to_row()`를 저장한다(추천값·적용값·source·탐색 여부·선택 확률).
+  4. 코칭 강도 Bandit: `ContextualBandit`의 기본 정책이 Thompson Sampling으로 바뀌었다(공개 API와 저장 형식 호환, 옛 상태는 그대로 읽는다). 보상은 `reward.coaching_reward(session)`(단계 수행 비율, 코칭 안 한 날은 None)로 바꾸고 기상 성공은 넣지 않는다.
+- **앱이 할 일:** 서버가 준 시작 단계(1~5)로 알람 볼륨을 시작한다(지금은 1 고정). 사용자가 **전화를 받은 순간의 볼륨 단계**와 알람이 울리기 시작한 **시작 단계**, 재기상 여부를 서버에 보고한다(학습 입력이다).
+- **DB가 할 일:** ① 사용자별·전체 사다리 저장(기존 Bandit 상태 테이블에 키 하나 추가하거나 JSON 칸) ② 세션에 `wake_start_level`, `wake_received_level`(없으면 NULL), 시작 단계의 결정 로그(`recommended_level`, `applied_level`, `source`, `explored`, `propensity`, `previous_level`) ③ 중요한 날 판단용 값이 필요하면 서버 쪽 기준(캘린더 일정 등)을 정한다.
+- **효과 검증의 한계(중요):** `python -m ai.personalization.wake_sim`은 가상 사용자(설정용 4종과 검증용 4종을 나눔)로 알고리즘이 사용자별 단계를 찾아가는지만 본다. 가상 사용자의 반응은 우리가 정한 값이라 **효과의 증거가 아니다.** 실제 사용자로 기상률 20%p 차이를 확인하려면 한 쪽에 약 82일(양쪽 164일)이 필요해서 소수 실사용자로는 증명할 수 없다. 실사용자는 "실제 서버에서 학습과 선택이 작동한다"를 보이는 용도로만 쓴다.
+
+### B24. 말투 유지·날씨 표기·영어 따라 말하기 (11/21, AI만 변경)
+- **AI가 바꾼 것(서버·앱이 할 일 없음):** ① 사용자가 반말로 말하든 "못 들었어, 다시 설명해 줘"처럼 되묻든 설정 어조를 대화 끝까지 유지한다. ② 날씨 용어를 알아듣기 쉬운 말로 바꿔 읽는다(튼구름 → 구름 많음, 구름많음 → 구름 많음, 구름조금 → 구름 조금, 온흐림 → 흐림). ③ 영어 콘텐츠에서 사용자가 따라 말하면 "짧은 반응 → 방금 따라 한 문장을 한 번 더 → 다음 단계 안내" 순서로 말한다. ④ 일정 제목이 이상해도 일반 규칙으로만 다루고 제목을 지어내지 않는다.
+- **서버가 확인할 것:** 날씨 값은 기상청식 원문을 그대로 넘겨도 된다(AI가 바꿔 읽는다). 영어 안내 문장은 앱 음소거 문구 기준 그대로다.
+
 ## 5. 서버 어댑터(`backend/clients/ai_gateway.py`) 수정 목록
 
 옛 이름을 새 이름으로 바꾸면 된다. 아래 외의 부분은 그대로 동작한다.
@@ -411,3 +486,7 @@ var lastAcceptedUserTurns = -1
 8. **재기상 알림:** 8초 무응답으로 재기상 음악을 틀 때 앱이 AI에게 글자로 `(앱 알림: 재기상 음악 재생)`을 보낸다(B17).
 9. **자막 숫자 표기:** 앱이 자막을 그리기 전에 `SubtitleNumbers.apply`를 적용한다(B18).
 10. **`report_step_result` 검사:** 앱이 지금 단계가 아니거나 사용자 말이 없던 보고는 기록하지 않고 `ok`만 돌려준다(B19).
+11. **`reschedule_alarm`(말로 미루기):** 브리핑에서 AI가 안내를 먼저 말한 뒤 끝에서 부른다. 앱은 `toolResponse` 없이 안내 음성이 끝나면 연결을 닫고, 서버에 오늘만 1회 다시 울리는 알람을 요청한다(B21).
+12. **`update_setting`(대화로 설정 변경):** 밤·브리핑에서 AI가 확인을 받은 뒤 부른다. 앱은 서버 설정을 바꾸고 `{"result":"ok"}`를 돌려준다(B22).
+13. **기상 알람 시작 볼륨:** 서버가 밤마다 `wake_volume.decide_start_level`로 내일 시작 단계를 정해 알람에 전달하고, 앱이 받은 단계를 보고하면 `learn_wake`로 학습한다(B23).
+14. **스트레칭 부위 12개:** 서버·DB 허용 값과 180초, 앱 그림 11개가 필요하다(B20).
