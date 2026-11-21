@@ -2,6 +2,8 @@
     .venv/bin/python -m ai.devclient.run --list
     .venv/bin/python -m ai.devclient.run briefing_full coaching_routine
     .venv/bin/python -m ai.devclient.run --all [--repeat N]
+    .venv/bin/python -m ai.devclient.run coaching_routine --repeat 6 --realistic   # 안정성(판정 순서·무응답)을 잴 때는 --realistic 권장:
+        # 기본 전송은 합성 음성을 실시간보다 빠르게, 앞뒤 무음 없이 보내서 짧은 "했어"가 인식 안 되는 측정 오차가 생긴다(11/21)
 실제 Gemini를 호출한다(시나리오당 Live 연결 1회 + 밤 시나리오는 텍스트 호출 1~2회). GEMINI_API_KEY는 ai/.env에서 읽는다.
 """
 import argparse
@@ -56,6 +58,7 @@ def main(argv=None) -> int:
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--repeat", type=int, default=1)
+    ap.add_argument("--realistic", action="store_true", help="가상 사용자 음성을 실시간 속도로 보내고 앞뒤에 무음을 붙인다(인식 누락 측정 오차 감소)")
     args = ap.parse_args(argv)
     if args.list:
         for s in SCENARIOS.values():
@@ -67,7 +70,7 @@ def main(argv=None) -> int:
         print("시나리오를 고르세요(--list로 목록 확인):", unknown or "")
         return 2
     load_env(os.path.join(HERE, "..", ".env"))
-    client, llm = DevClient(), GeminiText()
+    client, llm = DevClient(realistic=args.realistic), GeminiText()
     os.makedirs(os.path.join(HERE, "runs"), exist_ok=True)
     out_path = os.path.join(HERE, "runs", time.strftime("%Y%m%d_%H%M%S") + ".jsonl")
     failed = 0
