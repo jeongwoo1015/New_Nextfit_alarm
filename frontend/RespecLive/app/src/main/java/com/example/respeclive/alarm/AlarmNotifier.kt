@@ -9,31 +9,46 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.RingtoneManager
+import android.os.Build
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.respeclive.MainActivity
+import com.example.respeclive.audio.AlarmVibrator
 import com.example.respeclive.data.AlarmType
 
 object AlarmNotifier {
-    private const val CHANNEL_ID = "respec_alarm_v1"
+    // 한 번 만든 채널의 진동 설정은 앱에서 바꿀 수 없어서, 설정의 알람 진동에 따라 쓸 채널을 둘로 나눔.
+    // 진동 채널을 남기는 이유: 다른 앱을 쓰는 중이라 상단 알림만 뜨면 수신 화면의 진동(AlarmVibrator)이 돌지 않음
+    private const val CHANNEL_VIBRATE = "respec_alarm_v2"
+    private const val CHANNEL_SILENT = "respec_alarm_v2_novibrate"
+    private const val LEGACY_CHANNEL = "respec_alarm_v1"
 
     fun ensureChannel(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = context.getSystemService(NotificationManager::class.java)
-        if (nm.getNotificationChannel(CHANNEL_ID) != null) return
+        nm.getNotificationChannel(LEGACY_CHANNEL)?.let { nm.deleteNotificationChannel(LEGACY_CHANNEL) }
         val attrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ALARM)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
-        val channel = NotificationChannel(CHANNEL_ID, "알람", NotificationManager.IMPORTANCE_HIGH).apply {
-            description = "모닝콜, 굿나잇콜 알람"
-            setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM), attrs)
-            enableVibration(true)
-            vibrationPattern = longArrayOf(0, 500, 500, 500)
-            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+        fun create(id: String, name: String, vibrate: Boolean) {
+            if (nm.getNotificationChannel(id) != null) return
+            nm.createNotificationChannel(NotificationChannel(id, name, NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "모닝콜, 굿나잇콜 알람"
+                setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM), attrs)
+                enableVibration(vibrate)
+                if (vibrate) vibrationPattern = longArrayOf(0, 500, 500, 500)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            })
         }
-        nm.createNotificationChannel(channel)
+        create(CHANNEL_VIBRATE, "알람", vibrate = true)
+        create(CHANNEL_SILENT, "알람 (진동 없음)", vibrate = false)
     }
+
+    /** 설정에서 알람 진동을 껐으면 진동 없는 채널 */
+    private fun channelFor(context: Context) =
+        if (AlarmVibrator.isEnabled(context)) CHANNEL_VIBRATE else CHANNEL_SILENT
 
     /** 전체 화면 알림. 화면이 꺼져 있거나 잠금 상태면 앱 화면이 바로 열리고, 사용 중이면 상단 알림으로 표시됨 */
     @SuppressLint("MissingPermission")
@@ -46,7 +61,7 @@ object AlarmNotifier {
         )
 
         val isWake = type == AlarmType.WAKE.name
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val notification = NotificationCompat.Builder(context, channelFor(context))
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentTitle(if (isWake) "AI 모닝콜" else "AI 굿나잇콜")
             .setContentText("$label · 눌러서 받기")
