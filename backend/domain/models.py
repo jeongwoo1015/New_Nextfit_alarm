@@ -34,6 +34,8 @@ class UserSetting:
     intensity: int = 2                     # 깨우는 말의 강도 1~3
     auto_intensity: bool = True            # 잘 못 일어나는 날이 이어지면 강도를 자동으로 올림
     english_level: str = "BEGINNER"        # BEGINNER / INTERMEDIATE
+    wake_max_start_level: int | None = None  # 11/22 기상 볼륨 시작 단계 상한 1~5 (앞으로 계속, 비우면 제한 없음)
+    wake_next_level: int | None = None       # 11/22 다음 알람 한 번만 이 단계로 시작 1~5 (쓰고 나면 비움)
     updated_at: datetime | None = None
 
 
@@ -187,6 +189,7 @@ class MorningSession:
     fortune_source: str | None = None      # ai / fallback / safe
     applied_intensity: int | None = None   # 그날 실제로 쓴 강도 (자동 강도 반영 후, 11/16)
     stretch_area: str | None = None        # 그날 고른 스트레칭 부위 (11/16)
+    snoozed_until: datetime | None = None  # 미루기(버튼·말)로 다시 울릴 시각 (11/22). 횟수는 snooze_count
 
 
 @dataclass(frozen=True)
@@ -218,6 +221,7 @@ class SessionStep:
     step_status: str = "PENDING"
     checked_at: datetime | None = None
     ai_verdict: str | None = None
+    score: int | None = None               # 게임 기록: 제한 시간 안에 주고받은 횟수 (11/22, 0 이상)
 
 
 @dataclass(frozen=True)

@@ -57,6 +57,22 @@ class Weather:
 
 
 @dataclass(frozen=True)
+class SettingsView:
+    """대화로 바꿀 수 있는 설정의 현재 값 (AI SettingsView, B22). AI가 바꾸기 전에 현재 상태를 알리고 "한 단계 낮춰 줘"를 계산한다.
+    기상 볼륨 추천값(wake_start_level·wake_state RECOMMENDED/EXPLORING·wake_raise_from)은 기상 볼륨 개인화를 붙일 때 채운다."""
+    music_genre: str = ""
+    wake_start_level: int | None = None
+    wake_state: str = ""                    # RECOMMENDED / EXPLORING / USER
+    wake_max_level: int | None = None
+    wake_raise_from: int | None = None      # 밤에만: 내일 시작 단계가 올라가는 날의 이전 단계
+
+
+def settings_view(st: UserSetting) -> SettingsView:
+    """지금은 사용자가 정한 값만: 다음 알람 한 번(wake_next_level)이 있으면 그 단계가 시작 단계(USER), 상한은 그대로."""
+    return SettingsView(st.music_genre, st.wake_next_level, "USER" if st.wake_next_level else "", st.wake_max_start_level)
+
+
+@dataclass(frozen=True)
 class NightContext:
     persona: Persona
     now_hhmm: str
@@ -66,6 +82,7 @@ class NightContext:
     routine_items: tuple[str, ...] = ()     # 내일 알람이 루틴이면 지금 쓰는 항목 이름 (시간 변경·빼기 요청 확인용)
     routine_item_secs: tuple[int, ...] = () # routine_items와 같은 순서의 현재 시간(초)
     allow_skip_coaching: bool = True
+    settings: SettingsView | None = None    # 대화로 바꿀 수 있는 설정 (update_setting, B22)
 
 
 @dataclass(frozen=True)
@@ -94,6 +111,8 @@ class BriefingContext:
     one_liner_follows: bool = False         # 브리핑 뒤 앱이 어젯밤 한마디 녹음을 틀어 줌 → 마무리에서 순서 안내 (AI 11/10)
     plan: tuple[str, ...] = ()              # 모닝콜 순서표 (AI B15). 비어 있으면 AI가 예전 순서로 말한다
     already_done: bool = False              # 오늘 단계를 이미 모두 마친 날 (앱 재진입) → 짧게 칭찬만
+    settings: SettingsView | None = None    # 대화로 바꿀 수 있는 설정 (update_setting, B22)
+    snoozes_today: int = 0                  # 오늘 미룬 횟수 (버튼·말 합산). 하루 한도면 AI가 reschedule_alarm을 받지 않는다 (B21)
 
 
 @dataclass(frozen=True)
@@ -283,8 +302,12 @@ class RealAIGateway:
             now_hhmm=ctx.now_hhmm, tomorrow_wake_time=ctx.tomorrow_wake_time,
             events_tomorrow=tuple(ai.CalendarEvent(e.title, e.start, e.end, e.all_day) for e in ctx.events_tomorrow),
             routine_items=ctx.routine_items, routine_item_secs=ctx.routine_item_secs,
-            allow_skip_coaching=ctx.allow_skip_coaching)
+            allow_skip_coaching=ctx.allow_skip_coaching, settings=self._settings(ai, ctx.settings))
         return self._issue("night", build_setup("night", inp))
+
+    @staticmethod
+    def _settings(ai, v: SettingsView | None):
+        return ai.SettingsView(**asdict(v)) if v else None
 
     def _issue(self, kind: str, setup: dict) -> LiveToken:
         from ai.live.config import start_signal, token_request_body
@@ -328,7 +351,8 @@ class RealAIGateway:
             one_liner_follows=ctx.one_liner_follows,
             now_hhmm=ctx.now_hhmm, events_today=tuple(ai.CalendarEvent(e.title, e.start, e.end, e.all_day) for e in ctx.events_today),
             weather=ai.Weather(**asdict(ctx.weather)) if ctx.weather else None, night=self._night(ai, ctx.night),
-            strategy_block=ctx.strategy_block, plan=ctx.plan, already_done=ctx.already_done)
+            strategy_block=ctx.strategy_block, plan=ctx.plan, already_done=ctx.already_done,
+            settings=self._settings(ai, ctx.settings), snoozes_today=ctx.snoozes_today)
         return self._issue("briefing", build_setup("briefing", inp))
 
     def issue_coaching_token(self, ctx: CoachingContext) -> LiveToken:

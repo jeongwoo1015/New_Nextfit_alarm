@@ -1,4 +1,5 @@
 """사용자·설정·온보딩."""
+import logging
 from dataclasses import dataclass, replace
 from datetime import date, time
 
@@ -15,7 +16,10 @@ FIRST_ALARM_TIME = time(7, 0)
 
 USER_FIELDS = {"user_name", "birth_date", "gender"}
 SETTING_FIELDS = {"user_call_name", "tone", "speech_style", "voice_type", "sleep_alarm_enabled", "sleep_time",
-                  "music_genre", "theme", "app_language", "personality", "intensity", "auto_intensity", "english_level"}
+                  "music_genre", "theme", "app_language", "personality", "intensity", "auto_intensity", "english_level",
+                  "wake_max_start_level", "wake_next_level"}
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -111,6 +115,29 @@ class UserService:
             changes = {**changes, "theme": codes.normalize_theme(changes["theme"])}
         validate_setting(replace(setting, **_pick(changes, SETTING_FIELDS)))
         return self.r.users.save_setting(user_id, changes)
+
+    def change_setting_by_voice(self, user_id: str, field: str, value: str, scope: str | None = None) -> UserSetting:
+        """AI update_setting(field, value, scope) → 설정 칸 (11/20 회의 4). 사용자가 정한 값은 개인화 추천보다 항상 우선한다."""
+        try:
+            changes = _voice_setting(field, value.strip().upper(), scope)
+        except ValueError:
+            log.warning("대화 설정 변경 거절 user=%s field=%s value=%r scope=%s", user_id, field, value, scope)
+            raise ValidationFailed(f"{field}에 쓸 수 없는 값이에요: {value}", "SETTING_VALUE_INVALID") from None
+        log.info("대화 설정 변경 user=%s %s", user_id, changes)
+        return self.update_setting(user_id, changes)
+
+
+def _voice_setting(field: str, value: str, scope: str | None) -> dict:
+    """AI가 보낸 글자 값 → 바꿀 칸. 허용 값 밖이면 ValueError."""
+    if field == "music_genre" and value in codes.MUSIC_GENRES:
+        return {"music_genre": value}
+    if field == "personality" and value in codes.PERSONALITIES:
+        return {"personality": value}
+    if field == "intensity" and value.isdigit() and int(value) in codes.INTENSITIES:
+        return {"intensity": int(value)}
+    if field == "wake_volume" and value.isdigit() and int(value) in codes.WAKE_LEVELS:
+        return {"wake_max_start_level" if scope == "ALWAYS" else "wake_next_level": int(value)}
+    raise ValueError(value)
 
 
 def _personality_of(speech_style: str) -> str:

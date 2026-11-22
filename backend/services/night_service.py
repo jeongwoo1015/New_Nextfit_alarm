@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-from backend.clients.ai_gateway import AIGateway, CalendarEvent, LiveToken, NightContext, Persona, persona_of
+from backend.clients.ai_gateway import AIGateway, CalendarEvent, LiveToken, NightContext, Persona, persona_of, settings_view
 from backend.core.errors import AppError, Conflict, NotFound, ValidationFailed, check_media_type
 from backend.core.timeutil import now_kst, to_kst
 from backend.domain import codes
@@ -35,11 +35,14 @@ class NightService:
     def __init__(self, repos: Repositories, ai: AIGateway, clock=now_kst):
         self.r, self.ai, self.clock = repos, ai, clock
 
-    def _persona(self, user_id: str) -> Persona:
+    def _setting(self, user_id: str):
         s = self.r.users.get_setting(user_id)
         if not s:
             raise NotFound("온보딩을 먼저 마쳐 주세요", "SETTING_NOT_FOUND")
-        return persona_of(s)
+        return s
+
+    def _persona(self, user_id: str) -> Persona:
+        return persona_of(self._setting(user_id))
 
     def _tomorrow_alarm(self, user_id: str, at: datetime) -> Alarm | None:
         """하루 한정 변경과 대화로 바꾼 루틴 항목을 적용할 알람 = 밤 기록이 적용되는 아침에 가장 먼저 울리는 알람.
@@ -52,9 +55,10 @@ class NightService:
         items = []
         if alarm and alarm.morning_call_type == "ROUTINE":
             items = [i for i in (self.r.alarms.get_alarm_routine(user_id, alarm.alarm_id) or []) if i.duration_sec > 0]
-        ctx = NightContext(self._persona(user_id), now.strftime("%H:%M"), tuple(events_today), tuple(events_tomorrow),
+        st = self._setting(user_id)
+        ctx = NightContext(persona_of(st), now.strftime("%H:%M"), tuple(events_today), tuple(events_tomorrow),
                            alarm.alarm_time.strftime("%H:%M") if alarm else "", tuple(i.item_name for i in items),
-                           tuple(i.duration_sec for i in items))
+                           tuple(i.duration_sec for i in items), settings=settings_view(st))
         return self.ai.issue_night_token(ctx)
 
     def save_transcript(self, user_id: str, transcript: list[dict], started_at: datetime | None,

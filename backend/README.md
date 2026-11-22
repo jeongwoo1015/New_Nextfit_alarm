@@ -22,7 +22,8 @@
 | `POST /onboarding` | 온보딩 | 사용자·설정 저장 + 고른 유형(루틴 프리셋 / 콘텐츠 종류)으로 07:00 알람 생성 |
 | `PATCH /users/me` | 내 정보 | 이름·생년월일·성별 |
 | `DELETE /users/me` | 설정 | 탈퇴: 파일 먼저 지우고 Auth 계정 삭제(DB 행은 CASCADE), `jobs.maintenance.delete_account` |
-| `GET /settings` · `PATCH /settings` | 내 정보·설정 | 호칭·어조·성격(`personality`)·강도(`intensity` 1~3)·자동 강도(`auto_intensity`)·영어 수준(`english_level`)·목소리·음악 장르·취침 알림(11/18부터 쓰지 않음, 굿나잇콜은 알람으로)·테마(`LIGHT`/`DARK`/`AUTO`, 예전 `SYSTEM`은 `AUTO`로 저장)·언어. 예전 `speech_style`만 보내면 성격도 같이 바뀜(FIRM → STRICT) |
+| `GET /settings` · `PATCH /settings` | 내 정보·설정 | 호칭·어조·성격(`personality`)·강도(`intensity` 1~3)·자동 강도(`auto_intensity`)·영어 수준(`english_level`)·목소리·음악 장르·취침 알림(11/18부터 쓰지 않음, 굿나잇콜은 알람으로)·테마(`LIGHT`/`DARK`/`AUTO`, 예전 `SYSTEM`은 `AUTO`로 저장)·언어. 예전 `speech_style`만 보내면 성격도 같이 바뀜(FIRM → STRICT). 기상 볼륨 상한 `wake_max_start_level`·다음 한 번 `wake_next_level`(1~5, 이 둘만 `null`로 비움, 11/22) |
+| `POST /settings/ai-change` | 대화로 설정 바꾸기 | 밤·브리핑 AI `update_setting` 인자 그대로 `{"field", "value", "scope"}`. 음악·성격·강도는 그 칸, `wake_volume`은 `TODAY`(없으면 이쪽)면 `wake_next_level`, `ALWAYS`면 `wake_max_start_level`. 허용 값 밖이면 422 `SETTING_VALUE_INVALID`(앱은 AI에 그대로 `{"result":"ok"}`) |
 | `GET /alarms` · `POST /alarms` | 홈 | 알람 목록(시각 순, 모닝콜·굿나잇콜 모두)·추가. 각 알람에 `alarm_kind`(`WAKE` 모닝콜 / `BEDTIME` 굿나잇콜, 11/18). 굿나잇콜은 `{"alarm_kind": "BEDTIME", "alarm_time", "repeat_days"}`만 보낸다(모닝콜 칸은 null, `alarm_mode`는 `ON_TIME`만) |
 | `GET` · `PATCH` · `DELETE /alarms/{id}` | 알람 설정 | 토글은 `PATCH {"enabled": false}`. 굿나잇콜로 바꾸기는 `{"alarm_kind": "BEDTIME"}`(서버가 모닝콜 칸을 비우고, DB가 항목 설정과 그 알람의 하루 한정 변경을 지움). 모닝콜로 바꿀 때는 `morning_call_type`과 `template_id` 또는 `content_type`을 함께 |
 | `GET /alarms/{id}/routine-items` | 알람 세부 설정 | 항목별 시간(0 = 뺀 항목), 합계, 상한 |
@@ -36,7 +37,7 @@
 | `PATCH /night/records/{id}/voice-text` | 굿나잇콜 | 목소리 업로드 뒤 기기에서 받아쓴 '내일의 한마디' `{text}`(500자 이하, 빈 글 = 비우기). 목소리를 다시 올리면 비워지므로 다시 보낸다. 목소리가 없으면 409 `VOICE_NOT_UPLOADED` |
 | `POST /morning/sessions` | 알람 울림 | `{alarm_id}` → 오늘 세션 만들기(하루 한정 변경 반영) 또는 기존 세션(재연결). 응답 뒤 백그라운드에서 오늘의 포춘 문장을 만들어 세션에 저장. 이 응답에만 `morning_plan`(아침 순서표, AI B15)과 스트레칭 알람이면 `stretch_routines`(부위 12개 루틴, 루틴마다 4단계 180초, 부위를 아직 고를 수 있을 때만, AI B17)이 들어 있다. 처음 만들 때 그날 강도(`applied_intensity`, 자동 강도 반영)를 정해 저장. 굿나잇콜 알람이면 409 `NOT_WAKE_ALARM` |
 | `POST /morning/sessions/{id}/rewake` · `/response` | 모닝콜 | 8초 무응답 재기상(AI 음악) 횟수 +1 / 첫 음성 응답 시각(= 기상 성공 시각) |
-| `POST /morning/sessions/{id}/snooze` | 모닝콜 | "5분 뒤 다시 울리기" 횟수 +1 (제한 없음). 다시 울리면 `POST /morning/sessions`로 같은 세션 |
+| `POST /morning/sessions/{id}/snooze` | 모닝콜 | 미루기. 버튼은 본문 없이(5분), 말로 미루기(AI `reschedule_alarm`)는 `{"minutes_later": 1~60}` 또는 `{"at_time": "HH:MM"}`(오늘, 60분 안). 응답 `snooze_count`·`snoozes_today`·`snoozed_until` → 앱이 그 시각에 한 번 다시 예약. 버튼·말 합쳐 하루 3번(넘으면 409 `SNOOZE_LIMIT`). 다시 울리면 `POST /morning/sessions`로 같은 세션 |
 | `POST /morning/sessions/{id}/wake-check` | 브리핑 | 확인 멘트(2~3개)를 모두 마침 — 브리핑 Live의 `wake_check_done`을 앱이 전달. 이때 기상 성공 판정 |
 | `POST /morning/sessions/{id}/briefing-token` | 브리핑 | 오늘 일정·현재 위치(선택, 날씨용)를 보내면 브리핑 Live 토큰. 그날 처음이면 개인화 전략을 정해 로그 |
 | `POST /morning/sessions/{id}/fortune-token` | 포춘 | 오늘의 포춘(어젯밤 한마디, 없으면 한 줄 일기)을 AI가 그대로 읽는 Live 토큰 + `fortune_text`·`fortune_style`·`fortune_source`. 문장이 아직 없으면 이때 만든다(재연결도 같은 문장). AI 음성이 끝나면 앱이 다음 단계로 |

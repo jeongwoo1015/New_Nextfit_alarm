@@ -35,5 +35,8 @@ def validate_setting(s: UserSetting) -> None:
     _check(errors, "theme", s.theme, codes.THEMES)
     if not s.app_language or len(s.app_language) > 10:
         errors.append("app_language는 1~10자예요")
+    for name in ("wake_max_start_level", "wake_next_level"):              # 비우면(None) 제한 없음 / 다음 한 번 없음
+        if getattr(s, name) is not None and getattr(s, name) not in codes.WAKE_LEVELS:
+            errors.append(f"{name}는 1~5 또는 null이에요")
     if errors:
         raise ValidationFailed(" / ".join(errors))

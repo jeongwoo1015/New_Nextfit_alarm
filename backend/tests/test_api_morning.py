@@ -216,8 +216,10 @@ def test_rewake_before_check_fails(client, morning):
 
 def test_snooze_fails_and_reuses_session(client, morning, clock):
     v = start(client, morning).json()
-    assert client.post(url(v, "/snooze"), headers=auth(USER_A)).json() == {"snooze_count": 1}
-    assert client.post(url(v, "/snooze"), headers=auth(USER_A)).json() == {"snooze_count": 2}   # 횟수 제한 없음
+    assert client.post(url(v, "/snooze"), headers=auth(USER_A)).json() == {
+        "snooze_count": 1, "snoozes_today": 1, "snoozed_until": "2026-11-06T07:05:00+09:00"}   # 본문 없으면 버튼 5분
+    assert client.post(url(v, "/snooze"), headers=auth(USER_A)).json()["snooze_count"] == 2
+    assert client.get(url(v), headers=auth(USER_A)).json()["session"]["snoozed_until"] == "2026-11-06T07:05:00+09:00"
     clock.now = datetime(2026, 11, 6, 7, 10, tzinfo=KST)                         # 5분 뒤 다시 울림 → 같은 세션
     again = start(client, morning).json()["session"]
     assert again["session_id"] == v["session"]["session_id"] and again["alarm_rang_at"] == v["session"]["alarm_rang_at"]
@@ -289,3 +291,39 @@ def test_today_duration_change(client, morning):
     assert client.patch(url(v, "/steps/1/duration"), json={"duration_sec": 60}, headers=auth(USER_B)).status_code == 404
     alarm = client.get(f"/alarms/{morning['alarm_id']}/routine-items", headers=auth(USER_A)).json()
     assert alarm["total_sec"] == 600                                                        # 알람 설정은 그대로
+
+
+def test_voice_snooze_minutes_or_time(client, morning, clock):
+    """말로 미루기(AI reschedule_alarm): 지금부터 몇 분 뒤 또는 오늘 몇 시, 60분 안."""
+    v = start(client, morning).json()
+    r = client.post(url(v, "/snooze"), json={"minutes_later": 10}, headers=auth(USER_A)).json()
+    assert r["snoozed_until"] == "2026-11-06T07:10:00+09:00"
+    clock.now = datetime(2026, 11, 6, 7, 10, 30, tzinfo=KST)
+    r = client.post(url(v, "/snooze"), json={"at_time": "08:00"}, headers=auth(USER_A)).json()
+    assert (r["snoozed_until"], r["snooze_count"]) == ("2026-11-06T08:00:00+09:00", 2)
+    for bad in ({"minutes_later": 0}, {"minutes_later": 61}, {"minutes_later": 5, "at_time": "07:30"}, {"at_time": "7시"}):
+        assert client.post(url(v, "/snooze"), json=bad, headers=auth(USER_A)).status_code == 422
+    for late in ("07:10", "06:00", "08:11"):                                       # 지났거나 60분 넘게 뒤
+        res = client.post(url(v, "/snooze"), json={"at_time": late}, headers=auth(USER_A))
+        assert res.status_code == 422 and res.json()["error"]["code"] == "SNOOZE_TIME_INVALID"
+    assert client.get(url(v), headers=auth(USER_A)).json()["session"]["snooze_count"] == 2   # 거절된 요청은 세지 않음
+
+
+def test_snooze_limit_three_per_day_across_alarms(client, morning, clock, ai):
+    """버튼·말 합쳐 그날 모든 모닝 세션에서 3번까지. 브리핑 입력에 오늘 횟수를 넘긴다."""
+    v = start(client, morning).json()
+    client.post(url(v, "/briefing-token"), json={}, headers=auth(USER_A))
+    assert [c for c in ai.calls if c[0] == "briefing_token"][-1][1].snoozes_today == 0
+    assert [c for c in ai.calls if c[0] == "briefing_token"][-1][1].settings.music_genre == "JAZZ"   # 대화로 바꿀 설정의 현재 값
+    client.post(url(v, "/snooze"), headers=auth(USER_A))
+    client.post(url(v, "/snooze"), json={"minutes_later": 3}, headers=auth(USER_A))
+    other = client.post("/alarms", json={"alarm_time": "07:30", "morning_call_type": "CONTENT", "content_type": "QUIZ",
+                                         "content_option": "WORDCHAIN"}, headers=auth(USER_A)).json()
+    w = start(client, other).json()
+    assert client.post(url(w, "/snooze"), headers=auth(USER_A)).json()["snoozes_today"] == 3
+    res = client.post(url(v, "/snooze"), headers=auth(USER_A))
+    assert res.status_code == 409 and res.json()["error"]["code"] == "SNOOZE_LIMIT"
+    client.post(url(v, "/briefing-token"), json={}, headers=auth(USER_A))
+    assert [c for c in ai.calls if c[0] == "briefing_token"][-1][1].snoozes_today == 3
+    clock.now = datetime(2026, 11, 7, 7, 0, tzinfo=KST)                           # 다음 날은 다시 3번
+    assert client.post(url(start(client, morning).json(), "/snooze"), headers=auth(USER_A)).json()["snoozes_today"] == 1

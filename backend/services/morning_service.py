@@ -7,14 +7,15 @@ import logging
 import threading
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 from backend.clients.ai_gateway import (AIGateway, BriefingContext, CalendarEvent, CoachingContext, CoachStep, ContentStep,
-                                        Fortune, LiveToken, Persona, night_view, persona_of)
+                                        Fortune, LiveToken, Persona, night_view, persona_of,
+                                        settings_view)
 from backend.clients.weather import NoWeather, WeatherClient
 from backend.core.errors import AppError, Conflict, NotFound, ValidationFailed
 from backend.domain import codes
-from backend.core.timeutil import now_kst, to_kst, today_kst
+from backend.core.timeutil import KST, now_kst, to_kst, today_kst
 from backend.domain.models import MorningSession, Progress, SessionStep, StepPlan
 from backend.domain.routine_rules import build_routine
 from backend.domain.session_rules import (content_duration_sec, content_steps, judge_wake, planned_total_sec,
@@ -73,6 +74,13 @@ class Location:
     lat: float
     lon: float
     name: str = ""
+
+
+@dataclass(frozen=True)
+class SnoozeResult:
+    snooze_count: int          # 이 세션의 미루기 횟수
+    snoozes_today: int         # 그날 모든 모닝 세션의 합계
+    snoozed_until: datetime    # 다시 울릴 시각 (KST)
 
 
 @dataclass(frozen=True)
@@ -196,10 +204,27 @@ class MorningService:
         self._session(user_id, session_id)
         return self.r.sessions.add_rewake(user_id, session_id)
 
-    def snooze(self, user_id: str, session_id: str) -> int:
-        """"5분 뒤 다시 울리기"를 누를 때마다 (횟수 제한 없음, 한 번이라도 하면 기상 실패). 다시 울리면 같은 세션이 이어진다."""
-        self._session(user_id, session_id)
-        return self.r.sessions.add_snooze(user_id, session_id)
+    def snoozes_today(self, user_id: str, session_date) -> int:
+        """그날 모든 모닝 세션의 미루기 합계 (버튼·말 합산, 하루 한도 검사와 브리핑 입력용)."""
+        return sum(x.snooze_count for x in self.r.sessions.recent_records(user_id, session_date, session_date).sessions)
+
+    def snooze(self, user_id: str, session_id: str, minutes_later: int | None = None, at_time: time | None = None) -> SnoozeResult:
+        """미루기 (버튼 "5분 뒤 다시 울리기" 또는 말로 미루기 reschedule_alarm). 다시 울리면 같은 세션이 이어진다.
+        기상 판정은 지금 규칙(11/01) 그대로 한 번이라도 미루면 실패다.
+        시간이 없으면 5분 뒤. at_time은 오늘 지금보다 뒤이고 60분 안. 버튼·말 합쳐 하루 3번까지(11/22 DB 정의서)."""
+        s = self._session(user_id, session_id)
+        now = to_kst(self.clock()).replace(microsecond=0)
+        if at_time is not None:
+            until = datetime.combine(now.date(), at_time.replace(second=0, microsecond=0), tzinfo=KST)
+            if not now < until <= now + timedelta(minutes=codes.SNOOZE_MAX_MIN):
+                raise ValidationFailed(f"다시 울릴 시각은 지금보다 뒤이고 {codes.SNOOZE_MAX_MIN}분 안이어야 해요", "SNOOZE_TIME_INVALID")
+        else:
+            until = now + timedelta(minutes=minutes_later or codes.SNOOZE_DEFAULT_MIN)
+        if self.snoozes_today(user_id, s.session_date) >= codes.SNOOZE_MAX_PER_DAY:
+            raise Conflict(f"알람은 하루 {codes.SNOOZE_MAX_PER_DAY}번까지만 미룰 수 있어요", "SNOOZE_LIMIT")
+        count = self.r.sessions.add_snooze(user_id, session_id)
+        self.r.sessions.update_session(user_id, session_id, {"snoozed_until": until})
+        return SnoozeResult(count, self.snoozes_today(user_id, s.session_date), until)
 
     def respond(self, user_id: str, session_id: str) -> MorningSession:
         """알람 후 첫 음성 응답 (처음 한 번만 기록). 기상 성공 시각 = 이 시각."""
@@ -238,6 +263,7 @@ class MorningService:
         """location은 앱이 매번 보내는 현재 위치(저장하지 않음). 없거나 날씨를 못 가져오면 날씨 없이 브리핑."""
         s = self._session(user_id, session_id)
         persona = self._persona(user_id, s)
+        st = self.r.users.get_setting(user_id)
         night = self.r.nights.get_night_for_morning(user_id, s.session_date)
         steps = self.r.sessions.list_steps(user_id, session_id)
         briefing_block, _ = self._strategy(user_id, s, night)
@@ -249,7 +275,8 @@ class MorningService:
         ctx = BriefingContext(persona, to_kst(self.clock()).strftime("%H:%M"), tuple(events_today), night_view(night),
                               program, content_name(s.content_type, s.content_option), s.coaching_skipped, briefing_block,
                               weather, one_liner_follows=bool(night and night.voice_audio_path),
-                              plan=self._plan(s, steps, night, at_start=True), already_done=_all_done(steps))
+                              plan=self._plan(s, steps, night, at_start=True), already_done=_all_done(steps),
+                              settings=settings_view(st), snoozes_today=self.snoozes_today(user_id, s.session_date))
         return self.ai.issue_briefing_token(ctx)
 
     def _strategy(self, user_id: str, s: MorningSession, night) -> tuple[str, str]:

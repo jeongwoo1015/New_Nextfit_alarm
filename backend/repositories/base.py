@@ -88,7 +88,7 @@ class SessionRepository(Protocol):
     """5. 모닝 세션·단계 — rs_morning_session, rs_session_step"""
     def get_or_create_session(self, snapshot: SessionSnapshot) -> MorningSession: ...   # 같은 알람·날짜가 있으면 그것(재연결)
     def get_session(self, user_id: str, session_id: str) -> MorningSession | None: ...
-    def update_session(self, user_id: str, session_id: str, changes: dict) -> MorningSession | None: ...  # alarm_rang_at, first_response_at, planned_total_sec, wake_checked_at, wake_success, session_end_at, fortune_*, applied_intensity, stretch_area
+    def update_session(self, user_id: str, session_id: str, changes: dict) -> MorningSession | None: ...  # alarm_rang_at, first_response_at, planned_total_sec, wake_checked_at, wake_success, session_end_at, fortune_*, applied_intensity, stretch_area, snoozed_until
     def add_rewake(self, user_id: str, session_id: str) -> int: ...                  # rewake_count + 1 (원자적으로), 바뀐 횟수
     def add_snooze(self, user_id: str, session_id: str) -> int: ...                  # snooze_count + 1 (원자적으로), 바뀐 횟수
     def create_steps(self, user_id: str, session_id: str, plans: list[StepPlan]) -> list[SessionStep]: ...  # 이미 있으면 만들지 않고 기존 단계
@@ -100,14 +100,32 @@ class SessionRepository(Protocol):
                              duration_sec: int) -> SessionStep | None: ...          # 오늘 진행 중 변경(코칭 중). 0 이하는 막고 오늘 빼기는 save_step(SKIPPED)
     def recent_records(self, user_id: str, since: date, until: date) -> RecentRecords: ...   # session_date / apply_date 기준, 양 끝 포함
 
+    # 게임 기록·콘텐츠 화면 (11/22)
+    def set_step_score(self, user_id: str, session_id: str, step_order: int, score: int) -> SessionStep | None: ...  # 주고받은 횟수(0 이상, 음수 ValidationFailed). 남의 세션·없는 단계 None
+    def best_score(self, user_id: str, content_type: str = "QUIZ", content_option: str | None = None) -> int | None: ...  # 그 콘텐츠의 최고 기록, 없으면 None
+    def list_content_steps(self, user_id: str, content_type: str, since: date, until: date) -> list[dict]: ...
+    # 그 기간 같은 콘텐츠 종류 세션의 단계를 (session_date, session_id, step_order) 순으로.
+    # 각 행 = 단계 칸 + session_date(ISO 문자열)·content_option·stretch_area. 동작 설명·영어 문장은 step_detail["script"]
+
 
 class PersonalizationRepository(Protocol):
-    """6. 개인화 (서버만) — rs_strategy_log, rs_bandit_state"""
+    """6. 개인화 (서버만) — rs_strategy_log, rs_bandit_state, rs_wake_log"""
     def save_strategy_log(self, user_id: str, session_id: str | None, row: dict) -> str: ...  # DecisionLog.to_row(). JSON 문자열 칸은 JSON으로. log_id
     def get_strategy_log(self, user_id: str, session_date: date) -> StrategyLog | None: ...   # 그날 가장 먼저 만든 로그
     def set_reward(self, log_id: str, reward: float) -> None: ...
-    def get_bandit_state(self, state_key: str) -> dict | None: ...                   # 'global' 또는 'user:{user_id}'
-    def save_bandit_state(self, state_key: str, state: dict, user_id: str | None = None) -> None: ...
+    def get_bandit_state(self, state_key: str) -> dict | None: ...                   # 코칭 'global'·'user:{user_id}', 기상 볼륨 'wake:global'·'wake:user:{user_id}'
+    def save_bandit_state(self, state_key: str, state: dict, user_id: str | None = None) -> None: ...  # 사용자 키는 user_id와 맞아야 함(아니면 DB CHECK 오류)
+
+    # 기상 볼륨 기록 — rs_wake_log, 하루 1행 (11/22). 행은 DB 칸 그대로의 dict(session_date는 ISO 문자열)
+    def save_wake_decision(self, user_id: str, session_date: date, row: dict) -> dict: ...
+    # 밤에 정한 다음 날 시작 볼륨(wake_volume.WakeLog.to_row()). 결정 칸만 쓰고 나머지 키는 무시.
+    # 같은 날 다시 저장하면 결정 칸만 바뀌고 아침 결과 칸은 그대로.
+    def save_wake_result(self, user_id: str, session_date: date, start_level: int, received_level: int | None,
+                         confirmed: bool, session_id: str | None = None) -> dict: ...
+    # 아침 결과. start_level 1~5, received_level 1~6(재기상 포함, 못 받았으면 None, start_level 이상). 밤 결정이 없던 날도 행을 만든다
+    def get_wake_log(self, user_id: str, session_date: date) -> dict | None: ...
+    def list_wake_logs(self, user_id: str, since: date, until: date) -> list[dict]: ...   # 양 끝 포함, 날짜 순 (리포트 '기상 단계 변화')
+    def mark_wake_learned(self, user_id: str, session_date: date) -> bool: ...       # 아직 학습 안 한 날만 표시. 처음 반영이면 True(두 번 학습 방지)
 
 
 class StorageClient(Protocol):
