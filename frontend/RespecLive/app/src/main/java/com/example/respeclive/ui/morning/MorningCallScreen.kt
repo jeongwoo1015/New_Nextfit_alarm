@@ -29,6 +29,7 @@ import com.example.respeclive.alarm.AlarmScheduler
 import com.example.respeclive.audio.AlarmSoundPlayer
 import com.example.respeclive.audio.AlarmVibrator
 import com.example.respeclive.data.WakeHistory
+import com.example.respeclive.data.WakeLevelPrefs
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.data.RespecApi
@@ -104,15 +105,17 @@ private fun MorningIncomingScreen(
     val view = LocalView.current
     val alarm = remember { AlarmSoundPlayer(context) }
     val vibration = remember { AlarmVibrator(context) }
-    var level by remember { mutableIntStateOf(AlarmSoundPlayer.WAKE_START_LEVEL) }
+    // 시작 단계: 넥스티에게 말로 정한 값(다음 한 번·상한)이 있으면 그 값, 없으면 서버 추천(아직 API가 없어 1단계)
+    val startLevel = remember { WakeLevelPrefs.takeStartLevel() }
+    var level by remember { mutableIntStateOf(startLevel) }
     var countdown by remember { mutableIntStateOf(VOLUME_UP_SECONDS) }
 
     // 알람음 재생 + 화면 켜짐 유지. 화면을 벗어나면 정지하고 볼륨 복원
     DisposableEffect(Unit) {
         view.keepScreenOn = true
-        alarm.start(level = AlarmSoundPlayer.WAKE_START_LEVEL)
+        alarm.start(level = startLevel)
         // 진동: 볼륨 단계를 따라 세지고, 최근 아침 기록으로 나눈 유형에 따라 시작 세기가 다름
-        vibration.start(AlarmSoundPlayer.WAKE_START_LEVEL, WakeHistory.profile(context))
+        vibration.start(startLevel, WakeHistory.profile(context))
         onDispose {
             view.keepScreenOn = false
             alarm.stop()

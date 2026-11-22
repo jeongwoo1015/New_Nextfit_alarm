@@ -41,7 +41,8 @@ object RespecApi {
     /** 앱 시작 시: ProfileOut {onboarding_done, user, setting} */
     suspend fun profile(): JSONObject? {
         val r = ApiClient.get("/users/me") ?: return null
-        return if (r.ok) r.json() else null
+        // 기상 알람 시작 단계용으로 말로 정한 볼륨 값을 기기에 저장 (알람이 울릴 때 인터넷을 기다리지 않도록)
+        return if (r.ok) r.json()?.also { WakeLevelPrefs.update(it.optJSONObject("setting")) } else null
     }
 
     /** 기본 정보 수정 (user_name, birth_date, gender 중 보낸 항목만) → UserOut */
@@ -56,7 +57,7 @@ object RespecApi {
      */
     suspend fun updateSetting(changes: JSONObject): JSONObject? {
         val r = ApiClient.patch("/settings", changes) ?: return null
-        return if (r.ok) r.json() else null
+        return if (r.ok) r.json()?.also { WakeLevelPrefs.update(it) } else null
     }
 
     /** 선택 가능한 루틴 프리셋 (PresetOut 목록: template_id, template_name, target_desc, description, total_sec, items) */
@@ -262,7 +263,7 @@ object RespecApi {
         val body = JSONObject().put("field", field).put("value", value)
         scope?.takeIf { it.isNotBlank() }?.let { body.put("scope", it) }
         val r = ApiClient.post("/settings/ai-change", body) ?: return null
-        return if (r.ok) r.json() else null
+        return if (r.ok) r.json()?.also { WakeLevelPrefs.update(it) } else null
     }
 
     /** 서버 시각(ISO, 시간대 포함) → epoch ms */

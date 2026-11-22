@@ -30,6 +30,7 @@ import com.example.respeclive.alarm.AlarmScheduler
 import com.example.respeclive.alarm.BedtimeReminder
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
+import com.example.respeclive.data.WakeLevelPrefs
 import com.example.respeclive.navigation.AppNavHost
 import com.example.respeclive.ui.common.StartupPermissions
 import com.example.respeclive.ui.common.permissionGuideDone
@@ -54,6 +55,7 @@ class MainActivity : ComponentActivity() {
         applySystemBars(AppTheme.isDark)
 
         AlarmRepository.init(applicationContext)
+        WakeLevelPrefs.init(applicationContext)
         AlarmNotifier.ensureChannel(this)
         AlarmScheduler.rescheduleAll(this)   // 앱을 열 때마다 알람 등록 상태를 최신으로 맞춤
         requestNotificationPermission()

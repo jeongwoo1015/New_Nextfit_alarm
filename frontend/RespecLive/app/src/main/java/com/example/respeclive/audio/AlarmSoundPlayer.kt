@@ -111,7 +111,7 @@ class AlarmSoundPlayer(
         const val SCALE_LEVELS = 6
         /** 기상 알람이 받지 않을 때 올라가는 최대 단계 */
         const val WAKE_MAX_LEVEL = 5
-        /** 기상 알람 시작 단계. 지금은 1 고정 (서버가 사용자별 시작 단계를 정해 주면(AI CONTRACTS B23) 그 값으로 바꿈) */
+        /** 기상 알람 기본 시작 단계 (말로 정한 값·서버 추천이 없을 때, WakeLevelPrefs) */
         const val WAKE_START_LEVEL = 1
 
         /** 재기상 알람 단계 = 기상 알람 시작 단계 + 1 (AI wake_volume.rewake_level과 같은 규칙, 최대 6) */

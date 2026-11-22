@@ -51,6 +51,7 @@ import com.example.respeclive.audio.AlarmSoundPlayer
 import com.example.respeclive.audio.AlarmVibrator
 import com.example.respeclive.data.VoiceSnooze
 import com.example.respeclive.data.WakeHistory
+import com.example.respeclive.data.WakeLevelPrefs
 import com.example.respeclive.data.WordChainLine
 import com.example.respeclive.data.WordChainMorning
 import com.example.respeclive.data.WordChainReason
@@ -899,7 +900,7 @@ fun MorningChatScreen(
             // 밤에 받아 둔 파일 → 서버 URL → (둘 다 없으면) 기기 기본 알람음
             val source = MusicStore.rewakeFile(context)?.absolutePath ?: RespecApi.musicUrl("rewake")
             if (rewaking) {
-                rewakePlayer.start(level = AlarmSoundPlayer.rewakeLevel(), soundUrl = source)
+                rewakePlayer.start(level = AlarmSoundPlayer.rewakeLevel(WakeLevelPrefs.lastStartLevel()), soundUrl = source)
                 rewakeVibration.startStrong()   // 재기상은 유형과 상관없이 세게
                 WakeHistory.markRewake(context)
                 client.sendNotice(REWAKE_NOTICE)      // AI가 이름을 불러 깨움 (대화 원문·자막에는 안 남음)
