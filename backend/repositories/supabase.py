@@ -4,6 +4,7 @@
 본인 행이 아니면 없는 것과 같이 None을 돌려준다. DB 오류는 core.errors 형식으로 바꿔 던진다.
 """
 import json
+import logging
 import random
 import uuid
 from contextlib import contextmanager
@@ -16,6 +17,7 @@ import httpx
 from postgrest.exceptions import APIError
 from storage3.utils import StorageException
 from supabase import Client, create_client
+from supabase.lib.client_options import SyncClientOptions
 
 from backend.core.config import get_settings
 from backend.core.errors import Conflict, NotFound, ServiceUnavailable, ValidationFailed
@@ -24,6 +26,8 @@ from backend.domain.models import (AiMusic, Alarm, AlarmRoutineItem, AppConfig, 
                                    StrategyLog, TemplateItem, User, UserSetting)
 
 from .registry import Repositories
+
+log = logging.getLogger(__name__)
 
 USER_BUCKETS = ("voice", "night-raw", "photo")
 PAGE = 1000   # Supabase API가 한 번에 돌려주는 최대 행 수. 넘으면 나눠 받는다
@@ -115,7 +119,16 @@ def _db():
             raise ValidationFailed(f"파일을 저장할 수 없어요: {message}") from None
         raise ServiceUnavailable(f"Storage 오류: {message}") from None
     except httpx.HTTPError as e:
+        log.warning("DB 연결 실패 %s: %s", type(e).__name__, e)
         raise ServiceUnavailable(f"DB에 연결할 수 없어요: {e}") from None
+
+
+def _safe_to_resend(query, error: httpx.TransportError) -> bool:
+    """읽기(GET)는 연결 오류면 다시 보낸다. 저장은 요청이 서버에 닿지 않은 경우(연결 실패, 응답 없이 끊김)만 다시 보낸다.
+    저장이 이미 반영됐는데 응답만 끊긴 경우에 다시 보내면 같은 행이 두 번 들어갈 수 있어서다."""
+    if getattr(getattr(query, "request", None), "http_method", None) == "GET":
+        return True
+    return isinstance(error, (httpx.ConnectError, httpx.RemoteProtocolError))
 
 
 class _Base:
@@ -127,7 +140,13 @@ class _Base:
 
     def _run(self, query) -> list[dict]:
         with _db():
-            return query.execute().data or []
+            try:
+                return query.execute().data or []
+            except httpx.TransportError as e:
+                if not _safe_to_resend(query, e):
+                    raise
+                log.warning("DB 연결이 끊겨 한 번 더 보냄 %s: %s", type(e).__name__, e)
+                return query.execute().data or []
 
     def _run_all(self, make_query) -> list[dict]:
         """PAGE 행씩 나눠 끝까지 받는다. make_query는 정렬까지 붙인 새 쿼리를 만든다(정렬이 있어야 페이지가 겹치지 않음)."""
@@ -589,7 +608,9 @@ def build_repositories() -> Repositories:
     s = get_settings()
     if not s.supabase_url or not s.supabase_service_role_key:
         raise ValueError("REPOSITORY_BACKEND=supabase에는 SUPABASE_URL과 SUPABASE_SERVICE_ROLE_KEY가 필요해요")
-    client = create_client(s.supabase_url, s.supabase_service_role_key)
+    # HTTP/2 연결 하나에 동시 요청이 몰리면 연결이 끊긴다(요청 200건 중 20건 안팎 실패). HTTP/1.1은 요청마다 연결을 따로 써서 끊기지 않는다
+    http = httpx.Client(http2=False, timeout=30)
+    client = create_client(s.supabase_url, s.supabase_service_role_key, options=SyncClientOptions(httpx_client=http))
     return Repositories(users=SupabaseUserRepository(client), presets=SupabasePresetRepository(client),
                         alarms=SupabaseAlarmRepository(client), nights=SupabaseNightRepository(client),
                         sessions=SupabaseSessionRepository(client),
