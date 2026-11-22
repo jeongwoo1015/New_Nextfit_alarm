@@ -33,10 +33,11 @@ begin
 end $$;
 
 
--- 밤 대화 원문, 개인화 로그·학습 상태: 정책 없음 = 서버(service_role)만 접근
+-- 밤 대화 원문, 개인화 로그·학습 상태, 기상 볼륨 기록: 정책 없음 = 서버(service_role)만 접근
 alter table rs_night_raw enable row level security;
 alter table rs_strategy_log enable row level security;
 alter table rs_bandit_state enable row level security;
+alter table rs_wake_log enable row level security;
 
 
 -- Storage 버킷 (모두 비공개, 재생은 서명된 임시 URL)
