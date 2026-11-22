@@ -192,9 +192,10 @@ private fun AlarmCard(
                         checkedThumbColor = RespecColors.OnAccent,
                         checkedTrackColor = RespecColors.Lime,
                         checkedBorderColor = RespecColors.Lime,
+                        // 꺼짐: 밤 테마에서 Disabled가 카드 색과 같아 스위치가 안 보였음 (굿나잇콜 수면 음악 스위치와 같게)
                         uncheckedThumbColor = RespecColors.TextSub,
-                        uncheckedTrackColor = RespecColors.Disabled,
-                        uncheckedBorderColor = RespecColors.Disabled
+                        uncheckedTrackColor = RespecColors.Background,
+                        uncheckedBorderColor = RespecColors.TextSub.copy(alpha = 0.5f)
                     )
                 )
             }
