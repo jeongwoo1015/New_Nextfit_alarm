@@ -105,7 +105,8 @@ class AlarmSoundPlayer(
 
     companion object {
         /**
-         * 볼륨 눈금 수 (11/20 회의): 기상 알람은 1~5단계, 재기상 알람은 기상 알람보다 한 단계 큰 2~6단계.
+         * 볼륨 눈금 수 (11/20 회의): 기상 알람은 시작 단계(서버가 정함, 없으면 1)에서 10초마다 올라 최대 5단계,
+         * 재기상 알람은 시작 단계보다 한 단계 큰 2~6단계 (AI CONTRACTS B23).
          * 6단계가 폰 알람 최대 볼륨이라 기상 알람 5단계는 최대의 5/6.
          */
         const val SCALE_LEVELS = 6
@@ -114,7 +115,7 @@ class AlarmSoundPlayer(
         /** 기상 알람 기본 시작 단계 (말로 정한 값·서버 추천이 없을 때, WakeLevelPrefs) */
         const val WAKE_START_LEVEL = 1
 
-        /** 재기상 알람 단계 = 기상 알람 시작 단계 + 1 (AI wake_volume.rewake_level과 같은 규칙, 최대 6) */
+        /** 재기상 알람 단계 = 기상 알람 시작 단계 + 1 (AI wake_volume.rewake_level(d.applied)와 같은 규칙, 최대 6) */
         fun rewakeLevel(wakeStartLevel: Int = WAKE_START_LEVEL): Int = (wakeStartLevel + 1).coerceIn(2, SCALE_LEVELS)
     }
 }

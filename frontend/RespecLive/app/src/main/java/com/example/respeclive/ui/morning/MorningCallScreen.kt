@@ -32,6 +32,7 @@ import com.example.respeclive.data.SnoozeCount
 import com.example.respeclive.data.WakeHistory
 import com.example.respeclive.data.WakeLevelPrefs
 import com.example.respeclive.data.AlarmRepository
+import com.example.respeclive.data.ApiClient
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.data.RespecApi
 import com.example.respeclive.data.RoutineRepository
@@ -47,6 +48,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
 private const val VOLUME_UP_SECONDS = 10
+/** 아침 결과 보고: 세션이 만들어지기를 이 시간까지 기다림 */
+private const val REPORT_WAIT_MS = 15_000L
 /** 미루기 버튼: 서버 답을 이 시간까지만 기다리고, 넘으면 기기에서 5분 뒤로 */
 private const val SNOOZE_WAIT_MS = 3_000L
 
@@ -70,6 +73,23 @@ fun MorningCallScreen(
     // 오늘 미룬 횟수 (버튼에 남은 횟수 표시). 세션의 미루기 횟수가 더 크면 그 값으로
     var snoozesToday by remember { mutableIntStateOf(SnoozeCount.get(context)) }
     var snoozing by remember { mutableStateOf(false) }
+
+    // 아침 결과 보고 (B23): 시작 단계와 받은 단계(못 받았으면 null). 세션이 아직 안 만들어졌으면 잠깐 기다렸다 보냄.
+    // 화면을 벗어나도 보내도록 앱 전체 범위에서
+    fun reportWake(received: Int?) {
+        val start = WakeLevelPrefs.lastStartLevel()
+        fun sid() = session?.optJSONObject("session")?.optString("session_id")?.takeIf { it.isNotBlank() }
+        ApiClient.scope.launch {
+            var id = sid()
+            var waited = 0L
+            while (id == null && waited < REPORT_WAIT_MS) {
+                delay(500)
+                waited += 500
+                id = sid()
+            }
+            id?.let { RespecApi.reportWakeResult(it, start, received) }
+        }
+    }
     LaunchedEffect(session) {
         session?.optJSONObject("session")?.optInt("snooze_count", 0)?.let { snoozesToday = SnoozeCount.atLeast(context, it) }
     }
@@ -90,8 +110,14 @@ fun MorningCallScreen(
         )
     } else {
         MorningIncomingScreen(
-            onAnswer = { answered = true },
-            onDismiss = onFinish,
+            onAnswer = { received ->
+                reportWake(received)
+                answered = true
+            },
+            onDismiss = {
+                reportWake(null)        // 받지 않고 끔
+                onFinish()
+            },
             snoozeLeft = SnoozeCount.left(snoozesToday),
             onSnooze = {
                 if (snoozing || snoozesToday >= SnoozeCount.MAX_PER_DAY) return@MorningIncomingScreen
@@ -116,6 +142,7 @@ fun MorningCallScreen(
                         "${AlarmScheduler.SNOOZE_MINUTES}분 뒤에 다시 울려요 · " + if (left > 0) "오늘 ${left}번 더 미룰 수 있어요" else "오늘은 마지막 미루기예요",
                         Toast.LENGTH_SHORT
                     ).show()
+                    reportWake(null)    // 받지 않고 미룸 (다시 울려 받으면 그 결과로 덮어씀)
                     onSnooze()
                 }
             },
@@ -126,7 +153,7 @@ fun MorningCallScreen(
 
 @Composable
 private fun MorningIncomingScreen(
-    onAnswer: () -> Unit,
+    onAnswer: (receivedLevel: Int) -> Unit,
     onDismiss: () -> Unit,
     onSnooze: () -> Unit,
     alarmLabel: String = "오전 6:00",
@@ -256,7 +283,7 @@ private fun MorningIncomingScreen(
             Spacer(Modifier.height(16.dp))
             SwipeToAnswer(onComplete = {
                 WakeHistory.recordAnswer(context, level)   // 받은 단계 = 진동 유형을 나누는 기준
-                onAnswer()
+                onAnswer(level)
             })
             Spacer(Modifier.height(8.dp))
             // 하루 3번(버튼·말 합산)을 다 쓰면 누를 수 없음

@@ -256,6 +256,15 @@ object RespecApi {
         return SnoozeResult(until, null, json?.optInt("snoozes_today", -1)?.takeIf { it >= 0 })
     }
 
+    /**
+     * 아침 결과 보고 (AI CONTRACTS B23 학습 입력): 알람이 울리기 시작한 단계와 전화를 받은 순간의 단계(못 받았으면 null).
+     * 서버 API 준비 전이면 404로 무시됨 (요청한 형식)
+     */
+    suspend fun reportWakeResult(sessionId: String, startLevel: Int, receivedLevel: Int?): Boolean {
+        val body = JSONObject().put("start_level", startLevel).put("received_level", receivedLevel ?: JSONObject.NULL)
+        return ApiClient.post("/morning/sessions/$sessionId/wake-result", body)?.ok == true
+    }
+
     /** 대화로 설정 바꾸기 (AI update_setting, CONTRACTS B22): 인자를 그대로 서버에 → 바뀐 설정, 거절·실패면 null */
     suspend fun aiChangeSetting(field: String, value: String, scope: String?): JSONObject? {
         val body = JSONObject().put("field", field).put("value", value)

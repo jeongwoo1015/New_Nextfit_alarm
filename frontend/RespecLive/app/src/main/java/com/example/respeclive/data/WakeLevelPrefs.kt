@@ -8,7 +8,7 @@ import org.json.JSONObject
  * 기상 알람 시작 단계 (AI CONTRACTS B23). 사용자가 넥스티에게 말로 정한 값(B22 update_setting → 서버 설정)이 추천보다 우선:
  * - wake_next_level: 다음 알람 한 번만 이 단계로 시작 (쓰고 나면 비움. 서버도 울리고 나면 비움)
  * - wake_max_start_level: 앞으로 이 단계보다 크게 시작하지 않음
- * 없으면 서버 추천 단계(아직 앱에 주는 API가 없어서 1단계).
+ * 없으면 서버(개인화)가 정한 시작 단계(설정의 wake_start_level, 서버가 아직 주지 않으면 1단계).
  * 알람이 울리는 순간 인터넷을 기다리지 않도록 서버 설정을 받을 때마다 기기에 저장해 둠
  */
 object WakeLevelPrefs {
@@ -16,6 +16,7 @@ object WakeLevelPrefs {
     private const val KEY_NEXT = "next"
     private const val KEY_MAX = "max"
     private const val KEY_LAST_START = "last_start"
+    private const val KEY_RECOMMENDED = "recommended"
 
     private var app: Context? = null
 
@@ -32,6 +33,8 @@ object WakeLevelPrefs {
         val e = prefs()?.edit() ?: return
         level(setting, "wake_next_level")?.let { e.putInt(KEY_NEXT, it) } ?: e.remove(KEY_NEXT)
         level(setting, "wake_max_start_level")?.let { e.putInt(KEY_MAX, it) } ?: e.remove(KEY_MAX)
+        // 서버(개인화)가 밤에 정한 다음 기상 알람 시작 단계 (B23 d.applied). 서버가 아직 주지 않으면 없음 → 1단계
+        if (setting.has("wake_start_level")) level(setting, "wake_start_level")?.let { e.putInt(KEY_RECOMMENDED, it) } ?: e.remove(KEY_RECOMMENDED)
         e.apply()
     }
 
@@ -43,13 +46,15 @@ object WakeLevelPrefs {
         val p = prefs()
         val next = p?.getInt(KEY_NEXT, 0)?.takeIf { it > 0 }
         val max = p?.getInt(KEY_MAX, 0)?.takeIf { it > 0 }
-        val level = resolve(next, max, recommended = null)
+        val recommended = p?.getInt(KEY_RECOMMENDED, 0)?.takeIf { it > 0 }
+        val level = resolve(next, max, recommended)
         p?.edit()?.remove(KEY_NEXT)?.putInt(KEY_LAST_START, level)?.apply()
         return level
     }
 
-    /** 오늘 기상 알람이 시작한 단계 (재기상 = 이 단계 + 1) */
+    /** 오늘 기상 알람이 시작한 단계 */
     fun lastStartLevel(): Int = prefs()?.getInt(KEY_LAST_START, 0)?.takeIf { it > 0 } ?: AlarmSoundPlayer.WAKE_START_LEVEL
+
 
     /**
      * AI wake_volume.decide_start_level과 같은 우선순위: 다음 한 번(그대로 씀) > 상한(추천이 넘으면 상한으로) > 추천 > 기본 1단계
