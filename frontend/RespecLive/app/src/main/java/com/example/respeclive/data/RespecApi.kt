@@ -9,7 +9,7 @@ import java.io.File
 
 /** 코칭 토큰 결과. 토큰을 못 받으면 code에 서버 오류 코드 (COACHING_SKIPPED, ALL_STEPS_CHECKED 등) */
 /** 말로 미루기 결과: snoozedUntilMs가 있으면 성공, 없으면 code(SNOOZE_LIMIT 등, 연결 실패면 null) */
-class SnoozeResult(val snoozedUntilMs: Long?, val code: String?)
+class SnoozeResult(val snoozedUntilMs: Long?, val code: String?, val snoozesToday: Int? = null)
 
 class CoachingToken(val auth: LiveAuth?, val steps: JSONArray?, val code: String?)
 
@@ -240,12 +240,9 @@ object RespecApi {
     suspend fun startMorningFor(alarm: Alarm?): JSONObject? =
         (alarm?.serverId ?: serverAlarmId(alarm?.hour, alarm?.minute))?.let { startMorning(it) }
 
-    /** "5분 뒤 다시 울리기" (한 번이라도 하면 그날은 기상 실패) */
-    suspend fun snooze(sessionId: String): Boolean =
-        ApiClient.post("/morning/sessions/$sessionId/snooze")?.ok == true
-
     /**
-     * 말로 미루기 (AI reschedule_alarm, CONTRACTS B21): minutesLater(1~60) 또는 atTime("HH:MM", 오늘 60분 안) 중 하나.
+     * 미루기. 버튼은 둘 다 null(서버가 5분), 말로 미루기(AI reschedule_alarm, CONTRACTS B21)는 minutesLater(1~60) 또는
+     * atTime("HH:MM", 오늘 60분 안) 중 하나.
      * 성공하면 다시 울릴 시각(snoozed_until), 실패하면 code (하루 3번을 넘으면 SNOOZE_LIMIT, 연결 실패면 null)
      */
     suspend fun snoozeTo(sessionId: String, minutesLater: Int?, atTime: String?): SnoozeResult {
@@ -254,8 +251,9 @@ object RespecApi {
         atTime?.let { body.put("at_time", it) }
         val r = ApiClient.post("/morning/sessions/$sessionId/snooze", body) ?: return SnoozeResult(null, null)
         if (!r.ok) return SnoozeResult(null, r.errorCode ?: "HTTP_${r.code}")
-        val until = r.json()?.optString("snoozed_until")?.takeIf { it.isNotBlank() }?.let { parseServerTime(it) }
-        return SnoozeResult(until, null)
+        val json = r.json()
+        val until = json?.optString("snoozed_until")?.takeIf { it.isNotBlank() }?.let { parseServerTime(it) }
+        return SnoozeResult(until, null, json?.optInt("snoozes_today", -1)?.takeIf { it >= 0 })
     }
 
     /** 대화로 설정 바꾸기 (AI update_setting, CONTRACTS B22): 인자를 그대로 서버에 → 바뀐 설정, 거절·실패면 null */

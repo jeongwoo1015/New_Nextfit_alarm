@@ -49,6 +49,7 @@ import androidx.core.content.ContextCompat
 import com.example.respeclive.alarm.AlarmScheduler
 import com.example.respeclive.audio.AlarmSoundPlayer
 import com.example.respeclive.audio.AlarmVibrator
+import com.example.respeclive.data.SnoozeCount
 import com.example.respeclive.data.VoiceSnooze
 import com.example.respeclive.data.WakeHistory
 import com.example.respeclive.data.WakeLevelPrefs
@@ -697,11 +698,15 @@ fun MorningChatScreen(
             } else {
                 val r = RespecApi.snoozeTo(sid, req.minutesLater, req.atTime)
                 when {
-                    r.code == "SNOOZE_LIMIT" -> "오늘은 더 미룰 수 없어요 (하루 3번까지)"
+                    r.code == "SNOOZE_LIMIT" -> {
+                        SnoozeCount.set(context, SnoozeCount.MAX_PER_DAY)
+                        "오늘은 더 미룰 수 없어요 (하루 ${SnoozeCount.MAX_PER_DAY}번까지)"
+                    }
                     else -> {
                         // 서버가 정한 시각, 서버에 닿지 못했으면 앱이 계산한 시각
                         val at = r.snoozedUntilMs ?: req.triggerMillis
                         AlarmScheduler.scheduleSnoozeAt(context, alarmId, VoiceSnooze.label(at), at)
+                        r.snoozesToday?.let { SnoozeCount.set(context, it) } ?: SnoozeCount.increment(context)
                         "${VoiceSnooze.label(at)}에 다시 울려요"
                     }
                 }

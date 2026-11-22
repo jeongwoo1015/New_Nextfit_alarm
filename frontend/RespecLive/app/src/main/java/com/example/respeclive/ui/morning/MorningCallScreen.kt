@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import com.example.respeclive.alarm.AlarmScheduler
 import com.example.respeclive.audio.AlarmSoundPlayer
 import com.example.respeclive.audio.AlarmVibrator
+import com.example.respeclive.data.SnoozeCount
 import com.example.respeclive.data.WakeHistory
 import com.example.respeclive.data.WakeLevelPrefs
 import com.example.respeclive.data.AlarmRepository
@@ -42,9 +43,12 @@ import com.example.respeclive.ui.nexty.NextyMotion
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
 private const val VOLUME_UP_SECONDS = 10
+/** 미루기 버튼: 서버 답을 이 시간까지만 기다리고, 넘으면 기기에서 5분 뒤로 */
+private const val SNOOZE_WAIT_MS = 3_000L
 
 /**
  * 알람 수신 화면 → 밀어서 받으면 아침 대화 화면.
@@ -63,6 +67,12 @@ fun MorningCallScreen(
     val scope = rememberCoroutineScope()
     var answered by remember { mutableStateOf(false) }
     var session by remember { mutableStateOf<JSONObject?>(null) }
+    // 오늘 미룬 횟수 (버튼에 남은 횟수 표시). 세션의 미루기 횟수가 더 크면 그 값으로
+    var snoozesToday by remember { mutableIntStateOf(SnoozeCount.get(context)) }
+    var snoozing by remember { mutableStateOf(false) }
+    LaunchedEffect(session) {
+        session?.optJSONObject("session")?.optInt("snooze_count", 0)?.let { snoozesToday = SnoozeCount.atLeast(context, it) }
+    }
 
     LaunchedEffect(Unit) {
         val local = AlarmRepository.get(alarmId)
@@ -82,12 +92,32 @@ fun MorningCallScreen(
         MorningIncomingScreen(
             onAnswer = { answered = true },
             onDismiss = onFinish,
+            snoozeLeft = SnoozeCount.left(snoozesToday),
             onSnooze = {
-                AlarmScheduler.scheduleSnooze(context, alarmId, alarmLabel)
-                session?.optJSONObject("session")?.optString("session_id")?.takeIf { it.isNotBlank() }
-                    ?.let { sid -> scope.launch { RespecApi.snooze(sid) } }
-                Toast.makeText(context, "${AlarmScheduler.SNOOZE_MINUTES}분 뒤에 다시 울려요", Toast.LENGTH_SHORT).show()
-                onSnooze()
+                if (snoozing || snoozesToday >= SnoozeCount.MAX_PER_DAY) return@MorningIncomingScreen
+                snoozing = true
+                scope.launch {
+                    // 서버가 하루 3번(버튼·말 합산)을 검사하고 다시 울릴 시각을 정함. 서버에 닿지 못하면 기기에서 5분 뒤로
+                    val sid = session?.optJSONObject("session")?.optString("session_id")?.takeIf { it.isNotBlank() }
+                    val r = sid?.let { withTimeoutOrNull(SNOOZE_WAIT_MS) { RespecApi.snoozeTo(it, null, null) } }
+                    if (r?.code == "SNOOZE_LIMIT") {
+                        // 한도를 넘음: 미루지 않고 알람은 계속 울림
+                        snoozesToday = SnoozeCount.set(context, SnoozeCount.MAX_PER_DAY)
+                        Toast.makeText(context, "오늘은 더 미룰 수 없어요 (하루 ${SnoozeCount.MAX_PER_DAY}번까지)", Toast.LENGTH_SHORT).show()
+                        snoozing = false
+                        return@launch
+                    }
+                    val at = r?.snoozedUntilMs ?: (System.currentTimeMillis() + AlarmScheduler.SNOOZE_MINUTES * 60_000L)
+                    AlarmScheduler.scheduleSnoozeAt(context, alarmId, alarmLabel, at)
+                    snoozesToday = r?.snoozesToday?.let { SnoozeCount.set(context, it) } ?: SnoozeCount.increment(context)
+                    val left = SnoozeCount.left(snoozesToday)
+                    Toast.makeText(
+                        context,
+                        "${AlarmScheduler.SNOOZE_MINUTES}분 뒤에 다시 울려요 · " + if (left > 0) "오늘 ${left}번 더 미룰 수 있어요" else "오늘은 마지막 미루기예요",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    onSnooze()
+                }
             },
             alarmLabel = alarmLabel
         )
@@ -99,7 +129,8 @@ private fun MorningIncomingScreen(
     onAnswer: () -> Unit,
     onDismiss: () -> Unit,
     onSnooze: () -> Unit,
-    alarmLabel: String = "오전 6:00"
+    alarmLabel: String = "오전 6:00",
+    snoozeLeft: Int = SnoozeCount.MAX_PER_DAY,
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -228,10 +259,12 @@ private fun MorningIncomingScreen(
                 onAnswer()
             })
             Spacer(Modifier.height(8.dp))
-            TextButton(onClick = onSnooze) {
+            // 하루 3번(버튼·말 합산)을 다 쓰면 누를 수 없음
+            TextButton(onClick = onSnooze, enabled = snoozeLeft > 0) {
                 Text(
-                    "${AlarmScheduler.SNOOZE_MINUTES}분 뒤 다시 울리기",
-                    color = RespecColors.TextSub,
+                    if (snoozeLeft > 0) "${AlarmScheduler.SNOOZE_MINUTES}분 뒤 다시 울리기 · ${snoozeLeft}번 남음"
+                    else "오늘은 더 미룰 수 없어요",
+                    color = if (snoozeLeft > 0) RespecColors.TextSub else RespecColors.TextSub.copy(alpha = 0.5f),
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold
                 )
