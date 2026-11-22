@@ -47,7 +47,7 @@ def test_rule_mode_matches_rules_decide_and_logs_rule_ids():
 
 
 def test_bandit_mode_records_context_probability_and_candidates():
-    b = ContextualBandit()
+    b = ContextualBandit(policy="epsilon")
     d = decide("u1", history(wake_ok=False), TODAY, condition="TIRED", mode="bandit", bandit=b, rng=random.Random(0))
     lg = d.log
     assert lg.source == "bandit" and lg.context_key == "low|tired" and lg.allowed_arms == ["standard", "gentle"]
@@ -67,7 +67,7 @@ def test_ab_assignment_is_deterministic_and_balanced():
 
 
 def test_ab_mode_runs_the_assigned_side_and_logs_probability():
-    b = ContextualBandit()
+    b = ContextualBandit(policy="epsilon")
     seen = set()
     for j in range(40):
         day = TODAY + timedelta(days=j)
@@ -86,7 +86,7 @@ def test_ab_without_bandit_is_not_randomized():
 @pytest.mark.parametrize("mode", ["rule", "bandit", "ab"])
 @pytest.mark.parametrize("cond,style", [("TIRED", "FRIENDLY"), ("GOOD", "KIND"), ("STRESSED", "KIND")])
 def test_push_never_appears_when_forbidden(mode, cond, style):
-    b = ContextualBandit(epsilon=1.0)
+    b = ContextualBandit(policy="epsilon", epsilon=1.0)
     for j in range(60):
         d = decide(f"u{j}", history(wake_ok=False, skip=True), TODAY + timedelta(days=j), cond, style, mode=mode, bandit=b, rng=random.Random(j))
         assert d.strategy.strategy_id != "push" and d.strategy.coaching_intensity != "firm"
@@ -125,7 +125,7 @@ def test_blocks_follow_strategy_and_stage():
 
 # ---------------- 로그 ----------------
 def test_log_row_json_roundtrip_and_fields(tmp_path):
-    d = decide("u1", history(False), TODAY, "TIRED", "KIND", mode="bandit", bandit=ContextualBandit(), rng=random.Random(1))
+    d = decide("u1", history(False), TODAY, "TIRED", "KIND", mode="bandit", bandit=ContextualBandit(policy="epsilon"), rng=random.Random(1))
     row = d.log.to_row()
     assert isinstance(row["strategy"], str) and isinstance(row["stats"], str) and isinstance(row["allowed_arms"], str)
     back = DecisionLog.from_row(json.loads(json.dumps(row)))
@@ -146,7 +146,7 @@ def test_from_row_tolerates_garbage():
 
 # ---------------- 학습 ----------------
 def test_learn_only_for_bandit_choices():
-    b = ContextualBandit()
+    b = ContextualBandit(policy="epsilon")
     d = decide("u1", history(), TODAY, mode="bandit", bandit=b, rng=random.Random(0))
     assert learn(b, d.log, 1.0) is True and b.counts == {f"{d.log.context_key}::{d.log.strategy_id}": 1}
     rule_log = decide("u1", history(), TODAY, mode="rule").log
@@ -157,7 +157,7 @@ def test_learn_only_for_bandit_choices():
 
 
 def test_learn_rejects_bad_scores_and_unknown_strategy():
-    b = ContextualBandit()
+    b = ContextualBandit(policy="epsilon")
     d = decide("u1", history(), TODAY, mode="bandit", bandit=b, rng=random.Random(0))
     assert learn(b, d.log, float("nan")) is False and learn(b, d.log, None) is False and b.counts == {}
     d.log.strategy_id = "ghost"

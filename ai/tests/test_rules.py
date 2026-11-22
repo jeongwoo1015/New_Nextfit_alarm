@@ -68,7 +68,7 @@ def test_ai_must_not_end_before_the_user_says_so():
 # ---------- 밤 ----------
 def test_night_rules():
     ok = [T("오늘 발표 리허설이 있으셨네요, 잘 마무리하셨어요?"), T("고생 많으셨어요. 그때 기분은 어땠어요?", heard="피곤해요"),
-          T("오늘은 발표를 잘 마쳤지만 지친 하루였던 것 같아요. 맞아요?", heard="뿌듯했어요")]
+          T("뿌듯하셨다니 다행이에요. 발표 끝나고는 뭘 하셨어요?", heard="뿌듯했어요")]
     r = check(log("night", ok), scn("night", event_words=["리허설"]))
     assert not failed(r) and not failed(r, SOFT)
     long_first = [T("오늘 하루 고생 많으셨어요. 일정이 많았네요. 어땠어요?")]
@@ -253,7 +253,7 @@ def test_scenarios_build_valid_setup(name):
     if s.kind == "coaching":
         removed = {k for k, v in s.expect.get("adjust", {}).items() if v == 0}                          # 오늘 뺀 단계는 판정하지 않는다
         assert set(s.expect["verdicts"]) == {st.order for st in s.inp.steps} - removed
-        assert len(s.utterances) == len(s.expect["verdicts"]) + len(s.expect.get("no_verdict_turns", ())) + s.expect.get("extra_turns", 0) + 1   # 판정 턴 + 시간 변경 턴 + (게임처럼 한 단계 안의 추가 대화) + 작별 인사
+        assert len(s.utterances) == len(s.expect["verdicts"]) + len(s.expect.get("no_verdict_turns", ())) + s.expect.get("extra_turns", 0) + (0 if s.expect.get("no_farewell") else 1)   # 판정 턴 + 시간 변경 턴 + (게임처럼 한 단계 안의 추가 대화) + 작별 인사(코칭 뒤에 다음 순서가 있어 앱이 알아서 넘어가는 시나리오는 작별이 없다)
 
 
 def test_new_scenarios_exist():
@@ -312,14 +312,14 @@ def test_encouragement_between_steps_is_required():
 
 # ---------- 밤 대화 마무리: 묻지 않고 "이제 마무리할게요", 작별 인사는 한 번만, 그 응답에서 end_session ----------
 CLOSING_BASE = [T("오늘 하루는 어땠어요?"), T("점심은 뭘 드셨어요?", heard="별일 없었어요"),
-                T("오늘은 김치찌개를 맛있게 먹은 평온한 하루였던 것 같아요, 맞아요?", heard="김치찌개요"),
-                T("내일 미리 챙길 일정이나 걱정이 있으세요?", heard="네 맞아요")]
+                T("김치찌개 맛있었겠어요. 내일 미리 챙길 일정이나 걱정이 있으세요?", heard="김치찌개요"),
+                T("알겠어요. 내일 꼭 해내고 싶은 일이 있으세요?", heard="없어요")]
 
 
-def test_ai_closes_by_itself_after_summary_and_tomorrow():
-    ok = log("night", CLOSING_BASE + [T("이제 마무리할게요. 편안한 밤 되세요.", [END], heard="없어요")], "end_session")
+def test_ai_closes_by_itself_after_tomorrow_talk():
+    ok = log("night", CLOSING_BASE + [T("오늘 하루도 수고하셨어요. 이제 내일의 나에게 남길 한마디를 녹음해 볼게요.", [END], heard="없어요")], "end_session")
     r = check(ok, scn("night", ends_cleanly=True))
-    for rule in ("밤: 작별 인사는 한 번만 하고 그 응답에서 대화를 끝냄", "밤: 마무리해도 되는지 묻지 않음", "밤: 요약 확인과 내일 이야기를 마친 뒤에 마무리함",
+    for rule in ("밤: 작별 인사는 한 번만 하고 그 응답에서 대화를 끝냄", "밤: 마무리해도 되는지 묻지 않음", "밤: 내일 이야기를 마친 뒤에 마무리함", "밤: 마무리에서 내일의 나에게 남길 한마디 녹음을 알림",
                  "밤: 마무리하는 응답은 질문으로 끝나지 않음", "사용자가 끝내자고 하기 전에 AI가 끝내지 않음"):
         assert rule not in failed(r), rule
 
@@ -329,10 +329,10 @@ def test_asking_for_permission_to_close_fails():
     assert "밤: 마무리해도 되는지 묻지 않음" in failed(check(bad, scn("night", ends_cleanly=True)))
 
 
-def test_closing_before_summary_and_tomorrow_fails():
+def test_closing_before_tomorrow_talk_fails():
     early = log("night", [T("오늘 하루는 어땠어요?"), T("이제 마무리할게요. 편안한 밤 되세요.", [END], heard="별일 없었어요")], "end_session")
     r = check(early, scn("night", ends_cleanly=True))
-    assert "밤: 요약 확인과 내일 이야기를 마친 뒤에 마무리함" in failed(r)
+    assert "밤: 내일 이야기를 마친 뒤에 마무리함" in failed(r)
 
 
 def test_closing_response_must_not_end_with_a_question():
@@ -470,7 +470,7 @@ def test_fortune_changed_or_missing_sentence_fails():
 
 
 def test_fortune_extras_are_soft_but_repeat_question_and_calls_are_hard():
-    chatty = f"좋은 아침이에요. 오늘의 포춘이에요. {FORTUNE} 힘이 되었으면 좋겠어요. 오늘도 파이팅이에요."
+    chatty = f"오늘의 포춘이에요. {FORTUNE} 힘이 되었으면 좋겠어요. 오늘도 파이팅이에요."
     r = check(log("fortune", [T(chatty)]), fscn())
     assert "포춘: 소개 한 문장 외에 덧붙이지 않음" in failed(r, SOFT) and not failed(r)
     assert "포춘: 첫 응답에서 한 번만 읽음" in failed(check(log("fortune", [T(f"{FORTUNE} {FORTUNE}")]), fscn()))
@@ -505,3 +505,28 @@ def test_wordchain_pass_tolerances():
     strict = Scenario("w", "coaching", None, expect={"verdicts": {1: "done"}, "report_turn": {1: 2}})
     assert "사용자가 끝내자고 하기 전에 AI가 끝내지 않음" in failed(check(ended, strict))            # 허용은 끝말잇기 시나리오에만 적용된다
     assert "코칭: 판정이 기대와 같음" in failed(check(skipped, strict))
+
+
+def test_fortune_regreeting_is_hard_and_intro_words_are_soft():
+    """브리핑 뒤 단계는 아침 첫인사를 또 하지 않는다(HARD). 만든 재료를 밝히는 소개는 SOFT로 본다."""
+    greet = check(log("fortune", [T(f"좋은 아침이에요. 오늘의 포춘이에요. {FORTUNE}")]), fscn())
+    assert "포춘: 아침 첫인사를 반복하지 않음" in failed(greet)
+    s = fscn(); s.expect["intro_words"] = ["한마디"]
+    assert "포춘: 소개가 만든 재료(어젯밤 한마디)를 밝힘" in failed(check(log("fortune", [T(f"오늘의 포춘이에요. {FORTUNE}")]), s), SOFT)
+    assert not failed(check(log("fortune", [T(f"어젯밤 남긴 한마디로 만든 오늘의 포춘이에요. {FORTUNE}")]), s), SOFT)
+
+
+def test_recap_question_is_a_hard_failure_but_alarm_confirmation_is_not():
+    """하루를 요약해 '맞아요?'라고 되묻는 것은 실패. 알람 변경을 확인하는 '맞죠?'는 허용."""
+    recap = log("night", [T("오늘 하루는 어땠어요?"), T("바쁜 하루였어요", heard="별일 없었어요"),
+                          T("오늘은 많이 지친 하루였던 것 같아요, 맞아요?", heard="그냥 그랬어요")])
+    assert "밤: 하루를 요약해 맞는지 되묻지 않음" in failed(check(recap, scn("night")))
+    alarm = log("night", [T("오늘 하루는 어땠어요?"), T("알람을 7시 30분으로 늦출게요, 내일 하루만이에요. 맞죠?", heard="알람 좀 늦춰 줘요")])
+    assert "밤: 하루를 요약해 맞는지 되묻지 않음" not in failed(check(alarm, scn("night")))
+
+
+def test_tomorrow_question_after_talk_rule():
+    rush = log("night", [T("오늘 하루는 어땠어요?"), T("내일 꼭 해내고 싶은 일이 있어요?", heard="별일 없었어요")])
+    assert "밤: 하루 이야기를 듣은 뒤에 내일 이야기를 물음" in failed(check(rush, scn("night", tomorrow_after_talk=True)))
+    ok = log("night", [T("오늘 하루는 어땠어요?"), T("점심은 뭘 드셨어요?", heard="별일 없었어요"), T("내일 꼭 해내고 싶은 일이 있어요?", heard="김치찌개요")])
+    assert "밤: 하루 이야기를 듣은 뒤에 내일 이야기를 물음" not in failed(check(ok, scn("night", tomorrow_after_talk=True)))

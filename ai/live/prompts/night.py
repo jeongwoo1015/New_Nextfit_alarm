@@ -1,6 +1,6 @@
 """밤 대화 프롬프트. 오늘 일정으로 자연스럽게 시작하고, 정의서의 밤 기록 항목을 대화에서 파악한다."""
 from ..inputs import NightInput
-from .common import (SAFETY_RULES, VOICE_RULES, clean, events_block, join_blocks, persona_block)
+from .common import (SAFETY_RULES, VOICE_RULES, clean, events_block, join_blocks, persona_block, settings_block, wake_raise_block)
 
 NIGHT_RULES = """당신은 사용자의 하루를 마무리해 주는 따뜻한 밤 대화 파트너입니다. 오늘 하루를 함께 돌아보는 대화이고, 그 이야기가 한 줄 일기가 됩니다.
 
@@ -121,7 +121,7 @@ def night_prompt(inp: NightInput) -> str:
     now = f"[현재 시각]\n- {inp.now_hhmm}" if inp.now_hhmm else ""
     return join_blocks(
         NIGHT_RULES.format(**ex), override, ROUTINE_RULES.format(**ex) if inp.routine_items else "", SAFETY_RULES, VOICE_RULES,
-        persona_block(inp.persona), now,
+        persona_block(inp.persona), settings_block(inp), wake_raise_block(inp), now,
         events_block("오늘 일정", inp.events_today, "없음 (일정을 가져오지 못했거나 등록된 일정이 없다)"),
         tomorrow, routine, events_block("내일 일정", inp.events_tomorrow),
     )
