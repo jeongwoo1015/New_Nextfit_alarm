@@ -376,11 +376,18 @@ fun NightChatScreen(onClose: () -> Unit) {
 
         // end_session: 응답을 보내지 않고 작별 인사가 끝나면 닫음 (AI CONTRACTS 2-3)
         client.onToolCall = { call ->
-            if (call.name == "end_session") {
-                toolEvents.trySend(call.name)
-                null
-            } else {
-                JSONObject().put("result", "ok")
+            when (call.name) {
+                "end_session" -> {
+                    toolEvents.trySend(call.name)
+                    null
+                }
+                // 대화로 설정 바꾸기 (B22): 음악·성격·강도·기상 볼륨. 서버에 바꾸고 AI에는 늘 ok
+                "update_setting" -> {
+                    RespecApi.aiChangeSetting(call.args.optString("field"), call.args.optString("value"),
+                        call.args.optString("scope").takeIf { it.isNotBlank() })
+                    JSONObject().put("result", "ok")
+                }
+                else -> JSONObject().put("result", "ok")
             }
         }
 

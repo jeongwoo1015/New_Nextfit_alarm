@@ -257,6 +257,14 @@ object RespecApi {
         return SnoozeResult(until, null)
     }
 
+    /** 대화로 설정 바꾸기 (AI update_setting, CONTRACTS B22): 인자를 그대로 서버에 → 바뀐 설정, 거절·실패면 null */
+    suspend fun aiChangeSetting(field: String, value: String, scope: String?): JSONObject? {
+        val body = JSONObject().put("field", field).put("value", value)
+        scope?.takeIf { it.isNotBlank() }?.let { body.put("scope", it) }
+        val r = ApiClient.post("/settings/ai-change", body) ?: return null
+        return if (r.ok) r.json() else null
+    }
+
     /** 서버 시각(ISO, 시간대 포함) → epoch ms */
     private fun parseServerTime(iso: String): Long? = runCatching {
         val clean = iso.replace(Regex("\\.\\d+"), "").replace(Regex("Z$"), "+00:00")

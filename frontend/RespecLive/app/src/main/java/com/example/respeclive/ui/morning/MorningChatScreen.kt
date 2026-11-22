@@ -514,6 +514,12 @@ fun MorningChatScreen(
                     toolEvents.trySend(call.name)
                     null
                 }
+                // 대화로 설정 바꾸기 (B22): 서버에 바꾸고 AI에는 늘 ok (거절돼도 AI가 다시 설명하지 않도록)
+                "update_setting" -> {
+                    RespecApi.aiChangeSetting(call.args.optString("field"), call.args.optString("value"),
+                        call.args.optString("scope").takeIf { it.isNotBlank() })
+                    JSONObject().put("result", "ok")
+                }
                 else -> JSONObject().put("result", "ok")
             }
         }
