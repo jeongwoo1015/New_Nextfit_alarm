@@ -7,7 +7,7 @@ from backend.core.auth import current_user_id
 from backend.services.morning_service import Location, MorningService, SessionView
 
 from .schemas import (BriefingTokenIn, CoachingTokenOut, FortuneTokenOut, LiveTokenOut, ProgressOut, RewakeOut, SessionOut, SessionStartIn,
-                      SessionViewOut, SnoozeOut, StepDurationIn, StepOut, StepStatusIn, StretchAreaIn, StretchStepOut, VerdictIn)
+                      SessionViewOut, SnoozeIn, SnoozeOut, StepDurationIn, StepOut, StepStatusIn, StretchAreaIn, StretchStepOut, VerdictIn)
 
 router = APIRouter(prefix="/morning", tags=["morning"])
 
@@ -49,10 +49,15 @@ def rewake(session_id: str, user_id: str = Depends(current_user_id), svc: Mornin
 
 
 @router.post("/sessions/{session_id}/snooze", response_model=SnoozeOut)
-def snooze(session_id: str, user_id: str = Depends(current_user_id), svc: MorningService = Depends(morning_service)):
-    """"5분 뒤 다시 울리기"를 누를 때마다 호출 (횟수 제한 없음). 5분 뒤 다시 울리면 POST /morning/sessions로 같은 세션을 받는다.
+def snooze(session_id: str, body: SnoozeIn | None = None, user_id: str = Depends(current_user_id),
+           svc: MorningService = Depends(morning_service)):
+    """미루기. 버튼 "5분 뒤 다시 울리기"는 본문 없이, 말로 미루기(AI reschedule_alarm)는 {"minutes_later": 10} 또는 {"at_time": "09:00"}.
+    앱은 응답의 snoozed_until에 알람을 한 번 다시 예약하고, 다시 울리면 POST /morning/sessions로 같은 세션을 받는다.
+    버튼·말 합쳐 하루 3번까지(넘으면 409 SNOOZE_LIMIT), at_time이 지났거나 60분 뒤면 422 SNOOZE_TIME_INVALID.
     한 번이라도 하면 그날은 기상 실패."""
-    return SnoozeOut(snooze_count=svc.snooze(user_id, session_id))
+    body = body or SnoozeIn()
+    r = svc.snooze(user_id, session_id, body.minutes_later, body.at_time)
+    return SnoozeOut(snooze_count=r.snooze_count, snoozes_today=r.snoozes_today, snoozed_until=r.snoozed_until)
 
 
 @router.post("/sessions/{session_id}/wake-check", response_model=SessionViewOut)

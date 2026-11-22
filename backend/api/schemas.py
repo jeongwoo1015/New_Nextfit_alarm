@@ -2,7 +2,7 @@
 from datetime import date, datetime, time
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PlainSerializer
+from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, model_validator
 
 from backend.domain import codes
 
@@ -17,6 +17,7 @@ EnglishLevel = Literal[codes.ENGLISH_LEVELS]
 StretchArea = Literal[codes.STRETCH_AREA_INPUTS]   # 새 12개 + 옛 5개(서비스가 새 값으로 바꿈)
 VoiceType = Literal[codes.VOICE_TYPES]
 MusicGenre = Literal[codes.MUSIC_GENRES]
+WakeLevel = Literal[codes.WAKE_LEVELS]
 Theme = Literal[codes.THEME_INPUTS]               # LIGHT/DARK/AUTO + 예전 SYSTEM(서비스가 AUTO로 바꿈)
 CallType = Literal[codes.MORNING_CALL_TYPES]
 AlarmKind = Literal[codes.ALARM_KINDS]
@@ -52,6 +53,8 @@ class SettingOut(Out):
     music_genre: str
     theme: str
     app_language: str
+    wake_max_start_level: int | None    # 기상 알람 시작 볼륨 상한 1~5 (null = 제한 없음, 11/22)
+    wake_next_level: int | None         # 다음 알람 한 번만 이 단계로 시작 1~5 (울리고 나면 서버가 비움)
     updated_at: datetime | None = None
 
 
@@ -101,6 +104,18 @@ class SettingPatch(BaseModel):
     music_genre: MusicGenre | None = None
     theme: Theme | None = None
     app_language: str | None = Field(default=None, min_length=1, max_length=10)
+    wake_max_start_level: WakeLevel | None = None   # null을 보내면 비운다 (아래 둘만, 나머지는 null이면 무시)
+    wake_next_level: WakeLevel | None = None
+
+
+SETTING_NULLABLE = {"wake_max_start_level", "wake_next_level"}
+
+
+class AiSettingChangeIn(BaseModel):
+    """AI update_setting 함수의 인자를 앱이 그대로 보낸다 (11/20 회의 4, AI CONTRACTS B22)."""
+    field: Literal[codes.AI_SETTING_FIELDS]
+    value: str = Field(min_length=1, max_length=20)
+    scope: Literal[codes.AI_SETTING_SCOPES] | None = None
 
 
 # ---------- 알람 ----------
@@ -300,6 +315,7 @@ class SessionOut(Out):
     first_response_at: datetime | None
     rewake_count: int
     snooze_count: int
+    snoozed_until: datetime | None      # 마지막 미루기로 다시 울릴 시각 (11/22)
     wake_checked_at: datetime | None    # 확인 멘트를 마친 시각 (이때 기상 성공을 정함)
     wake_success: bool
     session_end_at: datetime | None
@@ -369,8 +385,22 @@ class RewakeOut(BaseModel):
     rewake_count: int
 
 
+class SnoozeIn(BaseModel):
+    """미루기. 둘 다 없으면 버튼 기본 5분. 말로 미루기(AI reschedule_alarm)는 받은 인자 하나를 그대로 보낸다."""
+    minutes_later: int | None = Field(None, ge=1, le=codes.SNOOZE_MAX_MIN)   # 지금부터 몇 분 뒤
+    at_time: HHMM | None = None                                             # 오늘 "HH:MM" (지금보다 뒤, 60분 안)
+
+    @model_validator(mode="after")
+    def _one_of(self):
+        if self.minutes_later is not None and self.at_time is not None:
+            raise ValueError("minutes_later와 at_time 중 하나만 보내 주세요")
+        return self
+
+
 class SnoozeOut(BaseModel):
-    snooze_count: int
+    snooze_count: int                   # 이 세션의 미루기 횟수
+    snoozes_today: int                  # 오늘 모든 모닝 세션의 미루기 합계 (하루 3번까지)
+    snoozed_until: datetime             # 다시 울릴 시각 (KST). 앱은 이 시각으로 알람을 한 번 다시 예약한다
 
 
 # ---------- 리포트·일기 ----------

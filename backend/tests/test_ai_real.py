@@ -12,7 +12,8 @@ import pytest
 pytest.importorskip("ai.live.config")
 
 from backend.clients.ai_gateway import (BriefingContext, CalendarEvent, CoachingContext, CoachStep, ItemChange,  # noqa: E402
-                                        NightContext, NightView, Persona, RealAIGateway, Weather, to_item_changes)
+                                        NightContext, NightView, Persona, RealAIGateway, SettingsView, Weather,
+                                        to_item_changes)
 from backend.core.timeutil import KST  # noqa: E402
 from backend.domain.models import AlarmRoutineItem, MorningSession, RecentRecords, SessionStep  # noqa: E402
 
@@ -60,7 +61,10 @@ def test_night_token_builds_real_setup():
     text = system_text(body)
     assert "정우님" in text and "발표" in text and "스트레칭 (축소)" in text and "3분" in text
     assert body["bidiGenerateContentSetup"]["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"] == "Puck"
-    assert tool_names(body) == ["end_session"]
+    assert tool_names(body) == ["update_setting", "end_session"]                # 11/21 대화로 설정 바꾸기(B22)
+    gw.issue_night_token(NightContext(PERSONA, "23:30", settings=SettingsView("JAZZ", 4, "USER", 3)))
+    text = system_text(tokens[-1][1])
+    assert "[현재 설정]" in text and "재즈" in text and "시작 4단계 (사용자가 정한 값)" in text and "상한: 3단계" in text
 
 
 def test_briefing_token_routine_and_skip():
@@ -69,9 +73,11 @@ def test_briefing_token_routine_and_skip():
                                             program_name="현실 모닝루틴", strategy_block="[오늘의 전략]\n- 테스트"))
     body = tokens[-1][1]
     assert "07:02" in system_text(body) and "보고서 끝내기" in system_text(body) and "[오늘의 전략]" in system_text(body)
-    assert tool_names(body) == ["start_routine", "end_session"]                 # 루틴이 이어진다
+    assert tool_names(body) == ["start_routine", "reschedule_alarm", "update_setting", "end_session"]   # 루틴이 이어진다, 말로 미루기(B21)
     gw.issue_briefing_token(BriefingContext(PERSONA, "07:02", night=NIGHT, program_name="현실 모닝루틴", coaching_skipped=True))
-    assert tool_names(tokens[-1][1]) == ["end_session"]                         # 코칭 안 하는 날은 start_routine 없음
+    assert tool_names(tokens[-1][1]) == ["reschedule_alarm", "update_setting", "end_session"]   # 코칭 안 하는 날은 start_routine 없음
+    gw.issue_briefing_token(BriefingContext(PERSONA, "07:02", night=NIGHT, program_name="현실 모닝루틴", snoozes_today=3))
+    assert tool_names(tokens[-1][1]) == ["start_routine", "update_setting", "end_session"]   # 하루 3번 미뤘으면 더 못 미룸
 
 
 def test_briefing_token_weather():
@@ -87,7 +93,7 @@ def test_briefing_token_weather():
 def test_briefing_token_content_alarm():
     gw, tokens = gateway()
     gw.issue_briefing_token(BriefingContext(PERSONA, "06:31", content_name="퀴즈"))
-    assert "퀴즈" in system_text(tokens[-1][1]) and tool_names(tokens[-1][1]) == ["start_routine", "end_session"]
+    assert "퀴즈" in system_text(tokens[-1][1]) and tool_names(tokens[-1][1]) == ["start_routine", "reschedule_alarm", "update_setting", "end_session"]
 
 
 def test_coaching_token_has_no_following_session():

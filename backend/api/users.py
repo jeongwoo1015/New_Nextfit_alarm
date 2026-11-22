@@ -6,7 +6,7 @@ from backend.core.auth import current_user_id
 from backend.core.errors import NotFound
 from backend.services.user_service import OnboardingInput, Profile, UserService
 
-from .schemas import AlarmOut, OnboardingIn, ProfileOut, SettingOut, SettingPatch, UserOut, UserPatch
+from .schemas import SETTING_NULLABLE, AiSettingChangeIn, AlarmOut, OnboardingIn, ProfileOut, SettingOut, SettingPatch, UserOut, UserPatch
 
 router = APIRouter(tags=["users"])
 
@@ -52,5 +52,16 @@ def get_settings(user_id: str = Depends(current_user_id), svc: UserService = Dep
 
 @router.patch("/settings", response_model=SettingOut)
 def patch_settings(body: SettingPatch, user_id: str = Depends(current_user_id), svc: UserService = Depends(user_service)):
-    """내 정보(호칭·어조·말투·목소리·음악 장르)와 설정(취침 알림·테마·언어). 보낸 항목만 바꾼다."""
-    return svc.update_setting(user_id, body.model_dump(exclude_none=True))
+    """내 정보(호칭·어조·말투·목소리·음악 장르)와 설정(취침 알림·테마·언어·기상 볼륨). 보낸 항목만 바꾼다.
+    null은 무시하고, 기상 볼륨 두 칸(wake_max_start_level, wake_next_level)만 null로 비울 수 있다."""
+    changes = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None or k in SETTING_NULLABLE}
+    return svc.update_setting(user_id, changes)
+
+
+@router.post("/settings/ai-change", response_model=SettingOut)
+def ai_change_setting(body: AiSettingChangeIn, user_id: str = Depends(current_user_id), svc: UserService = Depends(user_service)):
+    """대화로 설정 바꾸기 — 밤·브리핑 Live에서 AI가 update_setting(field, value, scope)을 부르면 앱이 인자를 그대로 보낸다.
+    음악·성격·강도는 그 설정을 바꾸고(다음 모닝콜부터), wake_volume은 scope=TODAY면 다음 알람 한 번(wake_next_level),
+    ALWAYS면 앞으로의 상한(wake_max_start_level). wake_volume에 scope가 없으면 TODAY(한 번만 바뀌는 쪽).
+    허용 값 밖이면 422 SETTING_VALUE_INVALID — 앱은 결과와 상관없이 AI에는 {"result":"ok"}를 돌려준다(B22)."""
+    return svc.change_setting_by_voice(user_id, body.field, body.value, body.scope)

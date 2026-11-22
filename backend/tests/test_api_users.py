@@ -73,6 +73,40 @@ def test_patch_settings_and_user(client):
     assert r.status_code == 200 and r.json()["gender"] == "NONE"
 
 
+def test_wake_volume_settings_can_be_cleared(client):
+    """기상 볼륨 두 칸(11/22)만 null로 비울 수 있고, 다른 칸의 null은 무시한다."""
+    onboard(client)
+    s = client.get("/settings", headers=auth(USER_A)).json()
+    assert (s["wake_max_start_level"], s["wake_next_level"]) == (None, None)
+    r = client.patch("/settings", json={"wake_max_start_level": 3, "wake_next_level": 4}, headers=auth(USER_A)).json()
+    assert (r["wake_max_start_level"], r["wake_next_level"]) == (3, 4)
+    r = client.patch("/settings", json={"wake_next_level": None, "tone": None}, headers=auth(USER_A)).json()
+    assert (r["wake_max_start_level"], r["wake_next_level"], r["tone"]) == (3, None, "CASUAL")
+    for bad in ({"wake_next_level": 6}, {"wake_max_start_level": 0}):
+        assert client.patch("/settings", json=bad, headers=auth(USER_A)).status_code == 422
+
+
+def test_ai_change_setting(client):
+    """대화로 설정 바꾸기: AI update_setting 인자를 그대로 받는다."""
+    onboard(client)
+    post = lambda body, user=USER_A: client.post("/settings/ai-change", json=body, headers=auth(user))   # noqa: E731
+    assert post({"field": "music_genre", "value": "classic", "scope": "ALWAYS"}).json()["music_genre"] == "CLASSIC"
+    assert post({"field": "personality", "value": "STRICT"}).json()["personality"] == "STRICT"
+    assert post({"field": "intensity", "value": "3"}).json()["intensity"] == 3
+    r = post({"field": "wake_volume", "value": "2", "scope": "ALWAYS"}).json()
+    assert (r["wake_max_start_level"], r["wake_next_level"]) == (2, None)                # 앞으로의 상한
+    r = post({"field": "wake_volume", "value": "4", "scope": "TODAY"}).json()
+    assert (r["wake_max_start_level"], r["wake_next_level"]) == (2, 4)                   # 다음 알람 한 번
+    assert post({"field": "wake_volume", "value": "1"}).json()["wake_next_level"] == 1   # scope 없으면 TODAY
+    for bad in ({"field": "music_genre", "value": "ROCK"}, {"field": "intensity", "value": "4"},
+                {"field": "wake_volume", "value": "6", "scope": "TODAY"}, {"field": "personality", "value": "다정한"}):
+        res = post(bad)
+        assert res.status_code == 422 and res.json()["error"]["code"] == "SETTING_VALUE_INVALID"
+    for bad in ({"field": "tone", "value": "CASUAL"}, {"field": "intensity", "value": "2", "scope": "FOREVER"}):
+        assert post(bad).status_code == 422                                          # 대화로 바꿀 수 없는 칸·범위
+    assert post({"field": "intensity", "value": "1"}, USER_B).status_code == 404
+
+
 def test_users_are_isolated(client):
     onboard(client)
     assert client.get("/users/me", headers=auth(USER_B)).json()["onboarding_done"] is False
