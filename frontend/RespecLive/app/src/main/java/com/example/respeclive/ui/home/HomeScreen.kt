@@ -1,7 +1,5 @@
 package com.example.respeclive.ui.home
 
-import android.os.Handler
-import android.os.Looper
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -25,10 +23,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.respeclive.alarm.AlarmScheduler
-import com.example.respeclive.alarm.BedtimeReminder
 import com.example.respeclive.data.Alarm
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
+import com.example.respeclive.data.WakeHistory
 import com.example.respeclive.data.WakeOverrides
 import com.example.respeclive.ui.theme.AppTheme
 import com.example.respeclive.ui.theme.RespecColors
@@ -53,6 +51,8 @@ fun HomeScreen(
         AlarmRepository.sync(context)
         // 밤 대화로 하루만 바꾼 기상 시각을 다시 확인 (굿나잇콜 직후엔 추출이 안 끝났을 수 있음)
         WakeOverrides.refresh(context)
+        // 기록이 적을 때 알람 진동 세기를 정하는 이번 주 기상 성공률 (알람이 울릴 때 기다리지 않도록 미리 받아 둠)
+        WakeHistory.refreshSuccessRate(context)
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -118,24 +118,9 @@ fun HomeScreen(
                     ) {
                         Text("+ 나만의 알람 만들기", color = RespecColors.Purple, fontWeight = FontWeight.Bold)
                     }
-                    // 디버그 (나만의 알람 만들기 바로 아래): 넥스티 디버그 화면 / 굿나잇콜 미리 알림 팝업
-                    Row(Modifier.align(Alignment.CenterHorizontally)) {
-                        TextButton(onClick = onOpenDebug) {
-                            Text("디버그", color = RespecColors.TextSub, fontSize = 13.sp)
-                        }
-                        TextButton(onClick = {
-                            // 굿나잇콜 시각이 된 것처럼 팝업을 5초 뒤에 띄움 (앱 밖에서 뜨는지 보도록)
-                            val bedtime = alarms.firstOrNull { it.type == AlarmType.BEDTIME && it.enabled }
-                            if (bedtime == null) {
-                                Toast.makeText(context, "켜진 굿나잇콜 알람을 먼저 만들어 주세요", Toast.LENGTH_SHORT).show()
-                            } else {
-                                val app = context.applicationContext
-                                Toast.makeText(context, "5초 뒤에 굿나잇콜 알림이 떠요. 앱 밖으로 나가 보세요", Toast.LENGTH_SHORT).show()
-                                Handler(Looper.getMainLooper()).postDelayed({ BedtimeReminder.ringNow(app, bedtime) }, 5_000L)
-                            }
-                        }) {
-                            Text("굿나잇콜 알림", color = RespecColors.TextSub, fontSize = 13.sp)
-                        }
+                    // 디버그 (나만의 알람 만들기 바로 아래): 넥스티 디버그 화면
+                    TextButton(onClick = onOpenDebug, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                        Text("디버그", color = RespecColors.TextSub, fontSize = 13.sp)
                     }
                     // 떠 있는 대화 버튼이 마지막 카드의 스위치를 가리지 않도록 버튼 높이만큼 비워 둠
                     Spacer(Modifier.height(72.dp))

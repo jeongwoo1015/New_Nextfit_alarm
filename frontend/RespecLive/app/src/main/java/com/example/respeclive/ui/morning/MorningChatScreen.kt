@@ -47,6 +47,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.respeclive.audio.AlarmSoundPlayer
+import com.example.respeclive.audio.AlarmVibrator
+import com.example.respeclive.data.WakeHistory
 import com.example.respeclive.audio.CallAudio
 import com.example.respeclive.audio.MessagePlayer
 import com.example.respeclive.audio.VoiceTranscriber
@@ -182,6 +184,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     val client = remember { LiveClient(context) }
     val messagePlayer = remember { MessagePlayer() }
     val rewakePlayer = remember { AlarmSoundPlayer(context) }
+    val rewakeVibration = remember { AlarmVibrator(context) }
     val messageDone = remember { arrayOfNulls<CompletableDeferred<Unit>>(1) }
     val toolEvents = remember { Channel<String>(Channel.UNLIMITED) }   // start_routine / end_session
     val micReady = remember { CompletableDeferred<Unit>() }
@@ -259,6 +262,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             client.release()
             messagePlayer.release()
             rewakePlayer.stop()
+            rewakeVibration.stop()
             RoutineRepository.sessionId?.let { sid ->
                 ApiClient.scope.launch {
                     RespecApi.endMorning(sid)?.let { v -> withContext(Dispatchers.Main) { RoutineRepository.applyView(v) } }
@@ -777,6 +781,8 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             val source = MusicStore.rewakeFile(context)?.absolutePath ?: RespecApi.musicUrl("rewake")
             if (rewaking) {
                 rewakePlayer.start(level = AlarmSoundPlayer.rewakeLevel(), soundUrl = source)
+                rewakeVibration.startStrong()   // 재기상은 유형과 상관없이 세게
+                WakeHistory.markRewake(context)
                 client.sendNotice(REWAKE_NOTICE)      // AI가 이름을 불러 깨움 (대화 원문·자막에는 안 남음)
             }
             RespecApi.rewake(sid)
@@ -785,6 +791,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     LaunchedEffect(lastRole, userTurns, talkStage, rewaking) {
         if (rewaking && (lastRole == LiveClient.Role.User || userTurns > rewakeTurns || !talkStage)) {
             rewakePlayer.stop()
+            rewakeVibration.stop()
             rewaking = false
         }
     }

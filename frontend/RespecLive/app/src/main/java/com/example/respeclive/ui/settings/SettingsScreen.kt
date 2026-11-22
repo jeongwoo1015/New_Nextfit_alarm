@@ -25,6 +25,8 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -39,6 +41,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.example.respeclive.BuildConfig
+import com.example.respeclive.audio.AlarmVibrator
 import com.example.respeclive.ui.common.SubScreenHeaderTop
 import com.example.respeclive.ui.theme.RespecColors
 
@@ -69,7 +72,7 @@ private fun readPermissions(context: Context): PermissionState {
 }
 
 /**
- * 설정: 언어 / 권한(알림, 전체 화면 알람, 다른 앱 위에 표시, 배터리 최적화 제외, 마이크) / 의견 / 정보.
+ * 설정: 언어 / 알람(진동) / 권한(알림, 전체 화면 알람, 다른 앱 위에 표시, 배터리 최적화 제외, 마이크) / 의견 / 정보.
  * 권한은 허용돼 있으면 '허용됨', 아니면 바로가기 표시이고, 누르면 그 권한의 시스템 설정 화면을 엶
  */
 @Composable
@@ -128,6 +131,27 @@ fun SettingsScreen(onBack: () -> Unit) {
 
         Section("언어") {
             SettingRow("언어 설정", trailing = { Text("한국어", color = RespecColors.TextSub, fontSize = 14.sp) })
+        }
+
+        Section("알람") {
+            var vibrate by remember { mutableStateOf(AlarmVibrator.isEnabled(context)) }
+            SettingRow("진동", "알람이 울릴 때 진동도 함께 울려요. 잘 못 일어나는 날이 이어지면 더 세게 울려요", trailing = {
+                Switch(
+                    checked = vibrate,
+                    onCheckedChange = { vibrate = it; AlarmVibrator.setEnabled(context, it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = RespecColors.OnAccent,
+                        checkedTrackColor = RespecColors.Lime,
+                        checkedBorderColor = RespecColors.Lime,
+                        uncheckedThumbColor = RespecColors.TextSub,
+                        uncheckedTrackColor = RespecColors.Background,
+                        uncheckedBorderColor = RespecColors.TextSub.copy(alpha = 0.5f)
+                    )
+                )
+            }) {
+                vibrate = !vibrate
+                AlarmVibrator.setEnabled(context, vibrate)
+            }
         }
 
         Section("권한") {

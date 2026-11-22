@@ -103,9 +103,6 @@ object BedtimeReminder {
         show(context, alarm)
     }
 
-    /** 디버그: 지금이 굿나잇콜 시각인 것처럼 팝업을 띄움 (+10분을 누르면 실제로 10분 뒤 다시 울림) */
-    fun ringNow(context: Context, alarm: Alarm) = ring(context, alarm, null)
-
     /** 팝업을 눌러 굿나잇콜을 받음 (MainActivity가 수신 화면을 열 때). 팝업을 내리고 미뤄 둔 다시 울림도 지움 */
     fun answerNow(context: Context, alarm: Alarm) {
         forget(context, alarm.id)

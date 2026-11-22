@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.respeclive.alarm.AlarmScheduler
 import com.example.respeclive.audio.AlarmSoundPlayer
+import com.example.respeclive.audio.AlarmVibrator
+import com.example.respeclive.data.WakeHistory
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.data.RespecApi
@@ -100,6 +102,7 @@ private fun MorningIncomingScreen(
     val context = LocalContext.current
     val view = LocalView.current
     val alarm = remember { AlarmSoundPlayer(context) }
+    val vibration = remember { AlarmVibrator(context) }
     var level by remember { mutableIntStateOf(AlarmSoundPlayer.WAKE_START_LEVEL) }
     var countdown by remember { mutableIntStateOf(VOLUME_UP_SECONDS) }
 
@@ -107,9 +110,12 @@ private fun MorningIncomingScreen(
     DisposableEffect(Unit) {
         view.keepScreenOn = true
         alarm.start(level = AlarmSoundPlayer.WAKE_START_LEVEL)
+        // 진동: 볼륨 단계를 따라 세지고, 최근 아침 기록으로 나눈 유형에 따라 시작 세기가 다름
+        vibration.start(AlarmSoundPlayer.WAKE_START_LEVEL, WakeHistory.profile(context))
         onDispose {
             view.keepScreenOn = false
             alarm.stop()
+            vibration.stop()
         }
     }
 
@@ -122,6 +128,7 @@ private fun MorningIncomingScreen(
                 if (level < AlarmSoundPlayer.WAKE_MAX_LEVEL) {
                     level += 1
                     alarm.setLevel(level)
+                    vibration.setLevel(level)
                 }
                 countdown = VOLUME_UP_SECONDS
             }
@@ -212,7 +219,10 @@ private fun MorningIncomingScreen(
                 fontSize = 12.sp
             )
             Spacer(Modifier.height(16.dp))
-            SwipeToAnswer(onComplete = onAnswer)
+            SwipeToAnswer(onComplete = {
+                WakeHistory.recordAnswer(context, level)   // 받은 단계 = 진동 유형을 나누는 기준
+                onAnswer()
+            })
             Spacer(Modifier.height(8.dp))
             TextButton(onClick = onSnooze) {
                 Text(
