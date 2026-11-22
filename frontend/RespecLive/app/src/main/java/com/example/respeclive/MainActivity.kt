@@ -32,6 +32,7 @@ import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.navigation.AppNavHost
 import com.example.respeclive.ui.common.StartupPermissions
+import com.example.respeclive.ui.common.permissionGuideDone
 import com.example.respeclive.ui.theme.AppTheme
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.delay
@@ -98,7 +99,7 @@ class MainActivity : ComponentActivity() {
                         launch = launchRequest,
                         onLaunchHandled = { launchRequest = null }
                     )
-                    // 앱 시작 때 전체 화면 알림·다른 앱 위에 표시를 묻고, 거절하면 영향을 알려 줌 (알람으로 열린 수신 화면에서는 띄우지 않음)
+                    // 처음 시작 때 앱이 쓰는 권한을 한 화면에 안내하고 [허용]으로 차례대로 물음 (알람으로 열린 수신 화면에서는 띄우지 않음)
                     StartupPermissions(
                         enabled = launchRequest == null,
                         notificationDenied = notificationDenied,
@@ -169,7 +170,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** 처음 시작 때는 권한 안내 화면(StartupPermissions)이 알림 권한도 함께 물으므로, 안내를 마친 뒤에만 여기서 다시 물음 */
     private fun requestNotificationPermission() {
+        if (!permissionGuideDone(this)) return
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED

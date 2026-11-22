@@ -163,7 +163,6 @@ private const val FORTUNE_MATCH_CHARS = 6
 
 /** AI가 말을 마친 뒤 이 시간 동안 대답이 없으면 재기상 음악 (브리핑·코칭 내내, 스트레칭은 단계 타이머가 끝난 뒤부터) */
 private const val REWAKE_SILENCE_MS = 8_000L
-private const val REWAKE_LEVEL = 3
 
 /**
  * 아침 대화 (Gemini Live). 지시문·함수는 서버가 토큰에 고정한다 (ai/live, AI CONTRACTS 2절).
@@ -777,7 +776,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             // 밤에 받아 둔 파일 → 서버 URL → (둘 다 없으면) 기기 기본 알람음
             val source = MusicStore.rewakeFile(context)?.absolutePath ?: RespecApi.musicUrl("rewake")
             if (rewaking) {
-                rewakePlayer.start(level = REWAKE_LEVEL, soundUrl = source)
+                rewakePlayer.start(level = AlarmSoundPlayer.rewakeLevel(), soundUrl = source)
                 client.sendNotice(REWAKE_NOTICE)      // AI가 이름을 불러 깨움 (대화 원문·자막에는 안 남음)
             }
             RespecApi.rewake(sid)

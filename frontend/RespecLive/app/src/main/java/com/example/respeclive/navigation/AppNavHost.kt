@@ -9,6 +9,7 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -76,7 +77,8 @@ fun AppNavHost(
     onLaunchHandled: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    var needOnboarding by remember { mutableStateOf<Boolean?>(null) }
+    // 화면이 다시 만들어져도(가로 회전·다크 모드 전환 등) 시작 화면부터 다시 나오지 않도록 저장
+    var needOnboarding by rememberSaveable { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(Unit) {
         val profile = withTimeoutOrNull(8_000) { RespecApi.profile() }
         needOnboarding = profile != null && !profile.optBoolean("onboarding_done", true)
@@ -84,7 +86,7 @@ fun AppNavHost(
         profile?.optJSONObject("setting")?.optString("theme")?.let { AppTheme.applyServer(context, it) }
     }
     // 서버 응답이 빨라도 시작 화면이 보이도록 잠깐 유지. 알람으로 열렸으면 기다리지 않음
-    var startShown by remember { mutableStateOf(launch != null) }
+    var startShown by rememberSaveable { mutableStateOf(launch != null) }
     LaunchedEffect(Unit) {
         delay(START_SCREEN_MIN_MS)
         startShown = true

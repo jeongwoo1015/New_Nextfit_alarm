@@ -14,7 +14,7 @@ import kotlin.math.roundToInt
  */
 class AlarmSoundPlayer(
     private val context: Context,
-    private val maxLevel: Int = MAX_LEVEL,
+    private val maxLevel: Int = SCALE_LEVELS,
 ) {
     private val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var player: MediaPlayer? = null
@@ -104,6 +104,17 @@ class AlarmSoundPlayer(
     }
 
     companion object {
-        const val MAX_LEVEL = 5
+        /**
+         * 볼륨 눈금 수 (11/20 회의): 기상 알람은 1~5단계, 재기상 알람은 기상 알람보다 한 단계 큰 2~6단계.
+         * 6단계가 폰 알람 최대 볼륨이라 기상 알람 5단계는 최대의 5/6.
+         */
+        const val SCALE_LEVELS = 6
+        /** 기상 알람이 받지 않을 때 올라가는 최대 단계 */
+        const val WAKE_MAX_LEVEL = 5
+        /** 기상 알람 시작 단계. 지금은 1 고정 (서버가 사용자별 시작 단계를 정해 주면(AI CONTRACTS B23) 그 값으로 바꿈) */
+        const val WAKE_START_LEVEL = 1
+
+        /** 재기상 알람 단계 = 기상 알람 시작 단계 + 1 (AI wake_volume.rewake_level과 같은 규칙, 최대 6) */
+        fun rewakeLevel(wakeStartLevel: Int = WAKE_START_LEVEL): Int = (wakeStartLevel + 1).coerceIn(2, SCALE_LEVELS)
     }
 }

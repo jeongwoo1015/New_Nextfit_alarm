@@ -100,13 +100,13 @@ private fun MorningIncomingScreen(
     val context = LocalContext.current
     val view = LocalView.current
     val alarm = remember { AlarmSoundPlayer(context) }
-    var level by remember { mutableIntStateOf(1) }
+    var level by remember { mutableIntStateOf(AlarmSoundPlayer.WAKE_START_LEVEL) }
     var countdown by remember { mutableIntStateOf(VOLUME_UP_SECONDS) }
 
     // 알람음 재생 + 화면 켜짐 유지. 화면을 벗어나면 정지하고 볼륨 복원
     DisposableEffect(Unit) {
         view.keepScreenOn = true
-        alarm.start(level = 1)
+        alarm.start(level = AlarmSoundPlayer.WAKE_START_LEVEL)
         onDispose {
             view.keepScreenOn = false
             alarm.stop()
@@ -119,7 +119,7 @@ private fun MorningIncomingScreen(
             delay(1000)
             countdown -= 1
             if (countdown <= 0) {
-                if (level < AlarmSoundPlayer.MAX_LEVEL) {
+                if (level < AlarmSoundPlayer.WAKE_MAX_LEVEL) {
                     level += 1
                     alarm.setLevel(level)
                 }
@@ -206,8 +206,8 @@ private fun MorningIncomingScreen(
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             FitText(
-                if (level >= AlarmSoundPlayer.MAX_LEVEL) "알람 소리 최대"
-                else "알람 소리 $level/${AlarmSoundPlayer.MAX_LEVEL} · 받지 않으면 ${countdown}초 뒤 커져요",
+                if (level >= AlarmSoundPlayer.WAKE_MAX_LEVEL) "알람 소리 최대"
+                else "알람 소리 $level/${AlarmSoundPlayer.WAKE_MAX_LEVEL} · 받지 않으면 ${countdown}초 뒤 커져요",
                 color = RespecColors.TextSub,
                 fontSize = 12.sp
             )

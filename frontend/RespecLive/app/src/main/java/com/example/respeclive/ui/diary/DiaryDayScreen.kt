@@ -199,8 +199,31 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
             )
         }
 
-        // 이날의 리포트 (그날 아침 세션): 기상 시간 · 루틴 수행 · 루틴 성공률
-        SectionTitle("이날의 리포트")
+        // 오늘의 포춘 (11/20 회의: 아침에 받은 포춘 문장을 일기에서 다시 보기). 세션 응답의 fortune_text를 그대로 보여 줌
+        SectionTitle("오늘의 포춘")
+        Card {
+            val fortune = (0 until (sessions?.length() ?: 0))
+                .mapNotNull { sessions!!.optJSONObject(it)?.optJSONObject("session") }
+                .firstOrNull { it.text("fortune_text") != null }
+            val text = fortune?.text("fortune_text")
+            if (text != null) {
+                Text(
+                    if (fortune?.optString("fortune_style") == "HOROSCOPE") "오늘의 운세" else "포춘쿠키",
+                    color = RespecColors.TextSub, fontSize = 13.sp, fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+            Text(
+                text ?: "이날은 받은 포춘이 없어요",
+                color = if (text != null) RespecColors.Text else RespecColors.TextSub,
+                fontSize = if (text != null) 18.sp else 15.sp,
+                fontWeight = if (text != null) FontWeight.SemiBold else FontWeight.Normal,
+                lineHeight = 26.sp
+            )
+        }
+
+        // 리포트 (그날 아침 세션): 기상 시간 · 루틴 수행 · 루틴 성공률
+        SectionTitle("리포트")
         if (session == null) {
             Card { Text("이날은 모닝콜 기록이 없어요", color = RespecColors.TextSub, fontSize = 15.sp) }
         } else {
