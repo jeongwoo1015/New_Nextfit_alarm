@@ -58,6 +58,7 @@ import com.example.respeclive.ui.common.rememberHeldUserLine
 import com.example.respeclive.ui.common.rememberScreenScale
 import com.example.respeclive.ui.common.rememberSubtitleHeight
 import com.example.respeclive.ui.common.rememberSpokenPage
+import com.example.respeclive.ui.common.splitSubtitlePages
 import com.example.respeclive.ui.common.typeSubtitlePages
 import com.example.respeclive.ui.nexty.NextyCharacter
 import com.example.respeclive.ui.nexty.NightDecor
@@ -178,6 +179,7 @@ fun NightChatScreen(onClose: () -> Unit) {
     var skipAi by remember { mutableStateOf(false) }
     var skipSave by remember { mutableStateOf(false) }
     var finishNow by remember { mutableStateOf(false) }
+    var hangUp by remember { mutableStateOf(false) }      // 대화 중에 통화 종료를 누름 → 한 마디 녹음 없이 닫음
     var musicStarted by remember { mutableStateOf(false) } // 굿나잇콜 시작과 함께 수면 음악을 틀었음 (SleepMusicService)
     var sleeping by remember { mutableStateOf(false) }     // 마무리 뒤 수면 음악만 흐르는 상태
     val musicPlaying by SleepMusic.playing.collectAsState()
@@ -400,7 +402,7 @@ fun NightChatScreen(onClose: () -> Unit) {
         client.start {
             RespecApi.nightToken(CalendarEvents.today(context), CalendarEvents.tomorrow(context)) ?: RespecApi.tokenError()
         }
-        // AI가 마무리하며 끝냈으면(end_session) 한마디 녹음 안내를 AI가 이미 함. 사용자가 버튼으로 끝냈으면 앱이 안내
+        // AI가 마무리하며 끝냈으면(end_session) 한마디 녹음 안내를 AI가 이미 함. 사용자가 통화 종료 버튼으로 끝냈으면 녹음 없이 닫음
         val endedByAi = select<Boolean> {
             toolEvents.onReceive {
                 client.awaitReplyEnd()      // end_session 뒤에 이어지는 녹음 안내 말까지 끝까지 들려줌
@@ -447,17 +449,29 @@ fun NightChatScreen(onClose: () -> Unit) {
             RespecApi.sleepMusic(null)?.let { SleepMusic.switchTo(appCtx, it) }
         }
 
+        // 통화 종료 버튼으로 끝냈으면 한 마디 녹음·마무리 멘트 없이 바로 닫음.
+        // 원문 저장·밤 기록 반영은 위에서 백그라운드(ApiClient.scope)로 넘겼고, 수면 음악은 화면을 닫을 때 이어짐
+        if (hangUp) {
+            client.stop()
+            onClose()
+            return@LaunchedEffect
+        }
+
         // ===== 3) 내일의 한 마디 녹음 =====
         saveStep = true
         // AI가 "내일의 나에게 남길 한마디를 녹음해 볼게요"로 마무리했으면 안내를 다시 읽지 않고(자막만) 바로 띵 → 녹음.
-        // 사용자가 먼저 "잘게요" 해서 AI가 인사만 하고 끝냈거나 버튼으로 끝냈으면 앱이 "녹음해 볼게요"(어조에 맞춤)를 읽은 뒤 띵 → 녹음.
+        // 사용자가 먼저 "잘게요" 해서 AI가 인사만 하고 끝냈으면 앱이 "녹음해 볼게요"(어조에 맞춤)를 읽은 뒤 띵 → 녹음.
+        // (통화 종료 버튼으로 끝낸 경우는 위에서 이미 닫음)
         // 대답을 묻지 않음: 질문하면 사용자의 "응"이 한 마디로 녹음됨
-        val lastAi = turns.lastOrNull { it.role == LiveClient.Role.Assistant }?.text.orEmpty()
+        val lastAiLine = turns.lastOrNull { it.role == LiveClient.Role.Assistant }
+        val lastAi = lastAiLine?.text.orEmpty()
         val aiAnnounced = endedByAi && ("녹음" in lastAi || "한마디" in lastAi || "한 마디" in lastAi)
         val texts = nightLines(withTimeoutOrNull(3_000) { toneJob.await() })
         if (aiAnnounced) {
-            subtitle = texts.saveIntro
-            subtitleKey = null
+            // AI가 이미 소리 내어 안내했으므로 화면에도 AI가 실제로 한 말을 그대로 둠 (앱 고정 문구를 띄우면 들은 말과 화면 글이 달랐음)
+            // 박스 key도 말하는 동안 보던 마지막 페이지와 같게 해서(rememberSpokenPage의 key) 글자를 다시 치지 않음
+            subtitle = lastAi
+            subtitleKey = lastAiLine?.let { it.atMs to splitSubtitlePages(lastAi).lastIndex }
         } else say(texts.saveIntro)
 
         var voice: File? = null
@@ -562,9 +576,11 @@ fun NightChatScreen(onClose: () -> Unit) {
         }
     }
 
-    // 대화 중에는 대화만 끝내고 한 마디 단계로, 그 뒤에는 바로 닫음 (원문 저장은 백그라운드에서 계속)
+    // 통화 종료: 언제 누르든 통화를 완전히 끝내고 닫음 (한 마디 녹음 단계로 넘어가지 않음).
+    // 대화 중이면 대화 원문은 저장해야 하므로 진행 흐름에 알려, 원문 저장을 백그라운드로 넘긴 뒤 닫게 함
     fun endCall() {
         if (talking) {
+            hangUp = true
             endTalk.trySend(Unit)
             return
         }
@@ -584,7 +600,8 @@ fun NightChatScreen(onClose: () -> Unit) {
     val heldUser = rememberHeldUserLine(lines).takeIf { talking && status == LiveClient.Status.Live }
     val lastLine = heldUser ?: lines.lastOrNull()
     val shownFromUser = when {
-        !talking -> phase == Phase.Review
+        // 녹음 확인 단계에서 사용자 칸은 받아쓴 한 마디("…")를 보여 줄 때만. "글자로 바꾸는 중…"·"바꾸지 못했어요" 안내는 AI 말풍선
+        !talking -> phase == Phase.Review && pendingText != null
         else -> status == LiveClient.Status.Live && lastLine?.role == LiveClient.Role.User
     }
     // AI가 말하는 줄: 지금 말하는 박스를 통째로 먼저 보여 줌
@@ -742,9 +759,11 @@ private fun CallHeader(elapsed: Int, musicOn: Boolean, onMusicChange: (Boolean) 
                     checkedThumbColor = RespecColors.OnAccent,
                     checkedTrackColor = RespecColors.Lime,
                     checkedBorderColor = RespecColors.Lime,
+                    // 꺼짐 상태: 밤 테마에서는 Disabled가 알약 배경(Card)과 같은 색이라 스위치 몸통이 안 보였음.
+                    // 알약보다 진한 배경색 몸통 + 옅은 테두리로 두 테마 모두에서 스위치 모양이 보이게 함
                     uncheckedThumbColor = RespecColors.TextSub,
-                    uncheckedTrackColor = RespecColors.Disabled,
-                    uncheckedBorderColor = RespecColors.Disabled
+                    uncheckedTrackColor = RespecColors.Background,
+                    uncheckedBorderColor = RespecColors.TextSub.copy(alpha = 0.5f)
                 )
             )
         }
