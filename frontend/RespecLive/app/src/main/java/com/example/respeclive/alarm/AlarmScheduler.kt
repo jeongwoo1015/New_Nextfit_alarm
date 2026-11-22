@@ -79,6 +79,11 @@ object AlarmScheduler {
         setAlarm(context, SNOOZE_REQUEST_BASE + alarmId.coerceAtLeast(0), alarmId, AlarmType.WAKE, label, trigger)
     }
 
+    /** 말로 미루기: 정해진 시각에 오늘 한 번만 다시 울림 (버튼 미루기와 같은 자리를 써서 둘 중 마지막 것만 남음) */
+    fun scheduleSnoozeAt(context: Context, alarmId: Int, label: String, triggerMillis: Long) {
+        setAlarm(context, SNOOZE_REQUEST_BASE + alarmId.coerceAtLeast(0), alarmId, AlarmType.WAKE, label, triggerMillis)
+    }
+
     fun cancel(context: Context, id: Int) {
         BedtimeReminder.cancelLegacy(context, id)
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager

@@ -46,8 +46,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.example.respeclive.alarm.AlarmScheduler
 import com.example.respeclive.audio.AlarmSoundPlayer
 import com.example.respeclive.audio.AlarmVibrator
+import com.example.respeclive.data.VoiceSnooze
 import com.example.respeclive.data.WakeHistory
 import com.example.respeclive.data.WordChainLine
 import com.example.respeclive.data.WordChainMorning
@@ -184,7 +186,12 @@ private const val REWAKE_SILENCE_MS = 8_000L
  * onFinish: 통화가 끝나면 세션 id(세션을 만들지 못했으면 null)와 통화 길이(초)를 넘김
  */
 @Composable
-fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int) -> Unit, initialSession: JSONObject? = null) {
+fun MorningChatScreen(
+    alarmId: Int,
+    onFinish: (sessionId: String?, talkSec: Int) -> Unit,
+    initialSession: JSONObject? = null,
+    onSnoozed: () -> Unit = {},     // 말로 미루기를 마쳤을 때 (리포트 없이 홈으로)
+) {
     val context = LocalContext.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
@@ -231,6 +238,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     // 서버 기록은 사용자 말 받아쓰기가 도착하거나 AI가 다음 단계를 보고하거나 코칭이 끝날 때 함 (B19)
     val heldReports = remember { mutableStateMapOf<Int, String>() }
     var heldShown by remember { mutableIntStateOf(0) }     // 보류한 보고로 화면을 넘긴 마지막 단계 번호 (화면은 그다음 단계)
+    var rescheduleArgs by remember { mutableStateOf<JSONObject?>(null) }
     fun finish() {
         val sid = sessionId ?: initialSession?.optJSONObject("session")?.optString("session_id")?.takeIf { it.isNotBlank() }
         onFinish(sid, elapsed)
@@ -500,6 +508,12 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                     toolEvents.trySend(call.name)
                     null
                 }
+                // 말로 미루기 (B21): end_session처럼 응답을 보내지 않고, 안내 음성이 끝나면 연결을 닫은 뒤 미루기
+                "reschedule_alarm" -> {
+                    rescheduleArgs = call.args
+                    toolEvents.trySend(call.name)
+                    null
+                }
                 else -> JSONObject().put("result", "ok")
             }
         }
@@ -662,6 +676,33 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
         val briefingEvent = toolEvents.receive()
         client.awaitReplyEnd()      // AI의 마지막 말을 끝까지 들려줌
         client.pauseMic()
+
+        // 말로 미루기: 연결을 닫고 서버에 미룬 뒤 그 시각에 오늘 한 번 다시 울리도록 예약하고 홈으로
+        if (briefingEvent == "reschedule_alarm") {
+            client.stop()
+            val args = rescheduleArgs
+            val req = VoiceSnooze.check(
+                args?.takeIf { it.has("minutes_later") && !it.isNull("minutes_later") }?.optInt("minutes_later"),
+                args?.optString("at_time")?.takeIf { it.isNotBlank() && it != "null" }
+            )
+            val message = if (req == null) {
+                "다시 울릴 시각을 알아듣지 못했어요. 알람을 직접 맞춰 주세요"
+            } else {
+                val r = RespecApi.snoozeTo(sid, req.minutesLater, req.atTime)
+                when {
+                    r.code == "SNOOZE_LIMIT" -> "오늘은 더 미룰 수 없어요 (하루 3번까지)"
+                    else -> {
+                        // 서버가 정한 시각, 서버에 닿지 못했으면 앱이 계산한 시각
+                        val at = r.snoozedUntilMs ?: req.triggerMillis
+                        AlarmScheduler.scheduleSnoozeAt(context, alarmId, VoiceSnooze.label(at), at)
+                        "${VoiceSnooze.label(at)}에 다시 울려요"
+                    }
+                }
+            }
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            onSnoozed()
+            return@LaunchedEffect
+        }
         val message = messageJob.await()
 
         // 3) 순서표의 나머지 단계를 차례로. 한마디는 재생할 녹음이 있을 때만, 코칭은 브리핑이 start_routine을 불렀을 때만

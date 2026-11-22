@@ -74,7 +74,8 @@ fun MorningCallScreen(
         MorningChatScreen(
             alarmId = alarmId,
             initialSession = session,
-            onFinish = { sid, talkSec -> if (sid != null) onCallEnded(sid, talkSec) else onFinish() }
+            onFinish = { sid, talkSec -> if (sid != null) onCallEnded(sid, talkSec) else onFinish() },
+            onSnoozed = onSnooze
         )
     } else {
         MorningIncomingScreen(

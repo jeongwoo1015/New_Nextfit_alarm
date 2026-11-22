@@ -8,6 +8,9 @@ import org.json.JSONObject
 import java.io.File
 
 /** 코칭 토큰 결과. 토큰을 못 받으면 code에 서버 오류 코드 (COACHING_SKIPPED, ALL_STEPS_CHECKED 등) */
+/** 말로 미루기 결과: snoozedUntilMs가 있으면 성공, 없으면 code(SNOOZE_LIMIT 등, 연결 실패면 null) */
+class SnoozeResult(val snoozedUntilMs: Long?, val code: String?)
+
 class CoachingToken(val auth: LiveAuth?, val steps: JSONArray?, val code: String?)
 
 /**
@@ -239,6 +242,26 @@ object RespecApi {
     /** "5분 뒤 다시 울리기" (한 번이라도 하면 그날은 기상 실패) */
     suspend fun snooze(sessionId: String): Boolean =
         ApiClient.post("/morning/sessions/$sessionId/snooze")?.ok == true
+
+    /**
+     * 말로 미루기 (AI reschedule_alarm, CONTRACTS B21): minutesLater(1~60) 또는 atTime("HH:MM", 오늘 60분 안) 중 하나.
+     * 성공하면 다시 울릴 시각(snoozed_until), 실패하면 code (하루 3번을 넘으면 SNOOZE_LIMIT, 연결 실패면 null)
+     */
+    suspend fun snoozeTo(sessionId: String, minutesLater: Int?, atTime: String?): SnoozeResult {
+        val body = JSONObject()
+        minutesLater?.let { body.put("minutes_later", it) }
+        atTime?.let { body.put("at_time", it) }
+        val r = ApiClient.post("/morning/sessions/$sessionId/snooze", body) ?: return SnoozeResult(null, null)
+        if (!r.ok) return SnoozeResult(null, r.errorCode ?: "HTTP_${r.code}")
+        val until = r.json()?.optString("snoozed_until")?.takeIf { it.isNotBlank() }?.let { parseServerTime(it) }
+        return SnoozeResult(until, null)
+    }
+
+    /** 서버 시각(ISO, 시간대 포함) → epoch ms */
+    private fun parseServerTime(iso: String): Long? = runCatching {
+        val clean = iso.replace(Regex("\\.\\d+"), "").replace(Regex("Z$"), "+00:00")
+        java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US).parse(clean)?.time
+    }.getOrNull()
 
     /** AI 질문 뒤 8초 무응답으로 재기상 음악을 틀 때마다 */
     suspend fun rewake(sessionId: String): Boolean =
