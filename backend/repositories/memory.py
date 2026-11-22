@@ -1,7 +1,7 @@
 """메모리 저장소 — 테스트와 DB 없이 서버를 띄울 때 쓴다. 동작은 base.py의 규칙과 DB 트리거를 따른다."""
 import uuid
 from dataclasses import asdict, fields, replace
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 from backend.core.errors import ValidationFailed
 from backend.core.timeutil import apply_date, now_kst, record_date
@@ -22,6 +22,29 @@ STRETCH_AREAS = ("FULL", "NECK", "SHOULDER", "CHEST_BACK", "WRIST_HAND", "ELBOW_
                  "THIGH", "CALF", "ANKLE_FOOT", "NECK_SHOULDER", "ARM_WRIST", "BACK_HIP", "LEG")
 
 _SETTING_FIELDS = {f.name for f in fields(UserSetting)} - {"user_id", "updated_at"}
+WAKE_LEVELS = range(1, 6)                  # 기상 알람 볼륨 1~5단계 (11/22)
+RECEIVED_LEVELS = range(1, 7)              # 받은 단계: 재기상 알람은 한 단계 커서 6까지
+WAKE_SOURCES = ("bandit", "user_today", "user_max", "hold_no_notice", "important_day", "default")
+WAKE_STATES = ("RECOMMENDED", "EXPLORING", "USER")
+# supabase.py _WAKE_DECISION과 같게: save_wake_decision이 쓰는 결정 칸
+_WAKE_DECISION = {"context_key", "recommended_level", "applied_level", "source", "state", "explored", "propensity",
+                  "previous_level", "prefs", "reason"}
+
+
+def _plain(value):
+    """Supabase 응답처럼 날짜·시각을 ISO 문자열로."""
+    if isinstance(value, dict):
+        return {k: _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    if isinstance(value, (date, time, datetime)):
+        return value.isoformat()
+    return value
+
+
+def _check_level(value, allowed, name):
+    if value is not None and value not in allowed:
+        raise ValidationFailed(f"{name} 값이 올바르지 않아요: {value}")       # DB CHECK와 같게
 
 
 class MemoryUserRepository:
@@ -50,6 +73,8 @@ class MemoryUserRepository:
 
     def save_setting(self, user_id, values):
         values = {k: v for k, v in values.items() if k in _SETTING_FIELDS}
+        for name in ("wake_max_start_level", "wake_next_level"):              # CHECK 1~5, NULL 허용
+            _check_level(values.get(name), WAKE_LEVELS, name)
         current = self.settings.get(user_id)
         setting = replace(current, **values) if current else UserSetting(user_id=user_id, **values)
         self.settings[user_id] = replace(setting, updated_at=now_kst())
@@ -372,11 +397,36 @@ class MemorySessionRepository:
         nights = [n for n in self._nights.records.values() if n.user_id == user_id and since <= n.apply_date <= until]
         return RecentRecords(sorted(sessions, key=lambda s: s.session_date), sorted(steps, key=lambda s: (s.session_id, s.step_order)), nights)
 
+    def set_step_score(self, user_id, session_id, step_order, score):
+        if score is None or score < 0:
+            raise ValidationFailed("게임 기록은 0 이상이어야 해요")             # CHECK score >= 0
+        step = next((s for s in self.list_steps(user_id, session_id) if s.step_order == step_order), None)
+        if not step:
+            return None
+        self.steps[step.step_id] = replace(step, score=score)
+        return self.steps[step.step_id]
+
+    def best_score(self, user_id, content_type="QUIZ", content_option=None):
+        scores = [st.score for st in self.steps.values() if st.user_id == user_id and st.score is not None
+                  and (s := self.sessions.get(st.session_id)) and s.content_type == content_type
+                  and (not content_option or s.content_option == content_option)]
+        return max(scores, default=None)
+
+    def list_content_steps(self, user_id, content_type, since, until):
+        rows = []
+        for st in self.steps.values():
+            s = self.sessions.get(st.session_id)
+            if st.user_id == user_id and s and s.content_type == content_type and since <= s.session_date <= until:
+                rows.append({**_plain(asdict(st)), "session_date": s.session_date.isoformat(),
+                             "content_option": s.content_option, "stretch_area": s.stretch_area})
+        return sorted(rows, key=lambda r: (r["session_date"], r["session_id"], r["step_order"]))
+
 
 class MemoryPersonalizationRepository:
     def __init__(self):
         self.logs: dict[str, StrategyLog] = {}
         self.bandit: dict[str, dict] = {}
+        self.wake_logs: dict[tuple[str, str], dict] = {}     # (user_id, session_date ISO) → 행. UNIQUE(user_id, session_date)
 
     def save_strategy_log(self, user_id, session_id, row):
         keys = {f.name for f in fields(StrategyLog)} - {"log_id", "user_id", "session_id", "session_date", "created_at"}
@@ -396,7 +446,55 @@ class MemoryPersonalizationRepository:
         return self.bandit.get(state_key)
 
     def save_bandit_state(self, state_key, state, user_id=None):
+        ok = (state_key in ("global", "wake:global") and user_id is None) or              (user_id is not None and state_key in (f"user:{user_id}", f"wake:user:{user_id}"))
+        if not ok:
+            raise ValidationFailed(f"학습 상태 키가 올바르지 않아요: {state_key}")    # CHECK rs_bandit_state_key
         self.bandit[state_key] = state
+
+    # ---- 기상 볼륨 기록 (rs_wake_log) ----
+    def _wake_upsert(self, user_id, session_date, values):
+        key = (user_id, _plain(session_date))
+        now = now_kst().isoformat()
+        row = dict(self.wake_logs.get(key) or {
+            "wake_log_id": str(uuid.uuid4()), "user_id": user_id, "session_date": key[1], "session_id": None,
+            **dict.fromkeys(_WAKE_DECISION - {"explored"}), "explored": False,
+            "start_level": None, "received_level": None, "confirmed": None, "learned_at": None, "created_at": now})
+        row.update(_plain(values), updated_at=now)
+        for name in ("recommended_level", "applied_level", "previous_level", "start_level"):
+            _check_level(row[name], WAKE_LEVELS, name)
+        _check_level(row["received_level"], RECEIVED_LEVELS, "received_level")
+        _check_level(row["source"], WAKE_SOURCES, "source")
+        _check_level(row["state"], WAKE_STATES, "state")
+        if row["propensity"] is not None and not 0 <= row["propensity"] <= 1:
+            raise ValidationFailed("propensity는 0~1이어야 해요")
+        if None not in (row["received_level"], row["start_level"]) and row["received_level"] < row["start_level"]:
+            raise ValidationFailed("받은 단계는 시작 단계보다 낮을 수 없어요")   # CHECK rs_wake_log_received
+        self.wake_logs[key] = row
+        return dict(row)
+
+    def save_wake_decision(self, user_id, session_date, row):
+        return self._wake_upsert(user_id, session_date, {k: v for k, v in row.items() if k in _WAKE_DECISION})
+
+    def save_wake_result(self, user_id, session_date, start_level, received_level, confirmed, session_id=None):
+        values = {"start_level": start_level, "received_level": received_level, "confirmed": confirmed}
+        if session_id:
+            values["session_id"] = session_id
+        return self._wake_upsert(user_id, session_date, values)
+
+    def get_wake_log(self, user_id, session_date):
+        row = self.wake_logs.get((user_id, session_date.isoformat()))
+        return dict(row) if row else None
+
+    def list_wake_logs(self, user_id, since, until):
+        lo, hi = since.isoformat(), until.isoformat()
+        return [dict(r) for (uid, d), r in sorted(self.wake_logs.items(), key=lambda kv: kv[0][1]) if uid == user_id and lo <= d <= hi]
+
+    def mark_wake_learned(self, user_id, session_date):
+        row = self.wake_logs.get((user_id, session_date.isoformat()))
+        if not row or row["learned_at"] is not None:
+            return False
+        row["learned_at"] = now_kst().isoformat()
+        return True
 
 
 class MemoryStorageClient:
