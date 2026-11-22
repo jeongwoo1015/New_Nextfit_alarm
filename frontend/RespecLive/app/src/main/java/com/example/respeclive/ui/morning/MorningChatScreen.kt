@@ -241,7 +241,12 @@ fun MorningChatScreen(
     val heldReports = remember { mutableStateMapOf<Int, String>() }
     var heldShown by remember { mutableIntStateOf(0) }     // 보류한 보고로 화면을 넘긴 마지막 단계 번호 (화면은 그다음 단계)
     var rescheduleArgs by remember { mutableStateOf<JSONObject?>(null) }
+    var snoozedByVoice by remember { mutableStateOf(false) }   // 말로 미룸: 사용자가 통화 종료를 누르면 리포트 없이 홈으로
     fun finish() {
+        if (snoozedByVoice) {
+            onSnoozed()
+            return
+        }
         val sid = sessionId ?: initialSession?.optJSONObject("session")?.optString("session_id")?.takeIf { it.isNotBlank() }
         onFinish(sid, elapsed)
     }
@@ -685,7 +690,8 @@ fun MorningChatScreen(
         client.awaitReplyEnd()      // AI의 마지막 말을 끝까지 들려줌
         client.pauseMic()
 
-        // 말로 미루기: 연결을 닫고 서버에 미룬 뒤 그 시각에 오늘 한 번 다시 울리도록 예약하고 홈으로
+        // 말로 미루기: 연결을 닫고 서버에 미룬 뒤 그 시각에 오늘 한 번 다시 울리도록 예약.
+        // 회의(11/20)·AI 안내("지금 알람은 직접 종료해 주세요")대로 사용자가 통화 종료를 눌러야 끝남
         if (briefingEvent == "reschedule_alarm") {
             client.stop()
             val args = rescheduleArgs
@@ -711,8 +717,9 @@ fun MorningChatScreen(
                     }
                 }
             }
-            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-            onSnoozed()
+            snoozedByVoice = true
+            stage = Stage.Finished
+            notice = "$message · 통화를 종료해 주세요"
             return@LaunchedEffect
         }
         val message = messageJob.await()
