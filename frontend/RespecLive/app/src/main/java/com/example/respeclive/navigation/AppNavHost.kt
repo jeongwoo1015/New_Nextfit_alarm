@@ -40,7 +40,8 @@ import com.example.respeclive.ui.diary.DiaryScreen
 import com.example.respeclive.ui.onboarding.OnboardingScreen
 import com.example.respeclive.ui.profile.ProfileScreen
 import com.example.respeclive.ui.report.ReportScreen
-import com.example.respeclive.ui.routine.RoutineScreen
+import com.example.respeclive.ui.content.ContentScreen
+import com.example.respeclive.ui.content.WordChainScreen
 import com.example.respeclive.ui.settings.SettingsScreen
 import com.example.respeclive.ui.theme.AppTheme
 import com.example.respeclive.ui.start.StartScreen
@@ -54,7 +55,7 @@ private const val START_SCREEN_MIN_MS = 1200L
 private data class TabItem(val route: String, val label: String, val icon: ImageVector)
 
 private val tabs = listOf(
-    TabItem("routine", "루틴", Icons.Filled.Schedule),
+    TabItem("routine", "콘텐츠", Icons.Filled.AutoAwesome),
     TabItem("report", "리포트", Icons.Filled.BarChart),
     TabItem("home", "홈", Icons.Filled.Home),
     TabItem("diary", "일기", Icons.AutoMirrored.Filled.MenuBook),
@@ -63,7 +64,7 @@ private val tabs = listOf(
 
 private fun titleFor(route: String?) = when (route) {
     "home" -> "리스펙 알람"
-    "routine" -> "루틴 목록"
+    "routine" -> "콘텐츠"
     "report" -> "리포트"
     "diary" -> "한 줄 일기"
     "profile" -> "내 정보"
@@ -155,7 +156,14 @@ private fun MainNav(
                 )
             }
             composable("nextyDebug") { NextyDebugScreen(onBack = { nav.popBackStack() }) }
-            composable("routine") { RoutineScreen() }
+            // 콘텐츠 탭 (예전 루틴 탭 자리, 경로 이름은 그대로): 오늘 한 스트레칭·영어 문장·게임, 끝말잇기 기록·이어 하기(글자 입력)
+            composable("routine") { ContentScreen(onResumeGame = { sid -> nav.navigate("wordChain/$sid") }) }
+            composable("wordChain/{sessionId}") { entry ->
+                WordChainScreen(
+                    sessionId = entry.arguments?.getString("sessionId").orEmpty(),
+                    onClose = { nav.popBackStack() }
+                )
+            }
             composable("report") { ReportScreen() }
             composable("diary") { DiaryScreen(onOpenDay = { date -> nav.navigate("diaryDay/$date") }) }
             composable("diaryDay/{date}") { entry ->

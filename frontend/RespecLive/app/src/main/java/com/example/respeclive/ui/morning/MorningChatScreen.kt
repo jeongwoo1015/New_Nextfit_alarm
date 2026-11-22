@@ -49,6 +49,12 @@ import androidx.core.content.ContextCompat
 import com.example.respeclive.audio.AlarmSoundPlayer
 import com.example.respeclive.audio.AlarmVibrator
 import com.example.respeclive.data.WakeHistory
+import com.example.respeclive.data.WordChainLine
+import com.example.respeclive.data.WordChainMorning
+import com.example.respeclive.data.WordChainReason
+import com.example.respeclive.data.WordChainResult
+import com.example.respeclive.data.WordChainStore
+import com.example.respeclive.data.WordChainWinner
 import com.example.respeclive.audio.CallAudio
 import com.example.respeclive.audio.MessagePlayer
 import com.example.respeclive.audio.VoiceTranscriber
@@ -116,6 +122,8 @@ private const val QUIZ_REACTION_MS = 2800L
 
 /** 앱이 보내는 이벤트: 코칭 중 모든 단계를 판정함 */
 private const val ROUTINE_OVER = "routine_over"
+/** 끝말잇기 내 차례 제한 시간 (콘텐츠 탭의 글자 이어 하기와 같게) */
+private const val WORDCHAIN_TURN_MS = 20_000L
 
 // 모닝콜 순서표의 단계 (ai/tasks/morning_plan.py, AI CONTRACTS B15)
 private const val STAGE_BRIEFING = "BRIEFING"
@@ -413,7 +421,10 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
         client.onToolCall = { call ->
             when (call.name) {
                 "report_step_result" -> {
-                    client.muteReplyToToolCall(call, GUIDE_SPOKEN)
+                    // 끝말잇기는 한 단계짜리라 판정 뒤 AI가 이어서 하는 말은 늘 마무리 되풀이
+                    // ("재미있게 잘하셨어요. 다음 순서로…" 뒤에 "오늘 끝말잇기도 잘 마치셨어요. 포춘을…")라 조건 없이 들려주지 않음
+                    if (RoutineRepository.session?.contentOption == "WORDCHAIN") client.muteReplyToToolCall(call)
+                    else client.muteReplyToToolCall(call, GUIDE_SPOKEN)
                     val order = call.args.optInt("step_order", -1)
                     val verdict = call.args.optString("verdict")
                     // 지난 단계의 보고는 기록·화면 갱신을 건너뛰고, AI에게는 똑같이 ok만 돌려줌
@@ -423,6 +434,19 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                     // 보고 순서는 reportLock(먼저 온 순서대로)이 지킴
                     if (order > 0 && verdict.isNotBlank()) launch(Dispatchers.Main) {
                         val taken = reportLock.withLock { handleReport(order, verdict) }
+                        // 끝말잇기 승패 (AI에 요청한 칸: game_result USER_WIN/AI_WIN, game_reason TIMEOUT/NO_WORD). 아직 AI가 보내지 않으면 무시
+                        val gameResult = call.args.optString("game_result")
+                        val sid = sessionId
+                        // 시간 초과(TIMEOUT)는 승패가 아니라 일시중지라 저장하지 않음 (콘텐츠 탭에서 이어 함)
+                        if (sid != null && RoutineRepository.session?.contentOption == "WORDCHAIN" && gameResult in setOf("USER_WIN", "AI_WIN") &&
+                            call.args.optString("game_reason") != "TIMEOUT"
+                        ) {
+                            WordChainStore.saveMorningResult(context, sid, WordChainResult(
+                                if (gameResult == "USER_WIN") WordChainWinner.USER else WordChainWinner.NEXTY,
+                                WordChainReason.NO_WORD,
+                                inMorning = true
+                            ))
+                        }
                         // 퀴즈 콘텐츠: AI가 정답 여부를 함께 보냄 → 넥스티가 바로 O / X
                         if (taken && call.args.has("answer_correct")) {
                             quizByTool = true
@@ -572,7 +596,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                     showNote(
                         if (first.code == "COACHING_SKIPPED") {
                             if (hasNext) "오늘은 루틴을 쉬어 가는 날이에요." else "오늘은 루틴을 쉬어 가는 날이에요. 좋은 하루 보내세요!"
-                        } else "루틴을 시작하지 못했어요. 루틴 탭에서 직접 체크해 주세요."
+                        } else "루틴을 시작하지 못했어요."
                     )
                 }
                 return
@@ -758,9 +782,37 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             delay(200)
         }
     }
-    val stepTotalMs = currentStep?.durationSec?.takeIf { it > 0 }?.times(1000L)
-    val remainingMs = stepTotalMs?.takeIf { coachSpoke }?.let { (it - (nowMs - stepStartMs)).coerceIn(0L, it) }
-    val timerFraction = if (remainingMs != null && stepTotalMs != null) remainingMs.toFloat() / stepTotalMs else null
+    // 끝말잇기는 5분 단계 시간 대신 내 차례 제한 시간(20초): 넥스티가 말을 마치면 시작, 내가 말하면 멈춤. 넘기면 넥스티 승
+    // 넥스티의 마지막 말에 끝말잇기로 이어진 단어가 있을 때만 내 차례로 봄: 마무리 칭찬("잘했어요! 이제 포춘…") 뒤
+    // 판정이 늦게 기록되는 동안 타이머가 돌아 시간 초과 패배로 잘못 남지 않도록
+    val wordChainPoint = remember(lines, isWordChain) {
+        if (isWordChain) WordChainMorning.resumePoint(lines.map { WordChainLine(it.role == LiveClient.Role.User, it.text) }) else null
+    }
+    val wordChainMyTurn = isWordChain && stage == Stage.Coaching && coachSpoke && currentTitle != null &&
+        !aiSpeaking && lines.lastOrNull()?.role == LiveClient.Role.Assistant &&
+        wordChainPoint?.mine == false && lines.last().text.contains(wordChainPoint.word) &&
+        !WordChainMorning.isWrapUp(lines.last().text) &&
+        currentStep?.stepOrder !in heldReports.keys
+    var turnStartMs by remember { mutableLongStateOf(0L) }
+    var turnUserTurns by remember { mutableIntStateOf(0) }
+    LaunchedEffect(wordChainMyTurn) {
+        if (wordChainMyTurn) {
+            turnStartMs = System.currentTimeMillis()
+            turnUserTurns = client.userTurns
+        }
+    }
+    val wordChainTurnLive = wordChainMyTurn && userTurns <= turnUserTurns
+    val stepTotalMs = if (isWordChain) WORDCHAIN_TURN_MS else currentStep?.durationSec?.takeIf { it > 0 }?.times(1000L)
+    val remainingMs = when {
+        isWordChain -> if (wordChainTurnLive) (WORDCHAIN_TURN_MS - (nowMs - turnStartMs)).coerceIn(0L, WORDCHAIN_TURN_MS) else null
+        else -> stepTotalMs?.takeIf { coachSpoke }?.let { (it - (nowMs - stepStartMs)).coerceIn(0L, it) }
+    }
+    // 끝말잇기에서 넥스티 차례에는 링을 가득 채워 두고, 내 차례가 되면 줄어듦
+    val timerFraction = when {
+        remainingMs != null && stepTotalMs != null -> remainingMs.toFloat() / stepTotalMs
+        isWordChain && stage == Stage.Coaching && coachSpoke -> 1f
+        else -> null
+    }
 
     // ---- 재기상: AI가 말을 마친 뒤 8초 동안 대답이 없으면 음악 + POST /rewake. 사용자가 말하면(버튼 포함) 멈춤 ----
     // 멈춤은 말 횟수로 봄: 사용자 줄과 AI 줄이 거의 같이 들어오면 마지막 줄만 보고는 사용자 말을 놓쳐 음악이 계속 남 (11/18 시연, 스트레칭)
@@ -768,10 +820,30 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
     // 스트레칭은 동작하는 동안 말이 없는 게 정상이라, 단계 타이머가 도는 동안은 세지 않고 타이머가 끝난 뒤부터 셈
     val lastRole = lines.lastOrNull()?.role
     val talkStage = stage == Stage.Briefing || (stage == Stage.Coaching && coachSpoke)
+    // 끝말잇기: 주고받은 말을 기기에 저장 (콘텐츠 탭에서 확인·이어 하기. 서버는 아침 통화 원문을 저장하지 않음).
+    // '패스'·'제가 졌어요' 같은 말이면 승패가 난 것으로 봄 (AI는 다섯 번쯤 주고받으면 마무리하고 승패를 말하지 않음)
+    LaunchedEffect(lines, stage, coachingStarted, isWordChain) {
+        val sid = sessionId ?: return@LaunchedEffect
+        if (!isWordChain || !coachingStarted || stage != Stage.Coaching || lines.isEmpty()) return@LaunchedEffect
+        WordChainStore.saveMorning(context, sid, lines.map { WordChainLine(it.role == LiveClient.Role.User, it.text) })
+    }
+    // 내 차례 20초가 지나면 넥스티 승: 결과를 저장하고 단계를 완료로 맞춘 뒤 다음 순서(포춘 등)로
+    val wordChainTimeUp = wordChainTurnLive && remainingMs == 0L
+    LaunchedEffect(wordChainTimeUp) {
+        val sid = sessionId ?: return@LaunchedEffect
+        if (!wordChainTimeUp) return@LaunchedEffect
+        WordChainStore.saveMorningResult(context, sid, WordChainResult(WordChainWinner.NEXTY, WordChainReason.TIMEOUT, inMorning = true))
+        Toast.makeText(context, "시간이 다 됐어요. 이번 끝말잇기는 넥스티가 이겼어요", Toast.LENGTH_LONG).show()
+        currentStep?.stepOrder?.let { order -> scope.launch { RespecApi.markStep(sid, order, "DONE")?.let { RoutineRepository.applyView(it) } } }
+        toolEvents.trySend(ROUTINE_OVER)
+    }
     val stretchTimerRunning = stage == Stage.Coaching && contentType == "EXERCISE" && remainingMs != null && remainingMs > 0L
     LaunchedEffect(talkStage, status, aiSpeaking, lastRole, stretchTimerRunning, rewaking, sessionId) {
         val sid = sessionId ?: return@LaunchedEffect
-        if (!talkStage || status != LiveClient.Status.Live || aiSpeaking || stretchTimerRunning || rewaking) return@LaunchedEffect
+        // 끝말잇기는 내 차례 20초 타이머가 대답 없음을 처리하므로 재기상 음악을 틀지 않음
+        if (!talkStage || status != LiveClient.Status.Live || aiSpeaking || stretchTimerRunning || rewaking ||
+            (isWordChain && stage == Stage.Coaching)
+        ) return@LaunchedEffect
         if (lastRole != LiveClient.Role.Assistant) return@LaunchedEffect
         delay(REWAKE_SILENCE_MS)
         rewakeTurns = client.userTurns
@@ -938,7 +1010,9 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
             // 대답 버튼: 대답을 기다릴 때만 (말 대신 누르기). 시작 전(preparing은 Listening이 아님)과 루틴을 다 마쳤으면 숨김
             val answers = when {
                 // 스트레칭 부위를 묻는 동안은 아직 할 단계가 없으므로 숨김 (부위는 말로 대답)
-                phase == MPhase.Listening && !routineOver && !aiWrapping && !choosingArea && stage == Stage.Coaching -> BTN_LATER to BTN_DONE
+                // 끝말잇기는 끝이 정해진 동작이 아니라 '완료했어요'가 맞지 않고, 잘못 누르면 게임이 끝난 것으로 기록돼 건너뛰기만 둠
+                phase == MPhase.Listening && !routineOver && !aiWrapping && !choosingArea && stage == Stage.Coaching ->
+                    BTN_LATER to (if (isWordChain) null else BTN_DONE)
                 else -> null
             }
             Box(Modifier.fillMaxWidth().height(CallLayout.ANSWER_HEIGHT * scale), contentAlignment = Alignment.Center) {
@@ -954,7 +1028,7 @@ fun MorningChatScreen(alarmId: Int, onFinish: (sessionId: String?, talkSec: Int)
                             ) {
                                 FitText(laterText, color = RespecColors.Purple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                             }
-                            Button(
+                            if (doneText != null) Button(
                                 onClick = { client.sendText(doneText) },
                                 modifier = Modifier.weight(1f).height(52.dp * scale),
                                 shape = RoundedCornerShape(26.dp),

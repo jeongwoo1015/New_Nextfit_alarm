@@ -279,6 +279,21 @@ object RespecApi {
         return if (r.ok) r.json() else null
     }
 
+    // ---------------- 콘텐츠 화면 ----------------
+
+    /**
+     * 그날 콘텐츠 단계의 내용 (서버 API 준비 전: 백엔드에 요청한 형식, 없거나 실패하면 null).
+     * GET /contents/steps?date=YYYY-MM-DD → [{session_id, step_order, step_name, step_status, content_type, content_option,
+     *   stretch_area, script, words, score}]
+     * script: 스트레칭 동작 설명 / 영어 "영어 / 뜻 / 발음" / 끝말잇기 "시작 단어: 기차" / 초성 "초성: ㄱㅊ",
+     * words: 게임에서 말한 단어 목록(끝말잇기·초성), score: 게임 기록
+     */
+    suspend fun contentSteps(date: String): JSONArray? {
+        val r = ApiClient.get("/contents/steps?date=$date") ?: return null
+        if (!r.ok) return null
+        return r.json()?.optJSONArray("steps") ?: runCatching { JSONArray(r.body) }.getOrNull()
+    }
+
     // ---------------- 한 줄 일기 ----------------
 
     /** 달력: month "YYYY-MM" → CalendarDayOut 목록 (date, photo_url, routine_completion_rate 0~1, routine_done/total, ...) */
