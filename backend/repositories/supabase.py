@@ -389,7 +389,8 @@ class SupabaseNightRepository(_Base):
 
 # ---------- 5. 모닝 세션·단계 ----------
 _SESSION_CHANGES = {"alarm_rang_at", "first_response_at", "planned_total_sec", "wake_checked_at", "wake_success", "session_end_at",
-                    "fortune_text", "fortune_style", "fortune_source", "content_option", "applied_intensity", "stretch_area"}
+                    "fortune_text", "fortune_style", "fortune_source", "content_option", "applied_intensity", "stretch_area",
+                    "snoozed_until"}
 
 
 class SupabaseSessionRepository(_Base):
@@ -491,6 +492,37 @@ class SupabaseSessionRepository(_Base):
         q = self.db.table("rs_session_step").update(_plain(values)).eq("step_id", step.step_id).eq("user_id", user_id)
         return _model(SessionStep, _first(self._run(q)))
 
+    def set_step_score(self, user_id, session_id, step_order, score):
+        """게임 기록(제한 시간 안에 주고받은 횟수). 남의 세션이거나 없는 단계면 None."""
+        if not _is_uuid(session_id):
+            return None
+        q = (self.db.table("rs_session_step").update({"score": score})
+             .eq("session_id", session_id).eq("user_id", user_id).eq("step_order", step_order))
+        return _model(SessionStep, _first(self._run(q)))
+
+    def best_score(self, user_id, content_type="QUIZ", content_option=None):
+        """콘텐츠 화면의 최고 기록. 기록이 없으면 None."""
+        q = (self._select("rs_session_step", "score, rs_morning_session!inner(content_type, content_option)")
+             .eq("user_id", user_id).eq("rs_morning_session.content_type", content_type).not_.is_("score", "null"))
+        if content_option:
+            q = q.eq("rs_morning_session.content_option", content_option)
+        row = _first(self._run(q.order("score", desc=True).limit(1)))
+        return row["score"] if row else None
+
+    def list_content_steps(self, user_id, content_type, since, until):
+        """콘텐츠 화면(스트레칭 동작, 영어 문장 정리)용. 그 기간 같은 종류 세션의 단계를 날짜·순서대로.
+        각 행은 단계 칸 + session_date·content_option·stretch_area (동작 설명·영어 문장은 step_detail.script)."""
+        rows = self._run_all(lambda: (
+            self._select("rs_session_step", "*, rs_morning_session!inner(session_date, content_type, content_option, stretch_area)")
+            .eq("user_id", user_id).eq("rs_morning_session.content_type", content_type)
+            .gte("rs_morning_session.session_date", since.isoformat()).lte("rs_morning_session.session_date", until.isoformat())
+            .order("session_id").order("step_order")))
+        out = []
+        for r in rows:
+            s = r.pop("rs_morning_session")
+            out.append({**r, "session_date": s["session_date"], "content_option": s["content_option"], "stretch_area": s["stretch_area"]})
+        return sorted(out, key=lambda r: (r["session_date"], r["session_id"], r["step_order"]))
+
     def recent_records(self, user_id, since, until):
         """세션은 session_date, 단계는 세션 날짜로 조인해서, 밤 기록은 apply_date로 거른다(양 끝 포함). 길면 나눠 받는다."""
         lo, hi = since.isoformat(), until.isoformat()
@@ -510,6 +542,8 @@ class SupabaseSessionRepository(_Base):
 # ---------- 6. 개인화 (서버만) ----------
 _LOG_FIELDS = _columns(StrategyLog, ("log_id", "user_id", "session_id", "reward", "created_at"))
 _LOG_JSON = {"strategy", "rule_ids", "allowed_arms", "stats"}
+_WAKE_DECISION = {"context_key", "recommended_level", "applied_level", "source", "state", "explored", "propensity",
+                  "previous_level", "prefs", "reason"}
 
 
 class SupabasePersonalizationRepository(_Base):
@@ -538,6 +572,37 @@ class SupabasePersonalizationRepository(_Base):
     def save_bandit_state(self, state_key, state, user_id=None):
         row = {"state_key": state_key, "user_id": user_id, "state": state}
         self._run(self.db.table("rs_bandit_state").upsert(row, on_conflict="state_key"))
+
+    # 기상 볼륨 기록 (rs_wake_log, 하루 1행). 학습 상태는 save_bandit_state('wake:user:<id>' / 'wake:global')
+    def save_wake_decision(self, user_id, session_date, row):
+        """밤에 정한 다음 날 시작 볼륨(WakeLog.to_row()). 같은 날 다시 정하면 결정 칸만 바꾸고 아침 결과는 그대로 둔다."""
+        values = {k: v for k, v in row.items() if k in _WAKE_DECISION}
+        values.update(user_id=user_id, session_date=session_date)
+        return _first(self._run(self.db.table("rs_wake_log").upsert(_plain(values), on_conflict="user_id,session_date")))
+
+    def save_wake_result(self, user_id, session_date, start_level, received_level, confirmed, session_id=None):
+        """아침 결과. 받지 못했으면 received_level은 None. 밤 결정이 없던 날도 결과 행을 만든다."""
+        values = {"user_id": user_id, "session_date": session_date, "start_level": start_level,
+                  "received_level": received_level, "confirmed": confirmed}
+        if session_id:
+            values["session_id"] = session_id
+        return _first(self._run(self.db.table("rs_wake_log").upsert(_plain(values), on_conflict="user_id,session_date")))
+
+    def get_wake_log(self, user_id, session_date):
+        q = self._select("rs_wake_log").eq("user_id", user_id).eq("session_date", session_date.isoformat())
+        return _first(self._run(q))
+
+    def list_wake_logs(self, user_id, since, until):
+        """리포트 '나의 기상 단계 변화'용. 양 끝 포함, 날짜 순."""
+        return self._run_all(lambda: (self._select("rs_wake_log").eq("user_id", user_id)
+                                      .gte("session_date", since.isoformat()).lte("session_date", until.isoformat())
+                                      .order("session_date")))
+
+    def mark_wake_learned(self, user_id, session_date):
+        """아직 학습에 반영하지 않은 날만 표시한다. True면 이번에 처음 반영하는 것(두 번 학습하지 않게)."""
+        q = (self.db.table("rs_wake_log").update({"learned_at": _plain(datetime.now().astimezone())})
+             .eq("user_id", user_id).eq("session_date", session_date.isoformat()).is_("learned_at", "null"))
+        return bool(self._run(q))
 
 
 # ---------- 7. Storage ----------

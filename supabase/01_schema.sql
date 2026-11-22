@@ -64,6 +64,8 @@ create table if not exists rs_user_setting (
   auto_intensity       boolean not null default true,     -- 잘 못 일어나는 날이 이어지면 강도를 자동으로 올림
   english_level        varchar(20) not null default 'BEGINNER'
                        check (english_level in ('BEGINNER', 'INTERMEDIATE')),
+  wake_max_start_level smallint check (wake_max_start_level between 1 and 5),   -- 앞으로 이 단계보다 세게 시작하지 않음 (비우면 제한 없음)
+  wake_next_level      smallint check (wake_next_level between 1 and 5),        -- 다음 알람 한 번만 이 단계로 시작 (쓰고 나면 비움)
   voice_type           varchar(20) not null default 'FEMALE'
                        check (voice_type in ('FEMALE', 'MALE', 'NEUTRAL')),
   sleep_alarm_enabled  boolean not null default true,
@@ -325,6 +327,7 @@ create table if not exists rs_morning_session (
                        'FULL', 'NECK', 'SHOULDER', 'CHEST_BACK', 'WRIST_HAND', 'ELBOW_ARM',
                        'LOW_BACK', 'PELVIS', 'GLUTE', 'THIGH', 'CALF', 'ANKLE_FOOT',
                        'NECK_SHOULDER', 'ARM_WRIST', 'BACK_HIP', 'LEG')),
+  snoozed_until      timestamptz,                       -- 미루기(버튼·말)로 다시 울릴 시각. 횟수는 snooze_count
   unique (alarm_id, session_date),
   constraint rs_session_type_fields check (
     (morning_call_type = 'ROUTINE' and template_id is not null and content_type is null)
@@ -355,6 +358,7 @@ create table if not exists rs_session_step (
   checked_at            timestamptz,
   ai_verdict            varchar(20)
                         check (ai_verdict in ('done', 'not_done', 'skipped', 'ambiguous', 'other')),
+  score                 int check (score is null or score >= 0),   -- 게임 기록: 제한 시간 안에 주고받은 횟수
   unique (session_id, step_order),
   constraint rs_step_status_time check ((step_status = 'PENDING') = (checked_at is null))
 );
@@ -763,18 +767,52 @@ create index if not exists idx_strategy_log_user_date on rs_strategy_log (user_i
 
 
 -- 14. 개인화 Bandit 학습 상태 (서버만)
---  state_key = 'global' 이면 전체 합산 1행, 'user:{user_id}' 이면 사용자별
+--  state_key = 'global' 이면 전체 합산 1행, 'user:{user_id}' 이면 사용자별 (코칭 강도)
+--  기상 볼륨은 따로 학습해 'wake:global', 'wake:user:{user_id}'
 create table if not exists rs_bandit_state (
   state_key   varchar(50) primary key,
   user_id     uuid references rs_user(user_id) on delete cascade,
   state       jsonb not null,
   updated_at  timestamptz not null default now(),
   constraint rs_bandit_state_key check (
-    (state_key = 'global' and user_id is null)
-    or (user_id is not null and state_key = 'user:' || user_id::text)
+    (state_key in ('global', 'wake:global') and user_id is null)
+    or (user_id is not null and state_key in ('user:' || user_id::text, 'wake:user:' || user_id::text))
   )
 );
 
 drop trigger if exists trg_bandit_state_updated on rs_bandit_state;
 create trigger trg_bandit_state_updated before update on rs_bandit_state
+  for each row execute function rs_set_updated_at();
+
+
+-- 15. 기상 볼륨 기록 (서버만, 하루 1행)
+--  밤에 정한 다음 날 기상 알람 시작 볼륨(추천·적용 단계와 이유)과 아침 결과(시작 단계·받은 단계)
+--  기상 알람 1~5단계, 재기상 알람은 기상보다 한 단계 큰 2~6단계라 받은 단계는 6까지 허용
+create table if not exists rs_wake_log (
+  wake_log_id        uuid primary key default gen_random_uuid(),
+  user_id            uuid not null references rs_user(user_id) on delete cascade,
+  session_date       date not null,                     -- 알람이 울리는 아침 날짜
+  session_id         uuid references rs_morning_session(session_id) on delete set null,
+  context_key        varchar(50),                       -- 상황 칸 (예: 추정 수면 시간 짧음/보통/모름)
+  recommended_level  smallint check (recommended_level between 1 and 5),
+  applied_level      smallint check (applied_level between 1 and 5),
+  source             varchar(20) check (source in ('bandit', 'user_today', 'user_max', 'hold_no_notice', 'important_day', 'default')),
+  state              varchar(20) check (state in ('RECOMMENDED', 'EXPLORING', 'USER')),
+  explored           boolean not null default false,
+  propensity         numeric(6, 5) check (propensity is null or propensity between 0 and 1),
+  previous_level     smallint check (previous_level between 1 and 5),
+  prefs              jsonb,                             -- 결정할 때의 사용자 설정 {max_start_level, next_alarm_level}
+  reason             text,
+  start_level        smallint check (start_level between 1 and 5),      -- 아침 결과: 실제로 울리기 시작한 단계
+  received_level     smallint check (received_level between 1 and 6),   -- 전화를 받은 단계 (못 받았으면 비움)
+  confirmed          boolean,                           -- 받은 뒤 AI 확인 질문에 대답했는지
+  learned_at         timestamptz,                       -- 학습에 반영한 시각 (두 번 반영하지 않게)
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now(),
+  unique (user_id, session_date),
+  constraint rs_wake_log_received check (received_level is null or start_level is null or received_level >= start_level)
+);
+
+drop trigger if exists trg_wake_log_updated on rs_wake_log;
+create trigger trg_wake_log_updated before update on rs_wake_log
   for each row execute function rs_set_updated_at();

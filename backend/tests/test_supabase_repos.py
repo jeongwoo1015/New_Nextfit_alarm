@@ -347,6 +347,82 @@ def test_bedtime_alarm(repos, uid, alarm):
     repos.alarms.delete_alarm(uid, bed)
 
 
+def test_wake_volume_log(repos, uid, other):
+    """기상 볼륨: 밤 결정과 아침 결과가 하루 한 행에 쌓이고, 다시 정해도 결과는 남는다. 학습은 한 번만."""
+    p, d = repos.personalization, now_kst().date() + timedelta(days=1)
+    decision = {"user_id": "무시됨", "session_date": "무시됨", "context_key": "sleep_normal", "recommended_level": 1,
+                "applied_level": 3, "source": "user_today", "explored": False, "propensity": None, "state": "USER",
+                "reason": "사용자가 다음 알람을 3단계로 정함", "previous_level": 1, "prefs": {"next_alarm_level": 3},
+                "created_at": "2026-11-22T00:00:00+00:00"}
+    assert p.save_wake_decision(uid, d, decision)["applied_level"] == 3
+    for bad in ({"applied_level": 6}, {"source": "rule"}):
+        with pytest.raises(ValidationFailed):
+            p.save_wake_decision(uid, d, {**decision, **bad})
+
+    row = p.save_wake_result(uid, d, start_level=3, received_level=4, confirmed=True)
+    assert (row["applied_level"], row["start_level"], row["received_level"]) == (3, 3, 4)   # 결정은 그대로
+    row = p.save_wake_decision(uid, d, {**decision, "applied_level": 1, "source": "hold_no_notice"})
+    assert (row["applied_level"], row["received_level"]) == (1, 4)                         # 다시 정해도 결과는 남음
+    assert p.save_wake_result(uid, d, 3, 6, True)["received_level"] == 6                   # 재기상 알람은 6단계까지
+    with pytest.raises(ValidationFailed):
+        p.save_wake_result(uid, d, 3, 2, True)                                             # 시작보다 낮게 받을 수 없음
+    assert p.mark_wake_learned(uid, d) is True and p.mark_wake_learned(uid, d) is False    # 학습은 한 번만
+    assert [r["session_date"] for r in p.list_wake_logs(uid, d, d)] == [d.isoformat()]
+    assert p.get_wake_log(other, d) is None
+
+    db = repos.users.db
+    db.table("rs_user_setting").update({"wake_max_start_level": 3, "wake_next_level": None}).eq("user_id", uid).execute()
+    with pytest.raises(Exception, match="check constraint"):
+        db.table("rs_user_setting").update({"wake_next_level": 6}).eq("user_id", uid).execute()
+
+    p.save_bandit_state(f"wake:user:{uid}", {"version": 1, "counts": {}}, uid)              # 코칭과 따로 학습
+    assert p.get_bandit_state(f"wake:user:{uid}") == {"version": 1, "counts": {}}
+    with pytest.raises(Exception, match="rs_bandit_state_key"):
+        p.save_bandit_state("wake:user:someone", {}, uid)
+
+
+def test_game_score_and_content(repos, uid, other):
+    """게임 기록(주고받은 횟수)의 최고 기록, 콘텐츠 화면용 단계 모아 보기, 미루기 다시 울릴 시각."""
+    today = now_kst().date()
+    made = []
+
+    def session(content_type, option, area=None, steps=()):
+        a = repos.alarms.create_alarm(uid, {"alarm_time": time(6, len(made)), "morning_call_type": "CONTENT",
+                                            "content_type": content_type, "content_option": option})
+        made.append(a.alarm_id)
+        s = repos.sessions.get_or_create_session(SessionSnapshot(uid, a.alarm_id, today, "CONTENT", None, content_type, option,
+                                                                 time(6, 0), time(6, 0)))
+        if area:
+            repos.sessions.update_session(uid, s.session_id, {"stretch_area": area})
+        repos.sessions.create_steps(uid, s.session_id, [StepPlan(n, name, None, 60, step_detail=detail)
+                                                        for n, (name, detail) in enumerate(steps, 1)])
+        return s
+
+    g1 = session("QUIZ", "WORDCHAIN", steps=[("끝말잇기", {"script": "시작 단어: 나무"})])
+    g2 = session("QUIZ", "WORDCHAIN", steps=[("끝말잇기", {"script": "시작 단어: 바다"})])
+    assert repos.sessions.best_score(uid) is None
+    repos.sessions.set_step_score(uid, g1.session_id, 1, 7)
+    repos.sessions.set_step_score(uid, g2.session_id, 1, 12)
+    assert repos.sessions.best_score(uid) == 12 and repos.sessions.best_score(uid, "QUIZ", "WORDCHAIN") == 12
+    assert repos.sessions.best_score(other) is None
+    assert repos.sessions.set_step_score(other, g1.session_id, 1, 99) is None
+    with pytest.raises(ValidationFailed):
+        repos.sessions.set_step_score(uid, g1.session_id, 1, -1)
+
+    stretch = session("EXERCISE", "STRETCH", "NECK", [("턱 당기기", {"area": "NECK", "script": "턱을 살짝 당겨요"})])
+    rows = [r for r in repos.sessions.list_content_steps(uid, "EXERCISE", today, today) if r["session_id"] == stretch.session_id]
+    assert [(r["step_name"], r["stretch_area"], r["step_detail"]["script"]) for r in rows] == [("턱 당기기", "NECK", "턱을 살짝 당겨요")]
+    assert all(r["session_date"] == today.isoformat() for r in repos.sessions.list_content_steps(uid, "EXERCISE", today, today))
+    assert repos.sessions.list_content_steps(other, "EXERCISE", today, today) == []
+
+    until = now_kst() + timedelta(minutes=10)
+    repos.sessions.update_session(uid, g1.session_id, {"snoozed_until": until})
+    saved = repos.users.db.table("rs_morning_session").select("snoozed_until").eq("session_id", g1.session_id).execute().data[0]
+    assert saved["snoozed_until"] is not None
+    for alarm_id in made:
+        repos.alarms.delete_alarm(uid, alarm_id)
+
+
 def test_personalization(repos, uid):
     row = {"session_date": now_kst().date().isoformat(), "source": "rule", "mode": "rule", "strategy_id": "gentle",
            "strategy": json.dumps({"coaching": "soft"}), "rule_ids": json.dumps(["R1"]), "propensity": 1.0,

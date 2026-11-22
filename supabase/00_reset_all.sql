@@ -6,6 +6,7 @@
 
 
 drop table if exists
+  rs_wake_log,
   rs_bandit_state,
   rs_strategy_log,
   rs_diary_photo,
