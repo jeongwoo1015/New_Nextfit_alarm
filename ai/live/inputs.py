@@ -66,6 +66,16 @@ class Step:
 
 
 @dataclass(frozen=True)
+class SettingsView:
+    """대화로 바꿀 수 있는 설정의 현재 값(RS_USER_SETTING + 기상 볼륨 개인화 상태, 11/20 회의 4). 서버가 넘기면 AI가 바꾸기 전에 현재 상태를 알린다."""
+    music_genre: str = ""                 # POP / JAZZ / CLASSIC / DANCE / ACOUSTIC
+    wake_start_level: int | None = None   # 지금 기상 알람이 시작하는 볼륨 단계(1~5)
+    wake_state: str = ""                  # RECOMMENDED(개인화가 정한 값) / EXPLORING(아직 맞는 단계를 찾는 중) / USER(사용자가 정한 값)
+    wake_max_level: int | None = None     # 사용자가 정한 시작 단계 상한(없으면 None)
+    wake_raise_from: int | None = None    # 밤 대화에서만: 내일 시작 단계(wake_start_level)가 이 단계보다 올라가는 날이면 이전 단계. 올라가지 않으면 None
+
+
+@dataclass(frozen=True)
 class NightInput:
     persona: Persona = Persona()
     events_today: tuple[CalendarEvent, ...] = ()
@@ -75,6 +85,7 @@ class NightInput:
     routine_items: tuple[str, ...] = ()  # 내일 진행할 루틴 항목 이름 (시간 변경·빼기 요청 확인용)
     routine_item_secs: tuple[int, ...] = ()  # routine_items와 같은 순서의 현재 시간(초). 비어 있으면 시간 없이 이름만 보여 준다
     allow_skip_coaching: bool = True   # 사용자가 먼저 '코칭 안 할래'라고 하면 받아들인다(정의서: 하루 한정 0 허용). AI가 먼저 권하지는 않는다
+    settings: "SettingsView | None" = None   # 대화로 바꿀 수 있는 설정의 현재 값(update_setting)
 
 
 @dataclass(frozen=True)
@@ -93,6 +104,8 @@ class BriefingInput:
     strategy_block: str = ""           # 개인화 Agent가 만든 [오늘의 전략] 문장(AgentDecision.briefing_block). 비어 있으면 프롬프트가 달라지지 않는다
     plan: tuple[str, ...] = ()         # 모닝콜 순서표(ai.tasks.morning_plan). 비어 있으면 지금 앱 순서(LEGACY_ORDER)를 one_liner_follows·coaching_skipped·already_done으로 만든다
     already_done: bool = False         # 오늘 루틴·콘텐츠를 이미 모두 마친 날(앱 재진입 등). 브리핑에서 루틴 안내·시작 질문 없이 짧게 칭찬만 한다
+    settings: "SettingsView | None" = None   # 대화로 바꿀 수 있는 설정의 현재 값(update_setting)
+    snoozes_today: int = 0             # 오늘 이미 말로 미룬 횟수(11/20 회의 1). 하루 3번을 넘으면 더 미루지 않는다. 서버가 오늘 스누즈 횟수를 넘긴다
 
 
 @dataclass(frozen=True)

@@ -31,7 +31,7 @@ def test_eight_cell_plan_is_one_config_line():
     feats = ("wake", "tired", "day")
     keys = {context_key(stats(w), c, d, feats) for w, c, d in itertools.product((0.1, 0.9), ("TIRED", "GOOD"), (0, 6))}
     assert len(keys) == 8 and context_key(stats(0.1), "TIRED", 5, feats) == "low|tired|wkd" and context_key(stats(), None, 0, feats) == "ok|ok|wk"
-    assert ContextualBandit(features=feats).context(stats(0.1), "TIRED", 6) == "low|tired|wkd"
+    assert ContextualBandit(policy="epsilon", features=feats).context(stats(0.1), "TIRED", 6) == "low|tired|wkd"
 
 
 @pytest.mark.parametrize("rate,cell", [(0.49, "low"), (0.4999, "low"), (0.5, "ok"), (0.51, "ok")])
@@ -58,13 +58,13 @@ def test_unknown_feature_is_rejected():
     with pytest.raises(ValueError):
         context_key(stats(), None, None, ("wake", "mood"))
     with pytest.raises(ValueError):
-        ContextualBandit(features=("nope",))
+        ContextualBandit(policy="epsilon", features=("nope",))
 
 
 # ---------------- 안전 규칙: 입력 16가지 ----------------
 @pytest.mark.parametrize("wake_low,tired,day,kind", list(itertools.product((True, False), repeat=4)))
 def test_all_16_input_combinations(wake_low, tired, day, kind):
-    b = ContextualBandit(features=("wake", "tired", "day"))
+    b = ContextualBandit(policy="epsilon", features=("wake", "tired", "day"))
     d = b.choose(stats(0.2 if wake_low else 0.9), "TIRED" if tired else "GOOD", "KIND" if kind else "FRIENDLY", 6 if day else 1, random.Random(0))
     want = SAFE_ARMS if (tired or kind) else tuple(ARMS)
     assert d.allowed == want and abs(sum(d.probs.values()) - 1) < 1e-9 and d.arm in want
@@ -80,14 +80,14 @@ def test_allowed_arms_table():
 
 
 def test_push_is_never_picked_when_forbidden_even_when_exploring_everything():
-    b = ContextualBandit(epsilon=1.0)
+    b = ContextualBandit(policy="epsilon", epsilon=1.0)
     rng = random.Random(1)
     for cond, style in (("TIRED", "FRIENDLY"), ("GOOD", "KIND"), ("STRESSED", "KIND")):
         assert all(b.choose(stats(), cond, style, rng=rng).arm != "push" for _ in range(300))
 
 
 def test_empty_candidates_fall_back_to_standard_never_push():
-    b = ContextualBandit()
+    b = ContextualBandit(policy="epsilon")
     for allowed in ((), [], ("ghost",), ["unknown", "other"]):
         d = b.select("ok|ok", allowed=allowed, rng=random.Random(0))
         assert d.arm == FALLBACK_ARM == "standard" and d.allowed == ("standard",) and d.propensity == 1.0
@@ -95,13 +95,13 @@ def test_empty_candidates_fall_back_to_standard_never_push():
 
 # ---------------- 선택 확률 ----------------
 def test_first_day_picks_standard_with_expected_probability():
-    d = ContextualBandit(epsilon=0.15).select("ok|ok", rng=random.Random(0))
+    d = ContextualBandit(policy="epsilon", epsilon=0.15).select("ok|ok", rng=random.Random(0))
     assert d.probs == pytest.approx({"standard": 0.15 / 3 + 0.85, "gentle": 0.05, "push": 0.05})      # 기록이 없으면 기본 전략이 가장 유력
     assert d.values == {"standard": 0.5, "gentle": 0.5, "push": 0.5}
 
 
 def test_probabilities_sum_to_one_and_propensity_matches_choice():
-    b = ContextualBandit(epsilon=0.3)
+    b = ContextualBandit(policy="epsilon", epsilon=0.3)
     b.update("ok|ok", "gentle", 1.0)
     for allowed in (None, SAFE_ARMS):
         for seed in range(50):
@@ -110,17 +110,17 @@ def test_probabilities_sum_to_one_and_propensity_matches_choice():
 
 
 def test_epsilon_zero_is_greedy_and_epsilon_one_is_uniform():
-    b = ContextualBandit(epsilon=0.0)
+    b = ContextualBandit(policy="epsilon", epsilon=0.0)
     b.update("ok|ok", "push", 1.0)
     assert {b.select("ok|ok", rng=random.Random(s)).arm for s in range(50)} == {"push"}
-    u = ContextualBandit(epsilon=1.0)
+    u = ContextualBandit(policy="epsilon", epsilon=1.0)
     picks = [u.select("ok|ok", rng=random.Random(s)).arm for s in range(900)]
     assert all(250 < picks.count(a) < 350 for a in ARMS)                         # 약 1/3씩
     assert u.select("ok|ok", rng=random.Random(0)).probs == pytest.approx({a: 1 / 3 for a in ARMS})
 
 
 def test_same_seed_same_result_and_explored_flag():
-    b = ContextualBandit(epsilon=0.5)
+    b = ContextualBandit(policy="epsilon", epsilon=0.5)
     b.update("ok|ok", "gentle", 1.0)
     a = [b.select("ok|ok", rng=random.Random(7)) for _ in range(3)]
     assert a[0] == a[1] == a[2]
@@ -130,7 +130,7 @@ def test_same_seed_same_result_and_explored_flag():
 
 # ---------------- 학습 ----------------
 def test_value_pulls_toward_prior_with_little_data():
-    b = ContextualBandit(prior_mean=0.5, prior_weight=2.0)
+    b = ContextualBandit(policy="epsilon", prior_mean=0.5, prior_weight=2.0)
     assert b.value("c", "gentle") == 0.5
     b.update("c", "gentle", 1.0)
     assert b.value("c", "gentle") == pytest.approx((0.5 * 2 + 1) / 3)
@@ -140,13 +140,13 @@ def test_value_pulls_toward_prior_with_little_data():
 
 
 def test_cells_and_arms_learn_independently():
-    b = ContextualBandit()
+    b = ContextualBandit(policy="epsilon")
     b.update("low|ok", "push", 1.0)
     assert b.value("low|ok", "push") > 0.5 and b.value("ok|ok", "push") == 0.5 and b.value("low|ok", "gentle") == 0.5
 
 
 def test_update_rejects_bad_input_and_clamps():
-    b = ContextualBandit()
+    b = ContextualBandit(policy="epsilon")
     assert b.update("c", "ghost", 1.0) is False and b.update("c", "gentle", None) is False and b.update("c", "gentle", float("nan")) is False
     assert b.update("c", "gentle", "abc") is False and b.update("c", "gentle", True) is False and b.counts == {}
     assert b.update("c", "gentle", 5) and b.update("c", "gentle", -3) and b.update("c", "gentle", "0.5")
@@ -156,7 +156,7 @@ def test_update_rejects_bad_input_and_clamps():
 def simulate(best, days=300, seed=3):
     """best 전략만 평균 0.85점, 나머지는 0.35점을 받는 가상 사용자."""
     rng = random.Random(seed)
-    b = ContextualBandit()
+    b = ContextualBandit(policy="epsilon")
     picks = []
     for _ in range(days):
         d = b.choose(stats(0.3), "GOOD", "FRIENDLY", rng=rng)
@@ -174,7 +174,7 @@ def test_bandit_learns_the_better_strategy_for_a_simulated_user(best):
 
 def test_tired_days_never_learn_to_push_even_if_push_scores_best():
     rng = random.Random(0)
-    b = ContextualBandit()
+    b = ContextualBandit(policy="epsilon")
     for _ in range(200):
         d = b.choose(stats(0.3), "TIRED", "FRIENDLY", rng=rng)
         b.update(d.context, d.arm, 0.9 if d.arm == "push" else 0.3)
@@ -183,7 +183,7 @@ def test_tired_days_never_learn_to_push_even_if_push_scores_best():
 
 # ---------------- 저장·복원·합치기 ----------------
 def test_save_and_restore_gives_identical_choices():
-    b = ContextualBandit(epsilon=0.2)
+    b = ContextualBandit(policy="epsilon", epsilon=0.2)
     for arm, r in (("gentle", 1.0), ("push", 0.2), ("gentle", 0.8)):
         b.update("low|ok", arm, r)
     data = json.loads(json.dumps(b.to_dict()))                                # JSON으로 저장했다 읽어도 같다
@@ -206,7 +206,7 @@ def test_from_dict_skips_corrupt_entries():
 
 
 def test_merge_sums_users_and_keeps_originals():
-    a, b = ContextualBandit(), ContextualBandit()
+    a, b = ContextualBandit(policy="epsilon"), ContextualBandit(policy="epsilon")
     a.update("ok|ok", "gentle", 1.0), a.update("ok|ok", "gentle", 0.5)
     b.update("ok|ok", "gentle", 0.0), b.update("low|ok", "push", 1.0)
     m = ContextualBandit.merge(a, b)
@@ -218,4 +218,4 @@ def test_merge_sums_users_and_keeps_originals():
 
 def test_merge_requires_same_features():
     with pytest.raises(ValueError):
-        ContextualBandit.merge(ContextualBandit(), ContextualBandit(features=("wake", "tired", "day")))
+        ContextualBandit.merge(ContextualBandit(policy="epsilon"), ContextualBandit(policy="epsilon", features=("wake", "tired", "day")))

@@ -1,8 +1,9 @@
 """Contextual Bandit: 상황(Context)을 보고 말하는 방식(전략)을 고르고, 결과(Reward)로 학습한다.
 
-구현: 상황을 몇 칸으로 나누고(표 방식), 칸마다 전략별 평균 점수를 쌓는 ε-greedy.
-  - 대부분은 평균 점수가 가장 높은 전략을 고르고, ε(기본 15%)는 후보 중 무작위로 시도한다.
-  - 선택 확률(propensity)을 정확히 계산해서 돌려준다 → 나중에 효과를 평가(off-policy)할 때 필요하다.
+구현: 상황을 몇 칸으로 나누고(표 방식), 칸마다 전략별 점수(횟수, 점수 합)를 쌓는다. 고르는 방식(policy)은 둘이다.
+  - thompson(기본, 11/21): 칸·전략마다 Beta(성공+prior, 실패+prior)에서 값을 하나씩 뽑아 가장 큰 전략을 고른다. 기록이 적으면 값이 크게 흔들려 자연스럽게 탐색하고,
+    쌓일수록 잘 먹힌 전략으로 쏠린다(탐색 비율을 따로 정하지 않는다). 0~1 점수는 소수 성공으로 센다(sums = 성공, counts - sums = 실패). 선택 확률은 몬테카를로로 추정한다.
+  - epsilon: 대부분은 평균 점수가 가장 높은 전략을 고르고, ε(기본 15%)는 후보 중 무작위로 시도한다. 선택 확률(propensity)을 정확히 계산한다.
   - 피곤한 날과 사용자 말투 설정이 KIND인 사용자에게는 강한 전략(push)을 후보에서 뺀다.
   - 상태는 to_dict()/from_dict()로 JSON 저장·복원한다. 여러 사용자의 상태는 merge()로 합칠 수 있다(데이터가 적을 때를 위해).
 표준 라이브러리만 쓴다. DB를 읽지 않는다. 서버가 stats(User Model), 컨디션, 말투 설정을 넘긴다.
@@ -19,7 +20,8 @@ from .rules import is_tired
 from .strategy import Strategy
 from .user_model import UserStats
 
-STATE_VERSION = 1
+STATE_VERSION = 2          # 2: policy 칸 추가(옛 상태 1도 그대로 읽는다)
+POLICIES = ("thompson", "epsilon")
 WAKE_LOW = 0.5        # 최근 기상 성공률이 이 값 미만이면 '낮음' (Rule의 R1과 같은 가정값)
 
 # 순서가 중요하다: 점수가 같으면(처음 시작할 때) 앞쪽 전략이 이기므로 기본 전략(standard)을 맨 앞에 둔다.
@@ -79,7 +81,10 @@ class BanditDecision:
 
 class ContextualBandit:
     def __init__(self, arms: dict | None = None, epsilon: float = 0.15, prior_mean: float = 0.5, prior_weight: float = 2.0,
-                 features=CONTEXT_FEATURES):
+                 features=CONTEXT_FEATURES, policy: str = "thompson", mc_samples: int = 300):
+        if policy not in POLICIES:
+            raise ValueError(f"policy는 {POLICIES} 중 하나예요: {policy!r}")
+        self.policy, self.mc_samples = policy, max(0, int(mc_samples))     # mc_samples: thompson 선택 확률 추정에 쓰는 표본 수(0이면 균등으로 둔다, 시뮬레이션용)
         self.arms = dict(arms or ARMS)
         self.epsilon = min(1.0, max(0.0, float(epsilon)))
         self.prior_mean, self.prior_weight = float(prior_mean), float(prior_weight)
@@ -97,6 +102,24 @@ class ContextualBandit:
         n, s = self.counts.get(self._k(ctx, arm), 0), self.sums.get(self._k(ctx, arm), 0.0)
         return (self.prior_mean * self.prior_weight + s) / (self.prior_weight + n)
 
+    def beta_params(self, ctx: str, arm: str) -> tuple[float, float]:
+        """thompson: 칸·전략의 Beta(성공, 실패). 기록이 없으면 prior(평균 prior_mean, 강도 prior_weight)만 남는다."""
+        n, s_ = self.counts.get(self._k(ctx, arm), 0), min(self.sums.get(self._k(ctx, arm), 0.0), float(self.counts.get(self._k(ctx, arm), 0)))
+        return max(self.prior_mean * self.prior_weight + s_, 1e-3), max((1 - self.prior_mean) * self.prior_weight + (n - s_), 1e-3)
+
+    def _thompson_probs(self, ctx: str, pool: list) -> dict:
+        """각 전략이 뽑힐 확률을 고정 시드 몬테카를로로 추정한다(같은 상태면 같은 값). 0이 되지 않게 한 표본씩 더한다."""
+        if len(pool) == 1 or self.mc_samples == 0:
+            return {a: 1 / len(pool) for a in pool}
+        rng = random.Random(f"{ctx}|{'/'.join(pool)}|{sorted(self.counts.items())}")
+        wins = dict.fromkeys(pool, 0)
+        params = {a: self.beta_params(ctx, a) for a in pool}
+        for _ in range(self.mc_samples):
+            draw = {a: rng.betavariate(*params[a]) for a in pool}
+            wins[max(pool, key=lambda a: (draw[a], -pool.index(a)))] += 1
+        total = self.mc_samples + len(pool)
+        return {a: (wins[a] + 1) / total for a in pool}
+
     def context(self, stats, condition=None, weekday=None) -> str:
         return context_key(stats, condition, weekday, self.features)
 
@@ -109,6 +132,11 @@ class ContextualBandit:
         values = {a: self.value(ctx, a) for a in pool}
         best = max(pool, key=lambda a: (values[a], -pool.index(a)))         # 동점이면 앞쪽 전략
         k = len(pool)
+        if self.policy == "thompson":
+            probs = self._thompson_probs(ctx, pool)
+            draw = {a: rng.betavariate(*self.beta_params(ctx, a)) for a in pool}
+            arm = max(pool, key=lambda a: (draw[a], -pool.index(a)))        # 동점이면 앞쪽(기본) 전략
+            return BanditDecision(arm=arm, propensity=probs[arm], explored=(arm != best), allowed=tuple(pool), values=values, probs=probs, context=ctx)
         probs = {a: self.epsilon / k + ((1 - self.epsilon) if a == best else 0.0) for a in pool}
         arm = best if rng.random() >= self.epsilon else rng.choice(pool)
         return BanditDecision(arm=arm, propensity=probs[arm], explored=(arm != best), allowed=tuple(pool), values=values,
@@ -135,7 +163,7 @@ class ContextualBandit:
 
     # ---------------- 저장·복원·합치기 ----------------
     def to_dict(self) -> dict:
-        return {"version": STATE_VERSION, "features": list(self.features), "epsilon": self.epsilon, "prior_mean": self.prior_mean,
+        return {"version": STATE_VERSION, "policy": self.policy, "features": list(self.features), "epsilon": self.epsilon, "prior_mean": self.prior_mean,
                 "prior_weight": self.prior_weight, "counts": dict(self.counts), "sums": dict(self.sums)}
 
     @classmethod
@@ -144,8 +172,9 @@ class ContextualBandit:
         if not isinstance(data, dict):
             return cls()
         try:
+            policy = data.get("policy") if data.get("policy") in POLICIES else "thompson"
             b = cls(epsilon=data.get("epsilon", 0.15), prior_mean=data.get("prior_mean", 0.5), prior_weight=data.get("prior_weight", 2.0),
-                    features=tuple(data.get("features") or CONTEXT_FEATURES))
+                    features=tuple(data.get("features") or CONTEXT_FEATURES), policy=policy)
         except (TypeError, ValueError):
             return cls()
         counts, sums = data.get("counts"), data.get("sums")
@@ -165,7 +194,8 @@ class ContextualBandit:
         first = bandits[0]
         if any(b.features != first.features for b in bandits):
             raise ValueError("상황 특징이 다른 Bandit은 합칠 수 없어요")
-        out = cls(arms=first.arms, epsilon=first.epsilon, prior_mean=first.prior_mean, prior_weight=first.prior_weight, features=first.features)
+        out = cls(arms=first.arms, epsilon=first.epsilon, prior_mean=first.prior_mean, prior_weight=first.prior_weight, features=first.features,
+                  policy=first.policy, mc_samples=first.mc_samples)
         for b in bandits:
             for k, v in b.counts.items():
                 out.counts[k] = out.counts.get(k, 0) + v

@@ -287,3 +287,50 @@ def test_short_replies_after_closing_end_the_session():
         p = coaching_prompt(cin(kind_steps))
         assert "'없어', '괜찮아', '그래'" in p and "같은 응답에서 end_session을 호출한다" in p
         assert "'더 필요하신가요?' 같은 질문을 하지 않는다" in p
+
+
+# ---------- 아침 단계 연결 (브리핑 → 한마디 → 포춘 → 콘텐츠) ----------
+from ai.live.inputs import BriefingInput, FortuneInput, Persona
+from ai.live.prompts.briefing import briefing_prompt
+from ai.live.prompts.coaching import content_label
+from ai.live.prompts.fortune import fortune_prompt, intro_sentence
+from ai.tasks.content_steps import bank_quiz_steps
+
+
+def test_briefing_closing_announces_the_real_next_order():
+    # 순서표가 없으면 지금 앱 순서(브리핑 → (한마디) → 포춘 → 코칭)
+    base = briefing_prompt(BriefingInput(content_name="스트레칭"))
+    assert "그럼 먼저 오늘의 포춘부터 들어 볼까요?" in base and "어젯밤 남긴 한마디" not in base.split("[현재 시각]")[0]
+    withone = briefing_prompt(BriefingInput(content_name="스트레칭", one_liner_follows=True))
+    assert "그럼 먼저 어젯밤 남긴 한마디와 오늘의 포춘부터 들어 볼까요?" in withone
+    # 새 순서표(포춘 마지막): 바로 다음 단계만 묻는다
+    new = briefing_prompt(BriefingInput(content_name="스트레칭", plan=("BRIEFING", "ONE_LINER", "COACHING", "FORTUNE")))
+    assert "그럼 먼저 어젯밤 남긴 한마디부터 들어 볼까요?" in new
+    assert "이제 스트레칭을 시작할 준비됐어요?" in briefing_prompt(BriefingInput(content_name="스트레칭", plan=("BRIEFING", "COACHING", "FORTUNE")))
+
+
+def test_fortune_intro_names_what_it_was_made_from():
+    f = lambda tone, based: intro_sentence(FortuneInput(persona=Persona("예준", tone), based_on=based))
+    assert f("FORMAL", "") == "오늘의 포춘이에요." and f("CASUAL", "") == "오늘의 포춘이야."
+    assert f("FORMAL", "ONE_LINER") == "어젯밤 남긴 한마디로 만든 오늘의 포춘이에요."
+    assert f("CASUAL", "one_liner") == "어젯밤 남긴 한마디로 만든 오늘의 포춘이야."      # compose_fortune의 used_input 값 그대로도 받는다
+    assert f("FORMAL", "voice") == "어젯밤 남긴 한마디로 만든 오늘의 포춘이에요."        # compose_fortune의 used_input 실제 값("voice")
+    assert f("FORMAL", "DIARY") == "어젯밤 이야기로 만든 오늘의 포춘이에요."
+    assert f("FORMAL", "none") == "오늘의 포춘이에요."                                  # 모르는 값은 기본 소개
+    assert "어젯밤 남긴 한마디로 만든 오늘의 포춘이에요." in fortune_prompt(FortuneInput(fortune_text="가나다", based_on="ONE_LINER"))
+
+
+def test_later_morning_sessions_do_not_greet_again():
+    for p in (fortune_prompt(FortuneInput(fortune_text="가나다")), coaching_prompt(cin(stretch_steps(D0)))):
+        assert "'좋은 아침', '안녕하세요' 같은 첫인사나 자기소개를 하지 않고" in p
+    assert "아침은 여러 대화가 차례로 이어진다" not in briefing_prompt(BriefingInput())     # 브리핑은 첫 인사를 하는 세션이다
+
+
+def test_content_session_opens_with_a_bridge_sentence():
+    assert '예) "이어서 스트레칭 시간이에요." 콘텐츠 이름은 반드시 "스트레칭" 그대로 쓰고' in coaching_prompt(cin(stretch_steps(D0)))
+    assert content_label(cin(stretch_steps(D0))) == "스트레칭"
+    assert content_label(CoachingInput(morning_call_type="CONTENT", steps=tuple(wordchain_steps(D0)), content_option="WORDCHAIN")) == "끝말잇기"
+    quiz = lambda opt: content_label(CoachingInput(morning_call_type="CONTENT", content_type="QUIZ", content_option=opt, steps=tuple(bank_quiz_steps(opt, D0))))
+    assert quiz("PERSON") == "인물 퀴즈" and quiz("GENERAL") == "상식 퀴즈"
+    routine = CoachingInput(steps=(Step(1, "독서", 60, "QA"),))                  # 루틴 코칭 세션에는 붙지 않는다
+    assert "콘텐츠 시작(이 세션의 첫 안내)" not in coaching_prompt(routine)

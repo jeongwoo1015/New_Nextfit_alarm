@@ -54,11 +54,12 @@ def _now() -> str:
 
 
 class DevClient:
-    def __init__(self, api_key: str | None = None, synth=tts.synthesize, first_timeout: float = 40.0, drain: float = 2.0):
+    def __init__(self, api_key: str | None = None, synth=tts.synthesize, first_timeout: float = 40.0, drain: float = 2.0, realistic: bool = False):
         self.key = api_key or os.environ.get("GEMINI_API_KEY", "")
         if not self.key:
             raise DevClientError("GEMINI_API_KEY가 없어요")
         self.synth, self.first_timeout, self.drain = synth, first_timeout, drain
+        self.realistic = realistic      # 실제 앱처럼 음성을 실시간 속도로 보내고 앞뒤에 무음을 붙인다(짧은 "했어"가 인식 안 되는 측정 오차를 줄인다, 11/21)
 
     def scrub(self, msg) -> str:
         return str(msg).replace(self.key, "***")
@@ -86,7 +87,7 @@ class DevClient:
                     raise DevClientError("setupComplete가 오지 않았어요")
                 self._turn(ws, log, "시작", text=start_signal(kind))
                 for u in utterances:
-                    if log.ended_by in ("end_session", "start_routine"):
+                    if log.ended_by in ("end_session", "start_routine", "reschedule_alarm"):
                         break
                     self._turn(ws, log, u, audio=u)
         except DevClientError:
@@ -99,10 +100,12 @@ class DevClient:
         return log
 
     def _send_audio(self, ws, pcm: bytes) -> None:
+        if self.realistic:
+            pcm = b"\x00" * 9600 + pcm + b"\x00" * 25600        # 16kHz 16bit 모노: 앞 0.3초 + 뒤 0.8초 무음
         for k in range(0, len(pcm), 3200):
             ws.send(json.dumps({"realtimeInput": {"audio": {"mimeType": "audio/pcm;rate=16000",
                                                             "data": base64.b64encode(pcm[k:k + 3200]).decode()}}}))
-            time.sleep(0.01)
+            time.sleep(0.1 if self.realistic else 0.01)        # 3200바이트 = 0.1초 분량이라 realistic은 실시간 속도
         ws.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
 
     def _turn(self, ws, log: SessionLog, label: str, text: str | None = None, audio: str | None = None) -> None:
@@ -133,7 +136,7 @@ class DevClient:
                 replies = []
                 for c in m["toolCall"].get("functionCalls", []):
                     turn.calls.append({"name": c.get("name"), "args": c.get("args") or {}})
-                    if c.get("name") in ("end_session", "start_routine"):   # 앱은 응답하지 않고 음성이 끝나면 연결을 닫고(다음 세션을 시작하고)
+                    if c.get("name") in ("end_session", "start_routine", "reschedule_alarm"):   # 앱은 응답하지 않고 음성이 끝나면 연결을 닫고(다음 세션을 시작하고, 알람을 다시 예약하고)
                         log.ended_by = c.get("name")
                         continue
                     replies.append({"id": c.get("id"), "name": c.get("name"), "response": {"result": "ok"}})
