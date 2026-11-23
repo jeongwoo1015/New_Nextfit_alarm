@@ -9,7 +9,7 @@ from backend.services.history_service import HistoryService
 
 from .morning import wake_log_out
 
-from .schemas import (CalendarDayOut, DiaryDayOut, DiarySessionOut, NightRecordOut, PhotoOut, ReportOut, SessionOut,
+from .schemas import (CalendarDayOut, ContentStepOut, ContentStepsOut, DiaryDayOut, DiarySessionOut, NightRecordOut, PhotoOut, ReportOut, SessionOut,
                       StepOut, TotalsOut)
 
 router = APIRouter(tags=["history"])
@@ -23,6 +23,13 @@ def get_report(period: str = Query("week", pattern="^(week|month|year)$"), date_
     rep = svc.report(user_id, period, date_)
     levels = [wake_log_out(r) for r in svc.wake_levels(user_id, rep.start, rep.end)]
     return ReportOut.model_validate(rep).model_copy(update={"wake_levels": levels})
+
+
+@router.get("/contents/steps", response_model=ContentStepsOut)
+def get_content_steps(date_: date = Query(..., alias="date"), user_id: str = Depends(current_user_id),
+                      svc: HistoryService = Depends(history_service)):
+    """콘텐츠 화면: 그날 콘텐츠 단계의 내용(스트레칭 동작 설명, 영어 문장, 게임 시작 단어)과 판정·게임 기록. 없으면 빈 목록."""
+    return ContentStepsOut(date=date_, steps=[ContentStepOut(**r) for r in svc.content_steps(user_id, date_)])
 
 
 @router.get("/diary/calendar", response_model=list[CalendarDayOut])

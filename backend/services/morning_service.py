@@ -60,6 +60,7 @@ def fortune_based_on(source: str | None, night) -> str:
     if (night.voice_text or "").strip():
         return "ONE_LINER"
     return "DIARY" if (night.diary_text or "").strip() else ""
+STRATEGY_CATCH_UP_DAYS = 7      # 지난 며칠의 보상을 다음 알람 때 매기는지
 BANDIT_KEY = "global"           # AI CONTRACTS 6-4: 여러 사용자를 합쳐야 경향이 보여 전체 합산 상태를 쓴다
 RECENT_DAYS = 7
 INTENSITY_DAYS = 14             # 자동 강도: 지난 알람 결과를 이만큼 본다 (AI 규칙은 최근 3번 단위, 그날 쓴 강도를 따라감)
@@ -253,7 +254,36 @@ class MorningService:
         if s.session_end_at is None:
             s = self.r.sessions.update_session(user_id, session_id, {"session_end_at": to_kst(self.clock())})
             self.wake.learn(user_id, s)          # 확인 없이 끝났으면 확인 실패로 학습 (이미 학습했으면 건너뜀)
+            self.learn_strategy(user_id, s.session_date, only_session=session_id)
         return self.view(user_id, session_id)
+
+    # ---------- 코칭 강도 학습 (11/21 보상 = 단계 수행 비율) ----------
+    def learn_strategy(self, user_id: str, day, only_session: str | None = None) -> bool:
+        """그날 전략 로그에 보상을 매기고 Bandit이 고른 날이면 학습한다. 보상이 이미 있으면 다시 하지 않는다.
+        보상은 전략을 정한 세션(로그의 session_id)의 단계로 매긴다. 실패해도 아침 흐름은 이어진다."""
+        try:
+            lg = self.r.personalization.get_strategy_log(user_id, day)
+            if not lg or lg.reward is not None or not lg.session_id or (only_session and lg.session_id != only_session):
+                return False
+            s = self.r.sessions.get_session(user_id, lg.session_id)
+            if not s:
+                return False
+            res = self.ai.learn_strategy(self.r.personalization.get_bandit_state(BANDIT_KEY), lg, s,
+                                         self.r.sessions.list_steps(user_id, s.session_id))
+            if res.reward is None:
+                return False
+            self.r.personalization.set_reward(lg.log_id, res.reward)
+            if res.state is not None:
+                self.r.personalization.save_bandit_state(BANDIT_KEY, res.state)
+            return True
+        except Exception:
+            log.exception("코칭 강도 학습 실패 user=%s day=%s", user_id, day)
+            return False
+
+    def learn_past_strategies(self, user_id: str) -> int:
+        """끝내지 못한 지난 세션(앱 종료·통화 중단)의 보상을 다음 알람 때 매긴다 (세션 시작 응답 뒤 백그라운드)."""
+        today = today_kst(self.clock())
+        return sum(self.learn_strategy(user_id, today - timedelta(days=n)) for n in range(1, STRATEGY_CATCH_UP_DAYS + 1))
 
     def report_wake_volume(self, user_id: str, session_id: str, start_level: int, received_level: int | None) -> dict:
         """앱 보고: 알람이 울리기 시작한 단계와 전화를 받은 단계(1~5, 못 받고 껐으면 None)."""

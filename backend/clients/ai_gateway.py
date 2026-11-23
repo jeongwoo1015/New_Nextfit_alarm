@@ -14,7 +14,8 @@ import httpx
 
 from backend.core.config import Settings
 from backend.core.errors import ServiceUnavailable
-from backend.domain.models import AlarmRoutineItem, NightRecord, RecentRecords, UserSetting
+from backend.domain.models import (AlarmRoutineItem, MorningSession, NightRecord, RecentRecords, SessionStep, StrategyLog,
+                                   UserSetting)
 
 
 AUTH_TOKEN_URL = "https://generativelanguage.googleapis.com/v1alpha/auth_tokens"
@@ -167,6 +168,12 @@ class StrategyDecision:
 
 
 @dataclass(frozen=True)
+class StrategyLearning:
+    reward: float | None        # 단계 수행 비율 0~1 (AI coaching_reward). 코칭을 안 한 날·단계가 없는 날은 None(기록·학습 안 함)
+    state: dict | None          # 갱신한 코칭 Bandit 상태. Bandit이 고른 날이 아니면 None(저장할 것 없음)
+
+
+@dataclass(frozen=True)
 class WakeInputs:
     """기상 알람 시작 단계를 정하는 입력 (AI decide_start_level). 같은 날 다시 정할 때 같은 값을 넣으려고 기록(prefs)에 함께 남긴다."""
     sleep_minutes: float | None = None
@@ -284,6 +291,8 @@ class AIGateway(Protocol):
     def decide_wake_level(self, user_id: str, session_date: date, personal: dict | None, global_: dict | None,
                           w: WakeInputs, seed: str) -> WakeDecision: ...
     def wake_raise_announced(self, ai_text: str, level: int) -> bool: ...    # 밤 대화에서 AI가 올린다고 실제로 말했는가
+    def learn_strategy(self, bandit_state: dict | None, log: StrategyLog, session: MorningSession,
+                       steps: list[SessionStep]) -> StrategyLearning: ...    # 코칭 강도: 그날 결과로 보상을 매기고 학습 (11/21)
     def learn_wake(self, state: dict | None, context_key: str, start_level: int, received_level: int | None,
                    confirmed: bool) -> dict | None: ...                     # 반영한 새 학습 상태, 값이 잘못됐으면 None
 
@@ -434,8 +443,9 @@ class RealAIGateway:
         from ai.personalization.records import build_sessions
         sessions = build_sessions([asdict(s) for s in records.sessions], [asdict(s) for s in records.steps],
                                   [asdict(n) for n in records.nights])
+        # 저장된 상태가 없어도 빈 Bandit을 넘긴다 — None이면 AI가 규칙으로 돌아가 학습이 한 번도 시작되지 않는다
         d = decide(user_id, sessions, today, condition=condition, speech_style=speech_style, mode=mode,
-                   bandit=ContextualBandit.from_dict(bandit_state) if bandit_state else None)
+                   bandit=ContextualBandit.from_dict(bandit_state) if bandit_state else ContextualBandit())
         return StrategyDecision(d.strategy.to_dict(), d.briefing_block, d.coaching_block, d.log.to_row())
 
     def compose_fortune(self, one_liner: str, tone: str, today: date, diary_text: str) -> Fortune:
@@ -468,6 +478,20 @@ class RealAIGateway:
     def wake_raise_announced(self, ai_text: str, level: int) -> bool:
         from ai.personalization.wake_volume import raise_announced
         return raise_announced(ai_text, level)
+
+    def learn_strategy(self, bandit_state, log: StrategyLog, session: MorningSession, steps: list[SessionStep]) -> StrategyLearning:
+        from ai.personalization.agent import learn
+        from ai.personalization.bandit import ContextualBandit
+        from ai.personalization.logs import DecisionLog
+        from ai.personalization.records import build_sessions
+        from ai.personalization.reward import coaching_reward
+        record = build_sessions([asdict(session)], [asdict(s) for s in steps])[0]
+        reward = coaching_reward(record)
+        if reward is None:
+            return StrategyLearning(None, None)
+        bandit = ContextualBandit.from_dict(bandit_state) if bandit_state else ContextualBandit()
+        row = {**asdict(log), "session_date": log.session_date.isoformat()}
+        return StrategyLearning(reward, bandit.to_dict() if learn(bandit, DecisionLog.from_row(row), reward) else None)
 
     def learn_wake(self, state, context_key, start_level, received_level, confirmed) -> dict | None:
         from ai.personalization.wake_volume import WakeLadder, learn_wake
@@ -509,6 +533,9 @@ class UnavailableAIGateway:
 
     def learn_wake(self, state, context_key, start_level, received_level, confirmed):
         return None             # 학습 없이 기록만 남는다
+
+    def learn_strategy(self, bandit_state, log, session, steps):
+        return StrategyLearning(None, None)
 
 
 def build_ai_gateway(settings: Settings):

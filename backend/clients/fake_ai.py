@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 import re
 
 from .ai_gateway import (ContentPlan, ContentStep, Fortune, LiveToken, NightContext, NightExtract, RoutineChangeRequest,
-                         StrategyDecision, WakeDecision, WakeInputs, default_wake_decision, fit_seconds)
+                         StrategyDecision, StrategyLearning, WakeDecision, WakeInputs, default_wake_decision,
+                         fit_seconds)
 
 STRETCH_AREAS = ("FULL", "NECK", "SHOULDER", "CHEST_BACK", "WRIST_HAND", "ELBOW_ARM", "LOW_BACK", "PELVIS", "GLUTE",
                  "THIGH", "CALF", "ANKLE_FOOT")
@@ -115,6 +116,16 @@ class FakeAIGateway:
 
     def wake_raise_announced(self, ai_text, level):
         return bool(re.search(rf"{level}\s*단계", ai_text or "") and re.search("소리|볼륨|알람", ai_text or ""))
+
+    def learn_strategy(self, bandit_state, log, session, steps):
+        """AI coaching_reward처럼 단계 수행 비율, Bandit이 고른 날만 상태를 바꾼다."""
+        self.calls.append(("strategy_learn", (log.log_id, session.session_id)))
+        if session.coaching_skipped or not steps:
+            return StrategyLearning(None, None)
+        reward = sum(s.step_status == "DONE" for s in steps) / len(steps)
+        if log.source != "bandit":
+            return StrategyLearning(reward, None)
+        return StrategyLearning(reward, {"learned": [*(bandit_state or {}).get("learned", []), [log.strategy_id, reward]]})
 
     def learn_wake(self, state, context_key, start_level, received_level, confirmed):
         self.calls.append(("wake_learn", (context_key, start_level, received_level, confirmed)))

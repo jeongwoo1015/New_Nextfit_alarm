@@ -469,6 +469,25 @@ class ReportOut(Out):
     wake_levels: list[WakeLogOut] = []   # 나의 기상 단계 변화: 이 기간(오늘까지) 날짜별 시작·받은 단계 (11/22)
 
 
+class ContentStepOut(BaseModel):
+    """콘텐츠 화면 한 줄 (앱 RespecApi.contentSteps 형식)."""
+    session_id: str
+    step_order: int
+    step_name: str
+    step_status: str
+    content_type: str
+    content_option: str | None
+    stretch_area: str | None            # 스트레칭이면 그 단계의 부위
+    script: str | None                  # 스트레칭 동작 설명 / 영어 "영어 / 뜻 / 발음" / 끝말잇기 "시작 단어: 기차"
+    words: list[str]                    # 게임에서 말한 단어 (저장 방식 미정 — 지금은 단계 내용에 있으면 그대로, 없으면 빈 목록)
+    score: int | None                   # 게임 기록: 제한 시간 안에 주고받은 횟수
+
+
+class ContentStepsOut(BaseModel):
+    date: date
+    steps: list[ContentStepOut]
+
+
 class CalendarDayOut(BaseModel):
     date: date
     photo_url: str | None                # 사진을 올린 날 (없으면 루틴 성공률을 보여 준다)

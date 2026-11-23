@@ -33,6 +33,7 @@ def start_session(body: SessionStartIn, tasks: BackgroundTasks, user_id: str = D
     v = svc.start(user_id, body.alarm_id)
     if not v.session.fortune_text:
         tasks.add_task(svc.prepare_fortune_quietly, user_id, v.session.session_id)
+    tasks.add_task(svc.learn_past_strategies, user_id)     # 끝내지 못한 지난 세션의 코칭 강도 학습
     return _view(v)
 
 

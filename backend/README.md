@@ -51,6 +51,7 @@
 | `POST /morning/sessions/{id}/end` | 종료 | `end_session` 또는 통화 종료. 기상 성공 기록 |
 | `GET /morning/sessions/{id}` · `GET /morning/sessions/today` | 루틴 화면 | 세션, 단계, 진행 개수(`finished` = "완료!") |
 | `GET /reports?period=week\|month\|year&date=` | 리포트 | 상단 `overall` = 전체 기간 누적(기상 성공률·루틴 성공률·취침 성공률 `bedtime_success_rate`), `totals`·`series` = 선택한 기간(평균 기상 시각, 루틴 완료 52/70, 그래프 칸 주: 월~일 / 월: 1주~5주 / 연: 1~12월), 현재·최장 연속 달성일. 취침(11/06): 성공률 = 밤 대화를 마친 날 ÷ 기록 기간(첫 기록일~어제, 오늘 밤을 마쳤으면 오늘까지), `avg_bed_clock` = 밤 기록이 처음 저장된 시각의 평균(자정 넘김 이어서). `wake_levels` = 나의 기상 단계 변화(이 기간 중 오늘까지 날짜별 시작·받은 단계, `user_set`) |
+| `GET /contents/steps?date=YYYY-MM-DD` | 콘텐츠 화면 | 그날 콘텐츠 세션 단계 `{date, steps: [{session_id, step_order, step_name, step_status, content_type, content_option, stretch_area, script, words, score}]}`. `script` = 동작 설명·영어 문장·시작 단어, `score` = 게임 기록(주고받은 횟수), `words`는 저장 방식이 정해지기 전까지 빈 목록 |
 | `GET /diary/calendar?month=YYYY-MM` | 한 줄 일기 | 날짜별 사진 URL 또는 루틴 성공률, 세션·밤 기록 여부 |
 | `GET /diary/{date}` | 일기 상세 | 그날 밤 기록(한 줄 일기)·아침 세션과 단계·사진·하루 요약. 세션은 알람이 먼저 울린 순 |
 | `PUT /diary/{date}/photo` | 일기 사진 | jpg를 본문 그대로(`Content-Type: image/jpeg`, 10MB 이하, 미래 날짜 불가). 다시 올리면 덮어씀 |
@@ -128,6 +129,9 @@ AI 쪽 브리핑 입력의 `coaching_min`은 0(코칭 안 함)/10(진행)으로�
 역할별 브랜치끼리 병합해도 된다(11/01). 같은 파일을 두 브랜치에서 고치지 않는다: base.py·models·서비스·API·requirements·
 메모리 구현·`jobs/personalization.py`는 backend-service, `repositories/supabase.py`·`jobs/maintenance.py`·`supabase/*.sql`은 backend-db,
 `ai/`는 ai 담당. 이 브랜치에는 feat/backend-db와 feat/ai가 병합돼 있어 실제 `ai` 함수로 테스트한다(`tests/test_ai_real.py`).
+
+## 코칭 강도 학습 (AI 11/21)
+브리핑 때 정한 그날 전략 로그(1개)에 보상 = 단계 수행 비율(`coaching_reward`, 기상 성공은 넣지 않음)을 매긴다. 세션이 끝날 때(`/end`), 끝내지 못한 지난 7일은 다음 알람의 세션 시작 뒤 백그라운드에서. 한 번 매긴 날은 다시 하지 않는다. Bandit이 고른 날만 학습 상태(`global`)를 갱신하고, Rule 날은 보상만 기록한다. 코칭을 안 한 날·단계가 없는 날은 매기지 않는다.
 
 ## 기상 볼륨 개인화 (11/20 회의, AI B23, DB 11-22 `rs_wake_log`)
 그날 가장 먼저 울리는 모닝콜 하나로 하루 1행을 기록·학습한다(`services/wake_service.py`, 계산은 AI `wake_volume`).

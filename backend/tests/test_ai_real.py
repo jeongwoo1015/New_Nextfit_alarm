@@ -4,6 +4,7 @@
 서버가 넘기는 입력이 AI 쪽 데이터 클래스·지시문 조립과 맞는지, 결과를 정의서 11/01 형식으로 바꾸는지를 본다.
 """
 import json
+from dataclasses import replace
 from datetime import date, datetime, time
 
 import httpx
@@ -12,10 +13,11 @@ import pytest
 pytest.importorskip("ai.live.config")
 
 from backend.clients.ai_gateway import (BriefingContext, CalendarEvent, CoachingContext, CoachStep, ItemChange,  # noqa: E402
-                                        NightContext, NightView, Persona, RealAIGateway, SettingsView, WakeInputs,
+                                        NightContext, NightView, Persona, RealAIGateway, SettingsView, StrategyLearning,
+                                        WakeInputs,
                                         Weather, to_item_changes)
 from backend.core.timeutil import KST  # noqa: E402
-from backend.domain.models import AlarmRoutineItem, MorningSession, RecentRecords, SessionStep  # noqa: E402
+from backend.domain.models import AlarmRoutineItem, MorningSession, RecentRecords, SessionStep, StrategyLog  # noqa: E402
 
 PERSONA = Persona("정우님", "CASUAL", "FRIENDLY", "MALE")
 NIGHT = NightView("발표를 잘 마쳤다", "보고서 끝내기", ("10시 회의",), "TIRED", "지쳤지만 뿌듯함", "잘했어요", "")
@@ -175,6 +177,19 @@ def test_decide_strategy_with_real_records():
     assert set(d.strategy) >= {"coaching_intensity", "briefing_length", "encouragement", "strategy_id"}
     assert d.strategy["coaching_intensity"] != "firm"                           # 피곤한 날·KIND에는 강한 전략 금지
     assert gw.strategy_blocks(d.strategy) == (d.briefing_block, d.coaching_block)   # 재연결 때 같은 문장
+
+
+    # 학습 상태가 아직 없어도 bandit 방식이면 Bandit이 고른다 (None을 넘기면 규칙으로 돌아가 학습이 시작되지 않았다)
+    b = gw.decide_strategy("u1", RecentRecords(sessions, steps, []), d0, None, "FRIENDLY", "bandit", None)
+    assert b.log_row["source"] == "bandit" and b.log_row["context_key"]
+    row = {k: v for k, v in b.log_row.items() if k in StrategyLog.__dataclass_fields__}
+    lg = StrategyLog(**{**row, "log_id": "l1", "session_date": d0, "session_id": "s6"})
+    today = MorningSession("s6", "u1", "a1", d0, "ROUTINE", "t", None, None, time(7), time(7))
+    done = [SessionStep(f"x{n}", "u1", "s6", n, f"단계 {n}", f"i{n}", 60, step_status=st) for n, st in enumerate(["DONE", "SKIPPED"], 1)]
+    res = gw.learn_strategy(None, lg, today, done)
+    assert res.reward == 0.5 and sum(res.state["counts"].values()) == 1             # 단계 수행 비율로 한 번 학습
+    assert gw.learn_strategy(None, lg, replace(today, coaching_skipped=True), done).reward is None   # 코칭 안 한 날
+    assert gw.learn_strategy(None, replace(lg, source="rule"), today, done) == StrategyLearning(0.5, None)   # Rule 날은 기록만
 
 
 def test_new_ai_format_with_scope_and_duration():
