@@ -49,6 +49,7 @@ import com.example.respeclive.data.CalendarEvents
 import com.example.respeclive.data.MusicStore
 import com.example.respeclive.data.NightMessageStore
 import com.example.respeclive.data.RespecApi
+import com.example.respeclive.data.WakeLevelPrefs
 import com.example.respeclive.data.WakeOverrides
 import com.example.respeclive.live.LiveClient
 import com.example.respeclive.ui.common.CallLayout
@@ -435,6 +436,8 @@ fun NightChatScreen(onClose: () -> Unit) {
             if (!hasUser) return@async null
             RespecApi.saveTranscript(transcript, startedAt, endedAt)?.also { r ->
                 NightMessageStore.saveRecord(appCtx, r.optString("night_record_id"), r.optString("apply_date"))
+                // 밤 대화를 저장하면 서버가 내일 기상 시작 단계를 확정함 → 받아 둠
+                WakeLevelPrefs.refreshFromServer()
             }
         }
 

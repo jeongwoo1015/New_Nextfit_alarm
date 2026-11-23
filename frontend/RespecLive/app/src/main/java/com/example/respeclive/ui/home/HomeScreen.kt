@@ -27,6 +27,7 @@ import com.example.respeclive.data.Alarm
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.data.WakeHistory
+import com.example.respeclive.data.WakeLevelPrefs
 import com.example.respeclive.data.WakeOverrides
 import com.example.respeclive.ui.theme.AppTheme
 import com.example.respeclive.ui.theme.RespecColors
@@ -53,6 +54,8 @@ fun HomeScreen(
         WakeOverrides.refresh(context)
         // 기록이 적을 때 알람 진동 세기를 정하는 이번 주 기상 성공률 (알람이 울릴 때 기다리지 않도록 미리 받아 둠)
         WakeHistory.refreshSuccessRate(context)
+        // 다음 아침 기상 알람 시작 단계 (서버 개인화, 울릴 때 인터넷을 기다리지 않도록 미리 받아 둠)
+        WakeLevelPrefs.refreshFromServer()
     }
 
     Column(Modifier.fillMaxSize()) {
