@@ -7,7 +7,7 @@ from backend.core.auth import current_user_id
 from backend.services.morning_service import Location, MorningService, SessionView
 
 from .schemas import (BriefingTokenIn, CoachingTokenOut, FortuneTokenOut, LiveTokenOut, ProgressOut, RewakeOut, SessionOut, SessionStartIn,
-                      SessionViewOut, SnoozeIn, SnoozeOut, WakeLogOut, WakeVolumeIn, StepDurationIn, StepOut, StepStatusIn, StretchAreaIn, StretchStepOut, VerdictIn)
+                      GameScoreIn, GameScoreOut, SessionViewOut, SnoozeIn, SnoozeOut, WakeLogOut, WakeVolumeIn, StepDurationIn, StepOut, StepStatusIn, StretchAreaIn, StretchStepOut, VerdictIn)
 
 router = APIRouter(prefix="/morning", tags=["morning"])
 
@@ -119,6 +119,15 @@ def report_verdict(session_id: str, step_order: int, body: VerdictIn, user_id: s
                    svc: MorningService = Depends(morning_service)):
     """Live 함수 호출 report_step_result를 앱이 그대로 전달 (앱은 {"result": "ok"}로 AI에 응답)."""
     return _view(svc.report_verdict(user_id, session_id, step_order, body.verdict))
+
+
+@router.put("/sessions/{session_id}/steps/{step_order}/score", response_model=GameScoreOut)
+def save_game_score(session_id: str, step_order: int, body: GameScoreIn, user_id: str = Depends(current_user_id),
+                    svc: MorningService = Depends(morning_service)):
+    """게임 기록: 제한 시간 안에 주고받은 횟수를 앱이 세서 보낸다 (게임 세션만, 아니면 422 NOT_GAME_SESSION).
+    이어 하기로 다시 보내면 바꾼다. 말한 단어는 서버에 보내지 않는다. 응답의 best_score는 같은 게임의 최고 기록."""
+    step, best = svc.save_game_score(user_id, session_id, step_order, body.score)
+    return GameScoreOut(step_order=step.step_order, score=step.score, best_score=best, is_best=step.score >= best)
 
 
 @router.patch("/sessions/{session_id}/steps/{step_order}", response_model=SessionViewOut)

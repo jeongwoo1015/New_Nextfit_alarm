@@ -483,6 +483,17 @@ class ContentStepOut(BaseModel):
     score: int | None                   # 게임 기록: 제한 시간 안에 주고받은 횟수
 
 
+class GameScoreIn(BaseModel):
+    score: int = Field(ge=0, le=10_000)     # 제한 시간 안에 주고받은 횟수 (앱이 센다)
+
+
+class GameScoreOut(BaseModel):
+    step_order: int
+    score: int
+    best_score: int                         # 같은 게임(콘텐츠 세부)의 지금까지 최고 기록 (이번 기록 포함)
+    is_best: bool                           # 이번이 최고 기록과 같거나 넘었는가 (새 기록 표시용)
+
+
 class ContentStepsOut(BaseModel):
     date: date
     steps: list[ContentStepOut]

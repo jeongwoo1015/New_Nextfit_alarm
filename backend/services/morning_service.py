@@ -457,6 +457,20 @@ class MorningService:
         self.r.sessions.save_step(user_id, step)
         return self.view(user_id, session_id)
 
+    def save_game_score(self, user_id: str, session_id: str, step_order: int, score: int) -> tuple[SessionStep, int]:
+        """게임 기록 = 제한 시간 안에 주고받은 횟수(앱이 센다, 11/22 RS_SESSION_STEP.SCORE). 게임(QUIZ) 세션만.
+        이어 하기로 다시 보내면 새 값으로 바꾼다. 말한 단어는 저장하지 않는다(기기에만, 팀 결정 11/23).
+        돌려주는 최고 기록은 같은 게임(콘텐츠 세부)끼리, 이번 기록 포함."""
+        s = self._session(user_id, session_id)
+        if s.content_type != "QUIZ":
+            raise ValidationFailed("게임 콘텐츠 세션만 기록을 저장할 수 있어요", "NOT_GAME_SESSION")
+        self._step(user_id, session_id, step_order)
+        step = self.r.sessions.set_step_score(user_id, session_id, step_order, score)
+        if not step:
+            raise NotFound("단계를 찾을 수 없어요", "STEP_NOT_FOUND")
+        best = self.r.sessions.best_score(user_id, "QUIZ", s.content_option)
+        return step, max(best or 0, score)
+
     def mark_step(self, user_id: str, session_id: str, step_order: int, status: str) -> SessionView:
         """체크리스트에서 사용자가 직접 체크·해제."""
         step = mark(self._step(user_id, session_id, step_order), status, to_kst(self.clock()))
