@@ -5,6 +5,7 @@
 루틴 항목 "사용 중" = 알람 항목 시간이 0보다 큼.
 """
 import importlib.util
+import random
 from dataclasses import asdict, dataclass, field
 from datetime import date, time
 from typing import Protocol
@@ -13,7 +14,8 @@ import httpx
 
 from backend.core.config import Settings
 from backend.core.errors import ServiceUnavailable
-from backend.domain.models import AlarmRoutineItem, NightRecord, RecentRecords, UserSetting
+from backend.domain.models import (AlarmRoutineItem, MorningSession, NightRecord, RecentRecords, SessionStep, StrategyLog,
+                                   UserSetting)
 
 
 AUTH_TOKEN_URL = "https://generativelanguage.googleapis.com/v1alpha/auth_tokens"
@@ -58,8 +60,7 @@ class Weather:
 
 @dataclass(frozen=True)
 class SettingsView:
-    """대화로 바꿀 수 있는 설정의 현재 값 (AI SettingsView, B22). AI가 바꾸기 전에 현재 상태를 알리고 "한 단계 낮춰 줘"를 계산한다.
-    기상 볼륨 추천값(wake_start_level·wake_state RECOMMENDED/EXPLORING·wake_raise_from)은 기상 볼륨 개인화를 붙일 때 채운다."""
+    """대화로 바꿀 수 있는 설정의 현재 값 (AI SettingsView, B22). AI가 바꾸기 전에 현재 상태를 알리고 "한 단계 낮춰 줘"를 계산한다."""
     music_genre: str = ""
     wake_start_level: int | None = None
     wake_state: str = ""                    # RECOMMENDED / EXPLORING / USER
@@ -67,8 +68,12 @@ class SettingsView:
     wake_raise_from: int | None = None      # 밤에만: 내일 시작 단계가 올라가는 날의 이전 단계
 
 
-def settings_view(st: UserSetting) -> SettingsView:
-    """지금은 사용자가 정한 값만: 다음 알람 한 번(wake_next_level)이 있으면 그 단계가 시작 단계(USER), 상한은 그대로."""
+def settings_view(st: UserSetting, wake_row: dict | None = None, raise_from: int | None = None) -> SettingsView:
+    """wake_row = 그 아침의 기상 볼륨 기록(RS_WAKE_LOG). 없으면 사용자가 정한 값만(다음 알람 한 번이면 그 단계, USER).
+    raise_from = 밤에만, 내일 시작 단계가 올라가는 날의 이전 단계 (AI가 알리고 반대 여부를 묻는다)."""
+    if wake_row and (wake_row.get("start_level") or wake_row.get("applied_level")):
+        return SettingsView(st.music_genre, wake_row.get("start_level") or wake_row["applied_level"], wake_row.get("state") or "",
+                            st.wake_max_start_level, raise_from)
     return SettingsView(st.music_genre, st.wake_next_level, "USER" if st.wake_next_level else "", st.wake_max_start_level)
 
 
@@ -163,6 +168,40 @@ class StrategyDecision:
 
 
 @dataclass(frozen=True)
+class StrategyLearning:
+    reward: float | None        # 단계 수행 비율 0~1 (AI coaching_reward). 코칭을 안 한 날·단계가 없는 날은 None(기록·학습 안 함)
+    state: dict | None          # 갱신한 코칭 Bandit 상태. Bandit이 고른 날이 아니면 None(저장할 것 없음)
+
+
+@dataclass(frozen=True)
+class WakeInputs:
+    """기상 알람 시작 단계를 정하는 입력 (AI decide_start_level). 같은 날 다시 정할 때 같은 값을 넣으려고 기록(prefs)에 함께 남긴다."""
+    sleep_minutes: float | None = None
+    important_day: bool = False
+    max_start_level: int | None = None      # 사용자 상한 (RS_USER_SETTING.WAKE_MAX_START_LEVEL)
+    next_level: int | None = None           # 다음 알람 한 번 (WAKE_NEXT_LEVEL)
+    previous_level: int | None = None       # 직전 아침의 단계
+    notified: bool = True                   # 올리는 날이면 밤 대화로 알렸는가 (False면 올리지 않고 직전 단계 유지)
+
+
+@dataclass(frozen=True)
+class WakeDecision:
+    row: dict                   # WakeLog.to_row() → rs_wake_log 결정 칸 (recommended·applied_level, source, state, ...)
+    raise_pending: bool         # 올리는 날이라 밤 대화에서 알려야 한다
+
+
+def default_wake_decision(user_id: str, session_date: date, w: WakeInputs) -> WakeDecision:
+    """AI를 쓸 수 없을 때: 사용자 값 → 직전 단계(상한 안) → 1단계. 올리지 않으므로 알릴 것도 없다."""
+    level = w.next_level or min(w.previous_level or 1, w.max_start_level or 5)
+    return WakeDecision({"user_id": user_id, "session_date": session_date.isoformat(), "context_key": "unknown",
+                         "recommended_level": level, "applied_level": level,
+                         "source": "user_today" if w.next_level else "default", "explored": False, "propensity": None,
+                         "state": "USER" if w.next_level else "RECOMMENDED", "reason": "기본 단계",
+                         "previous_level": w.previous_level,
+                         "prefs": {"max_start_level": w.max_start_level, "next_alarm_level": w.next_level}}, False)
+
+
+@dataclass(frozen=True)
 class LiveToken:
     """앱이 Gemini Live에 직접 연결할 1회용 임시 토큰. 지시문은 토큰에 고정돼 있다."""
     token: str                  # ws_url?access_token=<token>
@@ -248,6 +287,14 @@ class AIGateway(Protocol):
     def compose_fortune(self, one_liner: str, tone: str, today: date, diary_text: str) -> Fortune: ...
     def issue_fortune_token(self, persona: Persona, fortune: Fortune, based_on: str = "",
                             plan: tuple[str, ...] = ()) -> LiveToken: ...   # 문장을 그대로 읽는 Live
+    # 기상 알람 시작 볼륨 (B23). seed가 같으면 같은 추천(같은 날 다시 정해도 밤에 알린 값이 바뀌지 않게)
+    def decide_wake_level(self, user_id: str, session_date: date, personal: dict | None, global_: dict | None,
+                          w: WakeInputs, seed: str) -> WakeDecision: ...
+    def wake_raise_announced(self, ai_text: str, level: int) -> bool: ...    # 밤 대화에서 AI가 올린다고 실제로 말했는가
+    def learn_strategy(self, bandit_state: dict | None, log: StrategyLog, session: MorningSession,
+                       steps: list[SessionStep]) -> StrategyLearning: ...    # 코칭 강도: 그날 결과로 보상을 매기고 학습 (11/21)
+    def learn_wake(self, state: dict | None, context_key: str, start_level: int, received_level: int | None,
+                   confirmed: bool) -> dict | None: ...                     # 반영한 새 학습 상태, 값이 잘못됐으면 None
 
 
 def _wake(v) -> time | None:
@@ -396,8 +443,9 @@ class RealAIGateway:
         from ai.personalization.records import build_sessions
         sessions = build_sessions([asdict(s) for s in records.sessions], [asdict(s) for s in records.steps],
                                   [asdict(n) for n in records.nights])
+        # 저장된 상태가 없어도 빈 Bandit을 넘긴다 — None이면 AI가 규칙으로 돌아가 학습이 한 번도 시작되지 않는다
         d = decide(user_id, sessions, today, condition=condition, speech_style=speech_style, mode=mode,
-                   bandit=ContextualBandit.from_dict(bandit_state) if bandit_state else None)
+                   bandit=ContextualBandit.from_dict(bandit_state) if bandit_state else ContextualBandit())
         return StrategyDecision(d.strategy.to_dict(), d.briefing_block, d.coaching_block, d.log.to_row())
 
     def compose_fortune(self, one_liner: str, tone: str, today: date, diary_text: str) -> Fortune:
@@ -418,6 +466,37 @@ class RealAIGateway:
         from ai.personalization.strategy import Strategy, strategy_block
         s = Strategy.from_dict(strategy)
         return strategy_block(s, "briefing"), strategy_block(s, "coaching")
+
+    def decide_wake_level(self, user_id, session_date, personal, global_, w: WakeInputs, seed: str) -> WakeDecision:
+        from ai.personalization.wake_volume import UserWakePrefs, WakeLadder, decide_start_level, make_log
+        prefs = UserWakePrefs(w.max_start_level, w.next_level)
+        d = decide_start_level(WakeLadder.from_dict(personal) if personal else None,
+                               WakeLadder.from_dict(global_) if global_ else None, w.sleep_minutes, prefs, w.previous_level,
+                               w.notified, w.important_day, rng=random.Random(seed))
+        return WakeDecision(make_log(d, user_id, session_date.isoformat(), prefs, w.previous_level).to_row(), d.raise_pending)
+
+    def wake_raise_announced(self, ai_text: str, level: int) -> bool:
+        from ai.personalization.wake_volume import raise_announced
+        return raise_announced(ai_text, level)
+
+    def learn_strategy(self, bandit_state, log: StrategyLog, session: MorningSession, steps: list[SessionStep]) -> StrategyLearning:
+        from ai.personalization.agent import learn
+        from ai.personalization.bandit import ContextualBandit
+        from ai.personalization.logs import DecisionLog
+        from ai.personalization.records import build_sessions
+        from ai.personalization.reward import coaching_reward
+        record = build_sessions([asdict(session)], [asdict(s) for s in steps])[0]
+        reward = coaching_reward(record)
+        if reward is None:
+            return StrategyLearning(None, None)
+        bandit = ContextualBandit.from_dict(bandit_state) if bandit_state else ContextualBandit()
+        row = {**asdict(log), "session_date": log.session_date.isoformat()}
+        return StrategyLearning(reward, bandit.to_dict() if learn(bandit, DecisionLog.from_row(row), reward) else None)
+
+    def learn_wake(self, state, context_key, start_level, received_level, confirmed) -> dict | None:
+        from ai.personalization.wake_volume import WakeLadder, learn_wake
+        ladder = WakeLadder.from_dict(state)
+        return ladder.to_dict() if learn_wake(ladder, context_key, start_level, received_level, confirmed) else None
 
 
 class UnavailableAIGateway:
@@ -445,6 +524,18 @@ class UnavailableAIGateway:
 
     def today_intensity(self, base, sessions, auto):
         return base
+
+    def decide_wake_level(self, user_id, session_date, personal, global_, w, seed):
+        return default_wake_decision(user_id, session_date, w)      # 알람은 울려야 하므로 기본 단계
+
+    def wake_raise_announced(self, ai_text, level):
+        return False
+
+    def learn_wake(self, state, context_key, start_level, received_level, confirmed):
+        return None             # 학습 없이 기록만 남는다
+
+    def learn_strategy(self, bandit_state, log, session, steps):
+        return StrategyLearning(None, None)
 
 
 def build_ai_gateway(settings: Settings):

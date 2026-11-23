@@ -10,8 +10,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta
 
 from backend.clients.ai_gateway import (AIGateway, BriefingContext, CalendarEvent, CoachingContext, CoachStep, ContentStep,
-                                        Fortune, LiveToken, Persona, night_view, persona_of,
-                                        settings_view)
+                                        Fortune, LiveToken, Persona, night_view, persona_of)
 from backend.clients.weather import NoWeather, WeatherClient
 from backend.core.errors import AppError, Conflict, NotFound, ValidationFailed
 from backend.domain import codes
@@ -22,6 +21,7 @@ from backend.domain.session_rules import (content_duration_sec, content_steps, j
                                           resolve_snapshot, routine_steps)
 from backend.domain.step_rules import apply_verdict, check_today_duration, mark, pending_steps, progress, today_total
 from backend.repositories.registry import Repositories
+from backend.services.wake_service import WakeService
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +60,7 @@ def fortune_based_on(source: str | None, night) -> str:
     if (night.voice_text or "").strip():
         return "ONE_LINER"
     return "DIARY" if (night.diary_text or "").strip() else ""
+STRATEGY_CATCH_UP_DAYS = 7      # 지난 며칠의 보상을 다음 알람 때 매기는지
 BANDIT_KEY = "global"           # AI CONTRACTS 6-4: 여러 사용자를 합쳐야 경향이 보여 전체 합산 상태를 쓴다
 RECENT_DAYS = 7
 INTENSITY_DAYS = 14             # 자동 강도: 지난 알람 결과를 이만큼 본다 (AI 규칙은 최근 3번 단위, 그날 쓴 강도를 따라감)
@@ -100,6 +101,7 @@ class MorningService:
                  weather: WeatherClient | None = None):
         self.r, self.ai, self.clock, self.mode = repos, ai, clock, mode
         self.weather = weather or NoWeather()
+        self.wake = WakeService(repos, ai, clock)
 
     # ---------- 세션 ----------
     def start(self, user_id: str, alarm_id: str) -> SessionView:
@@ -120,6 +122,7 @@ class MorningService:
             changes["applied_intensity"] = level
         if changes:
             s = self.r.sessions.update_session(user_id, s.session_id, changes)
+        self.wake.on_session_start(user_id, s)
         v = self.view(user_id, s.session_id)
         night = self.r.nights.get_night_for_morning(user_id, s.session_date)
         return replace(v, morning_plan=self._plan(s, v.steps, night, at_start=True),
@@ -241,15 +244,50 @@ class MorningService:
             now = to_kst(self.clock())
             if s.first_response_at is None:      # 확인 멘트에 답했다는 뜻이므로 첫 응답이 빠졌으면 지금으로 채운다
                 s = self.r.sessions.update_session(user_id, session_id, {"first_response_at": now})
-            self.r.sessions.update_session(user_id, session_id, {"wake_checked_at": now, "wake_success": judge_wake(s)})
+            s = self.r.sessions.update_session(user_id, session_id, {"wake_checked_at": now, "wake_success": judge_wake(s)})
+            self.wake.learn(user_id, s)          # 기상 볼륨: 확인 질문을 마친 때 학습 (재기상이 있었으면 확인 실패)
         return self.view(user_id, session_id)
 
     def end(self, user_id: str, session_id: str) -> SessionView:
         """세션 종료. 확인 멘트를 끝내지 못한 채 끝나면 기상 실패로 남는다(WAKE_SUCCESS 기본값 FALSE)."""
         s = self._session(user_id, session_id)
         if s.session_end_at is None:
-            self.r.sessions.update_session(user_id, session_id, {"session_end_at": to_kst(self.clock())})
+            s = self.r.sessions.update_session(user_id, session_id, {"session_end_at": to_kst(self.clock())})
+            self.wake.learn(user_id, s)          # 확인 없이 끝났으면 확인 실패로 학습 (이미 학습했으면 건너뜀)
+            self.learn_strategy(user_id, s.session_date, only_session=session_id)
         return self.view(user_id, session_id)
+
+    # ---------- 코칭 강도 학습 (11/21 보상 = 단계 수행 비율) ----------
+    def learn_strategy(self, user_id: str, day, only_session: str | None = None) -> bool:
+        """그날 전략 로그에 보상을 매기고 Bandit이 고른 날이면 학습한다. 보상이 이미 있으면 다시 하지 않는다.
+        보상은 전략을 정한 세션(로그의 session_id)의 단계로 매긴다. 실패해도 아침 흐름은 이어진다."""
+        try:
+            lg = self.r.personalization.get_strategy_log(user_id, day)
+            if not lg or lg.reward is not None or not lg.session_id or (only_session and lg.session_id != only_session):
+                return False
+            s = self.r.sessions.get_session(user_id, lg.session_id)
+            if not s:
+                return False
+            res = self.ai.learn_strategy(self.r.personalization.get_bandit_state(BANDIT_KEY), lg, s,
+                                         self.r.sessions.list_steps(user_id, s.session_id))
+            if res.reward is None:
+                return False
+            self.r.personalization.set_reward(lg.log_id, res.reward)
+            if res.state is not None:
+                self.r.personalization.save_bandit_state(BANDIT_KEY, res.state)
+            return True
+        except Exception:
+            log.exception("코칭 강도 학습 실패 user=%s day=%s", user_id, day)
+            return False
+
+    def learn_past_strategies(self, user_id: str) -> int:
+        """끝내지 못한 지난 세션(앱 종료·통화 중단)의 보상을 다음 알람 때 매긴다 (세션 시작 응답 뒤 백그라운드)."""
+        today = today_kst(self.clock())
+        return sum(self.learn_strategy(user_id, today - timedelta(days=n)) for n in range(1, STRATEGY_CATCH_UP_DAYS + 1))
+
+    def report_wake_volume(self, user_id: str, session_id: str, start_level: int, received_level: int | None) -> dict:
+        """앱 보고: 알람이 울리기 시작한 단계와 전화를 받은 단계(1~5, 못 받고 껐으면 None)."""
+        return self.wake.report(user_id, self._session(user_id, session_id), start_level, received_level)
 
     # ---------- 브리핑 ----------
     def _persona(self, user_id: str, s: MorningSession) -> Persona:
@@ -276,7 +314,7 @@ class MorningService:
                               program, content_name(s.content_type, s.content_option), s.coaching_skipped, briefing_block,
                               weather, one_liner_follows=bool(night and night.voice_audio_path),
                               plan=self._plan(s, steps, night, at_start=True), already_done=_all_done(steps),
-                              settings=settings_view(st), snoozes_today=self.snoozes_today(user_id, s.session_date))
+                              settings=self.wake.today_settings(st, s), snoozes_today=self.snoozes_today(user_id, s.session_date))
         return self.ai.issue_briefing_token(ctx)
 
     def _strategy(self, user_id: str, s: MorningSession, night) -> tuple[str, str]:
@@ -418,6 +456,20 @@ class MorningService:
         step = apply_verdict(self._step(user_id, session_id, step_order), verdict, to_kst(self.clock()))
         self.r.sessions.save_step(user_id, step)
         return self.view(user_id, session_id)
+
+    def save_game_score(self, user_id: str, session_id: str, step_order: int, score: int) -> tuple[SessionStep, int]:
+        """게임 기록 = 제한 시간 안에 주고받은 횟수(앱이 센다, 11/22 RS_SESSION_STEP.SCORE). 게임(QUIZ) 세션만.
+        이어 하기로 다시 보내면 새 값으로 바꾼다. 말한 단어는 저장하지 않는다(기기에만, 팀 결정 11/23).
+        돌려주는 최고 기록은 같은 게임(콘텐츠 세부)끼리, 이번 기록 포함."""
+        s = self._session(user_id, session_id)
+        if s.content_type != "QUIZ":
+            raise ValidationFailed("게임 콘텐츠 세션만 기록을 저장할 수 있어요", "NOT_GAME_SESSION")
+        self._step(user_id, session_id, step_order)
+        step = self.r.sessions.set_step_score(user_id, session_id, step_order, score)
+        if not step:
+            raise NotFound("단계를 찾을 수 없어요", "STEP_NOT_FOUND")
+        best = self.r.sessions.best_score(user_id, "QUIZ", s.content_option)
+        return step, max(best or 0, score)
 
     def mark_step(self, user_id: str, session_id: str, step_order: int, status: str) -> SessionView:
         """체크리스트에서 사용자가 직접 체크·해제."""

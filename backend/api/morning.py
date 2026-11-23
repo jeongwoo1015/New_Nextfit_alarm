@@ -7,9 +7,14 @@ from backend.core.auth import current_user_id
 from backend.services.morning_service import Location, MorningService, SessionView
 
 from .schemas import (BriefingTokenIn, CoachingTokenOut, FortuneTokenOut, LiveTokenOut, ProgressOut, RewakeOut, SessionOut, SessionStartIn,
-                      SessionViewOut, SnoozeIn, SnoozeOut, StepDurationIn, StepOut, StepStatusIn, StretchAreaIn, StretchStepOut, VerdictIn)
+                      GameScoreIn, GameScoreOut, SessionViewOut, SnoozeIn, SnoozeOut, WakeLogOut, WakeVolumeIn, StepDurationIn, StepOut, StepStatusIn, StretchAreaIn, StretchStepOut, VerdictIn)
 
 router = APIRouter(prefix="/morning", tags=["morning"])
+
+
+def wake_log_out(row: dict) -> WakeLogOut:
+    return WakeLogOut(**{k: row.get(k) for k in WakeLogOut.model_fields if k != "user_set"},
+                      user_set=str(row.get("source") or "").startswith("user"))
 
 
 def _view(v: SessionView) -> SessionViewOut:
@@ -28,6 +33,7 @@ def start_session(body: SessionStartIn, tasks: BackgroundTasks, user_id: str = D
     v = svc.start(user_id, body.alarm_id)
     if not v.session.fortune_text:
         tasks.add_task(svc.prepare_fortune_quietly, user_id, v.session.session_id)
+    tasks.add_task(svc.learn_past_strategies, user_id)     # 끝내지 못한 지난 세션의 코칭 강도 학습
     return _view(v)
 
 
@@ -58,6 +64,14 @@ def snooze(session_id: str, body: SnoozeIn | None = None, user_id: str = Depends
     body = body or SnoozeIn()
     r = svc.snooze(user_id, session_id, body.minutes_later, body.at_time)
     return SnoozeOut(snooze_count=r.snooze_count, snoozes_today=r.snoozes_today, snoozed_until=r.snoozed_until)
+
+
+@router.post("/sessions/{session_id}/wake-volume", response_model=WakeLogOut)
+def report_wake_volume(session_id: str, body: WakeVolumeIn, user_id: str = Depends(current_user_id),
+                       svc: MorningService = Depends(morning_service)):
+    """기상 볼륨 결과: 전화를 받은 직후(또는 받지 않고 껐을 때) 한 번. 그날 처음 보고한 세션만 기록하고(다시 울림·다른 알람은 무시),
+    확인 질문을 마치거나 세션이 끝나면 서버가 학습한다. 받지 않고 껐으면 바로 학습."""
+    return wake_log_out(svc.report_wake_volume(user_id, session_id, body.start_level, body.received_level))
 
 
 @router.post("/sessions/{session_id}/wake-check", response_model=SessionViewOut)
@@ -105,6 +119,15 @@ def report_verdict(session_id: str, step_order: int, body: VerdictIn, user_id: s
                    svc: MorningService = Depends(morning_service)):
     """Live 함수 호출 report_step_result를 앱이 그대로 전달 (앱은 {"result": "ok"}로 AI에 응답)."""
     return _view(svc.report_verdict(user_id, session_id, step_order, body.verdict))
+
+
+@router.put("/sessions/{session_id}/steps/{step_order}/score", response_model=GameScoreOut)
+def save_game_score(session_id: str, step_order: int, body: GameScoreIn, user_id: str = Depends(current_user_id),
+                    svc: MorningService = Depends(morning_service)):
+    """게임 기록: 제한 시간 안에 주고받은 횟수를 앱이 세서 보낸다 (게임 세션만, 아니면 422 NOT_GAME_SESSION).
+    이어 하기로 다시 보내면 바꾼다. 말한 단어는 서버에 보내지 않는다. 응답의 best_score는 같은 게임의 최고 기록."""
+    step, best = svc.save_game_score(user_id, session_id, step_order, body.score)
+    return GameScoreOut(step_order=step.step_order, score=step.score, best_score=best, is_best=step.score >= best)
 
 
 @router.patch("/sessions/{session_id}/steps/{step_order}", response_model=SessionViewOut)

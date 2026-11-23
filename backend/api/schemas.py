@@ -397,6 +397,40 @@ class SnoozeIn(BaseModel):
         return self
 
 
+class WakeVolumeIn(BaseModel):
+    """아침 기상 볼륨 결과 (앱 보고). 재기상(8초 무응답 음악)은 서버가 세션 기록으로 따로 본다."""
+    start_level: WakeLevel                 # 알람이 울리기 시작한 단계
+    received_level: WakeLevel | None       # 전화를 받은 순간의 단계, 받지 않고 껐으면 null
+
+    @model_validator(mode="after")
+    def _not_below_start(self):
+        if self.received_level is not None and self.received_level < self.start_level:
+            raise ValueError("받은 단계는 시작 단계보다 낮을 수 없어요")
+        return self
+
+
+class WakeLogOut(BaseModel):
+    """그 아침의 기상 볼륨 기록 (RS_WAKE_LOG 중 앱이 보는 칸)."""
+    session_date: date
+    applied_level: int | None              # 정한 시작 단계
+    start_level: int | None                # 실제로 울리기 시작한 단계 (앱 보고)
+    received_level: int | None             # 전화를 받은 단계 (못 받았으면 null)
+    confirmed: bool | None                 # 받은 뒤 확인 질문에 답하고 재기상이 없었는가 (학습 전이면 null)
+    source: str | None                     # bandit 개인화 / user_today·user_max 사용자 / hold_no_notice 알리지 못해 유지 / important_day / default
+    state: str | None                      # RECOMMENDED / EXPLORING(찾는 중) / USER
+    user_set: bool                         # 사용자가 정한 값으로 울렸는가
+
+
+class WakeNextOut(BaseModel):
+    session_date: date                     # 다음에 울릴 아침
+    alarm_id: str                          # 그날 첫 모닝콜 (학습은 이 알람으로, 그날 다른 모닝콜도 같은 단계로 울린다)
+    alarm_time: HHMM
+    start_level: int                       # 알람 시작 볼륨 1~5
+    rewake_level: int                      # 재기상 음악 볼륨 = 시작 + 1 (2~6, AI B23)
+    source: str | None
+    state: str | None
+
+
 class SnoozeOut(BaseModel):
     snooze_count: int                   # 이 세션의 미루기 횟수
     snoozes_today: int                  # 오늘 모든 모닝 세션의 미루기 합계 (하루 3번까지)
@@ -432,6 +466,37 @@ class ReportOut(Out):
     series: list[BucketOut]
     current_streak: int
     best_streak: int
+    wake_levels: list[WakeLogOut] = []   # 나의 기상 단계 변화: 이 기간(오늘까지) 날짜별 시작·받은 단계 (11/22)
+
+
+class ContentStepOut(BaseModel):
+    """콘텐츠 화면 한 줄 (앱 RespecApi.contentSteps 형식)."""
+    session_id: str
+    step_order: int
+    step_name: str
+    step_status: str
+    content_type: str
+    content_option: str | None
+    stretch_area: str | None            # 스트레칭이면 그 단계의 부위
+    script: str | None                  # 스트레칭 동작 설명 / 영어 "영어 / 뜻 / 발음" / 끝말잇기 "시작 단어: 기차"
+    words: list[str]                    # 게임에서 말한 단어 (저장 방식 미정 — 지금은 단계 내용에 있으면 그대로, 없으면 빈 목록)
+    score: int | None                   # 게임 기록: 제한 시간 안에 주고받은 횟수
+
+
+class GameScoreIn(BaseModel):
+    score: int = Field(ge=0, le=10_000)     # 제한 시간 안에 주고받은 횟수 (앱이 센다)
+
+
+class GameScoreOut(BaseModel):
+    step_order: int
+    score: int
+    best_score: int                         # 같은 게임(콘텐츠 세부)의 지금까지 최고 기록 (이번 기록 포함)
+    is_best: bool                           # 이번이 최고 기록과 같거나 넘었는가 (새 기록 표시용)
+
+
+class ContentStepsOut(BaseModel):
+    date: date
+    steps: list[ContentStepOut]
 
 
 class CalendarDayOut(BaseModel):

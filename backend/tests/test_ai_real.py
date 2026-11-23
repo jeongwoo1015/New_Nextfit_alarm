@@ -4,6 +4,7 @@
 서버가 넘기는 입력이 AI 쪽 데이터 클래스·지시문 조립과 맞는지, 결과를 정의서 11/01 형식으로 바꾸는지를 본다.
 """
 import json
+from dataclasses import replace
 from datetime import date, datetime, time
 
 import httpx
@@ -12,10 +13,11 @@ import pytest
 pytest.importorskip("ai.live.config")
 
 from backend.clients.ai_gateway import (BriefingContext, CalendarEvent, CoachingContext, CoachStep, ItemChange,  # noqa: E402
-                                        NightContext, NightView, Persona, RealAIGateway, SettingsView, Weather,
-                                        to_item_changes)
+                                        NightContext, NightView, Persona, RealAIGateway, SettingsView, StrategyLearning,
+                                        WakeInputs,
+                                        Weather, to_item_changes)
 from backend.core.timeutil import KST  # noqa: E402
-from backend.domain.models import AlarmRoutineItem, MorningSession, RecentRecords, SessionStep  # noqa: E402
+from backend.domain.models import AlarmRoutineItem, MorningSession, RecentRecords, SessionStep, StrategyLog  # noqa: E402
 
 PERSONA = Persona("정우님", "CASUAL", "FRIENDLY", "MALE")
 NIGHT = NightView("발표를 잘 마쳤다", "보고서 끝내기", ("10시 회의",), "TIRED", "지쳤지만 뿌듯함", "잘했어요", "")
@@ -177,8 +179,40 @@ def test_decide_strategy_with_real_records():
     assert gw.strategy_blocks(d.strategy) == (d.briefing_block, d.coaching_block)   # 재연결 때 같은 문장
 
 
+    # 학습 상태가 아직 없어도 bandit 방식이면 Bandit이 고른다 (None을 넘기면 규칙으로 돌아가 학습이 시작되지 않았다)
+    b = gw.decide_strategy("u1", RecentRecords(sessions, steps, []), d0, None, "FRIENDLY", "bandit", None)
+    assert b.log_row["source"] == "bandit" and b.log_row["context_key"]
+    row = {k: v for k, v in b.log_row.items() if k in StrategyLog.__dataclass_fields__}
+    lg = StrategyLog(**{**row, "log_id": "l1", "session_date": d0, "session_id": "s6"})
+    today = MorningSession("s6", "u1", "a1", d0, "ROUTINE", "t", None, None, time(7), time(7))
+    done = [SessionStep(f"x{n}", "u1", "s6", n, f"단계 {n}", f"i{n}", 60, step_status=st) for n, st in enumerate(["DONE", "SKIPPED"], 1)]
+    res = gw.learn_strategy(None, lg, today, done)
+    assert res.reward == 0.5 and sum(res.state["counts"].values()) == 1             # 단계 수행 비율로 한 번 학습
+    assert gw.learn_strategy(None, lg, replace(today, coaching_skipped=True), done).reward is None   # 코칭 안 한 날
+    assert gw.learn_strategy(None, replace(lg, source="rule"), today, done) == StrategyLearning(0.5, None)   # Rule 날은 기록만
+
+
 def test_new_ai_format_with_scope_and_duration():
     class Res:
         changes = [{"template_item_id": "i1", "duration_sec": 60, "scope": "always"},
                    {"template_item_id": "i2", "duration_sec": 0, "scope": "weird"}]
     assert to_item_changes(Res()) == [ItemChange("i1", 60, "ALWAYS"), ItemChange("i2", 0, "TOMORROW")]
+
+
+def test_wake_volume_uses_ai_module():
+    """기상 볼륨: 같은 seed면 같은 결정(밤에 알린 값 유지), 알리지 못하면 직전 단계 유지, 학습 결과는 저장할 수 있는 dict."""
+    gw, _ = gateway()
+    w = WakeInputs(sleep_minutes=450, previous_level=1)
+    a = gw.decide_wake_level("u1", date(2026, 11, 6), None, None, w, "u1|2026-11-06")
+    b = gw.decide_wake_level("u1", date(2026, 11, 6), None, None, w, "u1|2026-11-06")
+    assert a == b and a.row["context_key"] == "ok" and a.row["applied_level"] in (1, 3)
+    assert set(a.row) >= {"recommended_level", "applied_level", "source", "state", "explored", "propensity", "previous_level", "prefs"}
+    held = gw.decide_wake_level("u1", date(2026, 11, 6), None, None, WakeInputs(450, previous_level=1, notified=False), "s")
+    assert held.row["applied_level"] == 1 and held.raise_pending is False
+    user = gw.decide_wake_level("u1", date(2026, 11, 6), None, None, WakeInputs(450, next_level=5), "s")
+    assert (user.row["applied_level"], user.row["source"], user.row["state"]) == (5, "user_today", "USER")
+    assert gw.wake_raise_announced("내일은 알람 소리를 3단계부터 시작할게요", 3) is True
+    assert gw.wake_raise_announced("잘 자요", 3) is False
+    state = gw.learn_wake(None, "ok", 1, 3, True)
+    assert state["counts"] == {"ok|1": [0, 1], "ok|2": [0, 1], "ok|3": [1, 0]}
+    assert gw.learn_wake(state, "ok", 3, 2, True) is None                          # 시작보다 낮게 받을 수 없음

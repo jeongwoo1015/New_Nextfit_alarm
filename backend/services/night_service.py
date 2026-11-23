@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-from backend.clients.ai_gateway import AIGateway, CalendarEvent, LiveToken, NightContext, Persona, persona_of, settings_view
+from backend.clients.ai_gateway import AIGateway, CalendarEvent, LiveToken, NightContext, Persona, persona_of
 from backend.core.errors import AppError, Conflict, NotFound, ValidationFailed, check_media_type
 from backend.core.timeutil import now_kst, to_kst
 from backend.domain import codes
@@ -14,6 +14,7 @@ from backend.domain.alarm_rules import pick_override_alarm
 from backend.domain.models import Alarm, NightRecord
 from backend.domain.routine_rules import apply_changes, overrides_of, tomorrow_rows
 from backend.repositories.registry import Repositories
+from backend.services.wake_service import WakeService
 
 log = logging.getLogger(__name__)
 
@@ -56,9 +57,10 @@ class NightService:
         if alarm and alarm.morning_call_type == "ROUTINE":
             items = [i for i in (self.r.alarms.get_alarm_routine(user_id, alarm.alarm_id) or []) if i.duration_sec > 0]
         st = self._setting(user_id)
+        settings = WakeService(self.r, self.ai, self.clock).night_settings(user_id, st, events_tomorrow)   # 내일 기상 볼륨 (B23)
         ctx = NightContext(persona_of(st), now.strftime("%H:%M"), tuple(events_today), tuple(events_tomorrow),
                            alarm.alarm_time.strftime("%H:%M") if alarm else "", tuple(i.item_name for i in items),
-                           tuple(i.duration_sec for i in items), settings=settings_view(st))
+                           tuple(i.duration_sec for i in items), settings=settings)
         return self.ai.issue_night_token(ctx)
 
     def save_transcript(self, user_id: str, transcript: list[dict], started_at: datetime | None,
@@ -68,6 +70,7 @@ class NightService:
             raise ValidationFailed("사용자 발화가 없는 대화예요", "EMPTY_TRANSCRIPT")
         self._persona(user_id)   # 온보딩 전 사용자는 rs_user 행이 없어 저장할 수 없다
         night_record_id = self.r.nights.save_night_raw(user_id, transcript, started_at, ended_at)
+        WakeService(self.r, self.ai, self.clock).after_night_talk(user_id, transcript)   # 올린다고 알렸는지 보고 내일 볼륨 확정
         return self.r.nights.get_night(user_id, night_record_id)
 
     def extract(self, user_id: str, night_record_id: str, saved_at: datetime | None = None) -> ExtractOutcome:

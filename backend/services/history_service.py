@@ -53,6 +53,25 @@ class HistoryService:
         rec = self.r.sessions.recent_records(user_id, ALL_HISTORY_SINCE, max(end - timedelta(days=1), today) + timedelta(days=1))
         return _with_bedtime(ai_stats.report(rec, period, anchor, today), rec, today)
 
+    def content_steps(self, user_id: str, day: date) -> list[dict]:
+        """콘텐츠 화면: 그날 콘텐츠 세션(스트레칭·영어·게임 등)의 단계를 날짜·세션·순서대로.
+        동작 설명·영어 문장·시작 단어는 단계 내용(step_detail.script)에 이미 있다(DB list_content_steps)."""
+        rows = []
+        for content_type in codes.CONTENT_TYPES:
+            for r in self.r.sessions.list_content_steps(user_id, content_type, day, day):
+                detail = r.get("step_detail") or {}
+                words = detail.get("words")
+                rows.append({"session_id": r["session_id"], "step_order": r["step_order"], "step_name": r["step_name"],
+                             "step_status": r["step_status"], "content_type": content_type, "content_option": r.get("content_option"),
+                             "stretch_area": detail.get("area") or r.get("stretch_area"), "script": detail.get("script"),
+                             "words": [str(w) for w in words] if isinstance(words, list) else [], "score": r.get("score")})
+        return rows
+
+    def wake_levels(self, user_id: str, start: date, end: date) -> list[dict]:
+        """나의 기상 단계 변화: [start, end) 중 오늘까지, 날짜 순 (내일 정해 둔 값은 넣지 않는다)."""
+        until = min(end - timedelta(days=1), today_kst(self.clock()))
+        return self.r.personalization.list_wake_logs(user_id, start, until) if until >= start else []
+
     def _photo_url(self, path: str | None) -> str | None:
         return self.r.storage.signed_url("photo", path) if path else None
 
