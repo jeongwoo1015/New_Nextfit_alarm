@@ -9,6 +9,9 @@ import java.io.File
 
 /** 코칭 토큰 결과. 토큰을 못 받으면 code에 서버 오류 코드 (COACHING_SKIPPED, ALL_STEPS_CHECKED 등) */
 /** 말로 미루기 결과: snoozedUntilMs가 있으면 성공, 없으면 code(SNOOZE_LIMIT 등, 연결 실패면 null) */
+/** 끝말잇기 한 턴 AI 판단: valid면 next(넥스티 단어, 없으면 넥스티 패배), 아니면 reason(보여 줄 이유) */
+class WordChainTurn(val valid: Boolean, val next: String?, val reason: String?)
+
 class SnoozeResult(val snoozedUntilMs: Long?, val code: String?, val snoozesToday: Int? = null)
 
 class CoachingToken(val auth: LiveAuth?, val steps: JSONArray?, val code: String?)
@@ -21,6 +24,8 @@ class FortuneToken(val auth: LiveAuth?, val text: String?, val style: String?, v
 
 /** 백엔드 API (backend/README.md). 실패하면 null (이유는 ApiClient.lastError) */
 object RespecApi {
+    /** 끝말잇기 AI 판단을 기다리는 최대 시간 (넘으면 앱 규칙으로) */
+    private const val WORDCHAIN_TURN_TIMEOUT_MS = 6_000L
 
     /** Live 토큰을 못 받았을 때 LiveClient가 화면에 이유를 보여 주도록 예외로 바꿈 */
     fun tokenError(): Nothing = throw IllegalStateException(ApiClient.lastError ?: "서버에서 통화 토큰을 받지 못했어요")
@@ -263,6 +268,23 @@ object RespecApi {
     suspend fun reportWakeResult(sessionId: String, startLevel: Int, receivedLevel: Int?): Boolean {
         val body = JSONObject().put("start_level", startLevel).put("received_level", receivedLevel ?: JSONObject.NULL)
         return ApiClient.post("/morning/sessions/$sessionId/wake-result", body)?.ok == true
+    }
+
+    /**
+     * 끝말잇기 한 턴을 AI가 판단 (서버 API 준비 전: 요청한 형식). words: 지금까지 이어진 단어(순서대로), word: 이번에 낸 단어.
+     * 실패(연결·시간 초과·API 없음)면 null → 앱 규칙과 단어 목록으로 이어 감
+     */
+    suspend fun wordChainTurn(words: List<String>, word: String): WordChainTurn? {
+        val body = JSONObject().put("words", JSONArray(words)).put("word", word)
+        val r = ApiClient.post("/wordchain/turn", body, WORDCHAIN_TURN_TIMEOUT_MS) ?: return null
+        if (!r.ok) return null
+        val json = r.json() ?: return null
+        if (!json.has("valid")) return null
+        return WordChainTurn(
+            valid = json.optBoolean("valid"),
+            next = json.optString("next").takeIf { !json.isNull("next") && it.isNotBlank() },
+            reason = json.optString("reason").takeIf { !json.isNull("reason") && it.isNotBlank() }
+        )
     }
 
     /** 대화로 설정 바꾸기 (AI update_setting, CONTRACTS B22): 인자를 그대로 서버에 → 바뀐 설정, 거절·실패면 null */

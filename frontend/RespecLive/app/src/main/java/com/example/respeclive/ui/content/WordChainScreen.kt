@@ -83,6 +83,7 @@ fun WordChainScreen(sessionId: String, onClose: () -> Unit) {
     var input by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var secondsLeft by remember { mutableIntStateOf(TURN_SECONDS) }
+    var checking by remember { mutableStateOf(false) }   // AI가 내 단어를 판단하는 중 (타이머 멈춤)
 
     fun finish(r: WordChainResult) {
         result = r
@@ -111,13 +112,15 @@ fun WordChainScreen(sessionId: String, onClose: () -> Unit) {
         secondsLeft = TURN_SECONDS
         while (secondsLeft > 0) {
             delay(1000)
-            secondsLeft -= 1
+            if (!checking) secondsLeft -= 1      // AI 판단을 기다리는 동안은 시간이 흐르지 않음
         }
         finish(WordChainResult(WordChainWinner.NEXTY, WordChainReason.TIMEOUT, inMorning = false))
     }
 
+    // 내 단어: 앱 규칙(끝 글자·두음법칙·중복·글자 수)을 먼저 보고, 통과하면 AI에게 실제 단어인지 묻고 넥스티 단어를 받음.
+    // AI가 답하지 못하면(서버 API 준비 전·연결 실패) 앱 규칙만으로 받아들이고 넥스티는 앱 단어 목록에서 고름
     fun submit() {
-        if (!started || !myTurn) return
+        if (!started || !myTurn || checking) return
         val word = WordChainRules.clean(input)
         val problem = WordChainRules.problem(word, previous, requiredStart, used)
         if (problem != null) {
@@ -125,9 +128,32 @@ fun WordChainScreen(sessionId: String, onClose: () -> Unit) {
             return
         }
         error = null
-        input = ""
-        game.add(WordChainLine(mine = true, text = word))
-        WordChainStore.saveGame(context, sessionId, game.toList(), null)
+        checking = true
+        scope.launch {
+            val chain = WordChainMorning.chainWords(morning).map { it.text } + game.map { it.text }
+            val turn = RespecApi.wordChainTurn(chain, word)
+            checking = false
+            if (result != null) return@launch          // 기다리는 사이 화면을 벗어났거나 끝남
+            if (turn != null && !turn.valid) {
+                error = turn.reason ?: "끝말잇기에 쓸 수 없는 단어예요"
+                return@launch
+            }
+            input = ""
+            game.add(WordChainLine(mine = true, text = word))
+            if (turn != null) {
+                // AI가 준 넥스티 단어도 규칙을 한 번 더 확인하고, 틀리면 앱 단어 목록에서
+                val next = turn.next?.let { WordChainRules.clean(it) }
+                    ?.takeIf { WordChainRules.problem(it, word, null, used + word) == null }
+                    ?: dict.pick(word, null, used + word)
+                if (turn.next == null || next == null) {
+                    // AI가 이을 단어가 없다고 함 → 내 승리
+                    finish(WordChainResult(WordChainWinner.USER, WordChainReason.NO_WORD, inMorning = false))
+                    return@launch
+                }
+                game.add(WordChainLine(mine = false, text = next))
+            }
+            WordChainStore.saveGame(context, sessionId, game.toList(), null)
+        }
     }
 
     BackHandler(onBack = onClose)
@@ -181,7 +207,7 @@ fun WordChainScreen(sessionId: String, onClose: () -> Unit) {
             val starts = previous?.let { WordChainRules.nextStarts(it) } ?: requiredStart?.let { setOfNotNull(it, WordChainRules.dueum(it)) }
             Text(
                 when {
-                    !myTurn -> "넥스티가 생각하는 중…"
+                    !myTurn || checking -> "넥스티가 생각하는 중…"
                     starts != null -> "'${starts.joinToString("' 또는 '")}'(으)로 시작하는 단어 · ${secondsLeft}초"
                     else -> "단어를 말해 주세요 · ${secondsLeft}초"
                 },
@@ -195,7 +221,7 @@ fun WordChainScreen(sessionId: String, onClose: () -> Unit) {
                     value = input,
                     onValueChange = { if (it.length <= 12) input = it; error = null },
                     modifier = Modifier.weight(1f),
-                    enabled = myTurn,
+                    enabled = myTurn && !checking,
                     singleLine = true,
                     shape = RoundedCornerShape(24.dp),
                     placeholder = { Text("단어 입력", color = RespecColors.TextSub) },
@@ -217,7 +243,7 @@ fun WordChainScreen(sessionId: String, onClose: () -> Unit) {
                 Spacer(Modifier.width(8.dp))
                 IconButton(
                     onClick = { submit() },
-                    enabled = myTurn,
+                    enabled = myTurn && !checking,
                     modifier = Modifier.size(52.dp).clip(CircleShape).background(RespecColors.Button)
                 ) { Icon(Icons.AutoMirrored.Filled.Send, "보내기", tint = RespecColors.OnButton) }
             }
@@ -225,7 +251,7 @@ fun WordChainScreen(sessionId: String, onClose: () -> Unit) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(
                     onClick = { scope.launch { finish(WordChainResult(WordChainWinner.NEXTY, WordChainReason.NO_WORD, inMorning = false)) } },
-                    enabled = myTurn,
+                    enabled = myTurn && !checking,
                     modifier = Modifier.weight(1f).height(46.dp),
                     shape = RoundedCornerShape(23.dp)
                 ) { Text("더 모르겠어요", color = RespecColors.Purple, fontWeight = FontWeight.Bold) }
