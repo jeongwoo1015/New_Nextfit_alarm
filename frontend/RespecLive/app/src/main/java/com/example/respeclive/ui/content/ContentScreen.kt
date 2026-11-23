@@ -335,6 +335,16 @@ private fun WordChainCard(s: ContentSession, onResumeGame: (String) -> Unit) {
         session = s,
         trailing = { Pill(if (result == null) "진행 중" else "끝남") }
     ) {
+        // 주고받은 단어 수와 최고 기록 (서버 기록이 있으면 그 값)
+        val score = s.steps.firstNotNullOfOrNull { it.score } ?: WordChainStore.score(WordChainStore.get(context, s.sessionId)).takeIf { it > 0 }
+        val best = WordChainStore.best(context)
+        if (score != null || best != null) {
+            Text(
+                listOfNotNull(score?.let { "주고받은 단어 ${it}개" }, best?.let { "최고 기록 ${it}개" }).joinToString(" · "),
+                color = RespecColors.TextSub, fontSize = 13.sp, fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(12.dp))
+        }
         if (result != null) {
             val (head, why) = wordChainResultText(result)
             val won = result.winner == WordChainWinner.USER

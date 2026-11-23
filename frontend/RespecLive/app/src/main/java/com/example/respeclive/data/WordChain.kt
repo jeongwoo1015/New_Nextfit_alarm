@@ -191,6 +191,7 @@ object WordChainMorning {
 object WordChainStore {
     private const val PREFS = "wordchain"
     private const val MAX_SESSIONS = 30
+    private const val KEY_BEST = "__best_score"
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -203,7 +204,7 @@ object WordChainStore {
         val p = prefs(context)
         val e = p.edit().putString(sessionId, encode(record).toString())
         // 오래된 기록 정리 (세션 수만 제한)
-        val keys = p.all.keys.filter { it != sessionId }
+        val keys = p.all.keys.filter { it != sessionId && it != KEY_BEST }
         if (keys.size >= MAX_SESSIONS) keys.take(keys.size - MAX_SESSIONS + 1).forEach { e.remove(it) }
         e.apply()
     }
@@ -217,6 +218,16 @@ object WordChainStore {
     fun saveMorningResult(context: Context, sessionId: String, result: WordChainResult) {
         val old = get(context, sessionId)
         if (old.result == null) put(context, sessionId, old.copy(result = result))
+    }
+
+    /** 게임 기록 = 주고받은 끝말잇기 단어 수 (모닝콜 + 이어 하기). 서버 PUT .../score로 보냄 */
+    fun score(record: WordChainRecord): Int = WordChainMorning.chainWords(record.morning).size + record.game.size
+
+    /** 서버가 알려 준 끝말잇기 최고 기록 (콘텐츠 탭 표시용) */
+    fun best(context: Context): Int? = prefs(context).getInt(KEY_BEST, -1).takeIf { it >= 0 }
+
+    fun saveBest(context: Context, best: Int) {
+        prefs(context).edit().putInt(KEY_BEST, best).apply()
     }
 
     fun saveGame(context: Context, sessionId: String, game: List<WordChainLine>, result: WordChainResult?) {

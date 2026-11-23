@@ -759,6 +759,14 @@ fun MorningChatScreen(
                 STAGE_COACHING -> {
                     runCoaching(sid, coachJob, hasNext = next != null)
                     coachJob = null
+                    // 끝말잇기: 모닝콜에서 주고받은 단어 수를 게임 기록으로 저장 (이어 하기에서 다시 보내면 바뀜)
+                    if (RoutineRepository.session?.contentOption == "WORDCHAIN") {
+                        val app = context.applicationContext
+                        val score = WordChainStore.score(WordChainStore.get(app, sid))
+                        ApiClient.scope.launch {
+                            RespecApi.saveGameScore(sid, 1, score)?.let { WordChainStore.saveBest(app, it.optInt("best_score", score)) }
+                        }
+                    }
                 }
             }
         }

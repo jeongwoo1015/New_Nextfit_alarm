@@ -276,6 +276,11 @@ object RespecApi {
         return if (r.ok) r.json() else null
     }
 
+    /** 게임 기록(주고받은 횟수, 앱이 셈) 저장 → GameScoreOut {score, best_score, is_best}. 게임 세션이 아니면 null */
+    suspend fun saveGameScore(sessionId: String, stepOrder: Int, score: Int): JSONObject? {
+        val r = ApiClient.put("/morning/sessions/$sessionId/steps/$stepOrder/score", JSONObject().put("score", score)) ?: return null
+        return if (r.ok) r.json() else null
+    }
 
     /**
      * 끝말잇기 한 턴을 AI가 판단 (서버 API 준비 전: 요청한 형식). words: 지금까지 이어진 단어(순서대로), word: 이번에 낸 단어.

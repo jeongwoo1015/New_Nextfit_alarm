@@ -1,5 +1,7 @@
 package com.example.respeclive.ui.content
 
+import android.widget.Toast
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -41,6 +43,8 @@ import com.example.respeclive.ui.nexty.NextyCharacter
 import com.example.respeclive.ui.nexty.NextyMotion
 import com.example.respeclive.ui.theme.RespecColors
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /** 이어 하기에서 내 차례 제한 시간 */
@@ -88,7 +92,18 @@ fun WordChainScreen(sessionId: String, onClose: () -> Unit) {
     fun finish(r: WordChainResult) {
         result = r
         WordChainStore.saveGame(context, sessionId, game.toList(), r)
-        ApiClient.scope.launch { RespecApi.markStep(sessionId, WORDCHAIN_STEP, "DONE") }
+        // 게임 기록(주고받은 단어 수)을 서버에 저장하고, 최고 기록이면 알려 줌
+        val score = WordChainStore.score(WordChainStore.get(context, sessionId))
+        val app = context.applicationContext
+        ApiClient.scope.launch {
+            RespecApi.markStep(sessionId, WORDCHAIN_STEP, "DONE")
+            RespecApi.saveGameScore(sessionId, WORDCHAIN_STEP, score)?.let { out ->
+                WordChainStore.saveBest(app, out.optInt("best_score", score))
+                if (out.optBoolean("is_best") && score > 0) {
+                    withContext(Dispatchers.Main) { Toast.makeText(app, "새 기록! ${score}번 주고받았어요", Toast.LENGTH_SHORT).show() }
+                }
+            }
+        }
     }
 
     // 넥스티 차례: 이을 단어가 없으면 내 승리
