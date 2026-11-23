@@ -7,9 +7,14 @@ from backend.core.auth import current_user_id
 from backend.services.morning_service import Location, MorningService, SessionView
 
 from .schemas import (BriefingTokenIn, CoachingTokenOut, FortuneTokenOut, LiveTokenOut, ProgressOut, RewakeOut, SessionOut, SessionStartIn,
-                      SessionViewOut, SnoozeIn, SnoozeOut, StepDurationIn, StepOut, StepStatusIn, StretchAreaIn, StretchStepOut, VerdictIn)
+                      SessionViewOut, SnoozeIn, SnoozeOut, WakeLogOut, WakeVolumeIn, StepDurationIn, StepOut, StepStatusIn, StretchAreaIn, StretchStepOut, VerdictIn)
 
 router = APIRouter(prefix="/morning", tags=["morning"])
+
+
+def wake_log_out(row: dict) -> WakeLogOut:
+    return WakeLogOut(**{k: row.get(k) for k in WakeLogOut.model_fields if k != "user_set"},
+                      user_set=str(row.get("source") or "").startswith("user"))
 
 
 def _view(v: SessionView) -> SessionViewOut:
@@ -58,6 +63,14 @@ def snooze(session_id: str, body: SnoozeIn | None = None, user_id: str = Depends
     body = body or SnoozeIn()
     r = svc.snooze(user_id, session_id, body.minutes_later, body.at_time)
     return SnoozeOut(snooze_count=r.snooze_count, snoozes_today=r.snoozes_today, snoozed_until=r.snoozed_until)
+
+
+@router.post("/sessions/{session_id}/wake-volume", response_model=WakeLogOut)
+def report_wake_volume(session_id: str, body: WakeVolumeIn, user_id: str = Depends(current_user_id),
+                       svc: MorningService = Depends(morning_service)):
+    """기상 볼륨 결과: 전화를 받은 직후(또는 받지 않고 껐을 때) 한 번. 그날 처음 보고한 세션만 기록하고(다시 울림·다른 알람은 무시),
+    확인 질문을 마치거나 세션이 끝나면 서버가 학습한다. 받지 않고 껐으면 바로 학습."""
+    return wake_log_out(svc.report_wake_volume(user_id, session_id, body.start_level, body.received_level))
 
 
 @router.post("/sessions/{session_id}/wake-check", response_model=SessionViewOut)

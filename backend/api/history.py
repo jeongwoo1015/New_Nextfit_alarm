@@ -7,6 +7,8 @@ from backend.app.deps import history_service
 from backend.core.auth import current_user_id
 from backend.services.history_service import HistoryService
 
+from .morning import wake_log_out
+
 from .schemas import (CalendarDayOut, DiaryDayOut, DiarySessionOut, NightRecordOut, PhotoOut, ReportOut, SessionOut,
                       StepOut, TotalsOut)
 
@@ -17,8 +19,10 @@ router = APIRouter(tags=["history"])
 def get_report(period: str = Query("week", pattern="^(week|month|year)$"), date_: date | None = Query(None, alias="date"),
                user_id: str = Depends(current_user_id), svc: HistoryService = Depends(history_service)):
     """리포트 화면: 상단은 전체 기간 누적(overall), 그래프와 그 영역 합계는 date가 속한 주·월·연(totals·series, 기본 오늘),
-    현재·최장 연속 달성일."""
-    return svc.report(user_id, period, date_)
+    현재·최장 연속 달성일, 나의 기상 단계 변화(wake_levels: 이 기간 중 오늘까지 날짜별 시작·받은 단계)."""
+    rep = svc.report(user_id, period, date_)
+    levels = [wake_log_out(r) for r in svc.wake_levels(user_id, rep.start, rep.end)]
+    return ReportOut.model_validate(rep).model_copy(update={"wake_levels": levels})
 
 
 @router.get("/diary/calendar", response_model=list[CalendarDayOut])

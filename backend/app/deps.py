@@ -9,6 +9,7 @@ from backend.services.music_service import MusicService
 from backend.services.night_service import NightService
 from backend.services.routine_service import RoutineService
 from backend.services.user_service import UserService
+from backend.services.wake_service import WakeService
 
 
 def get_repos(request: Request) -> Repositories:
@@ -46,3 +47,7 @@ def history_service(request: Request, repos: Repositories = Depends(get_repos)) 
 
 def music_service(request: Request, repos: Repositories = Depends(get_repos)) -> MusicService:
     return MusicService(repos, request.app.state.clock)
+
+
+def wake_service(request: Request, repos: Repositories = Depends(get_repos), ai=Depends(get_ai)) -> WakeService:
+    return WakeService(repos, ai, request.app.state.clock)

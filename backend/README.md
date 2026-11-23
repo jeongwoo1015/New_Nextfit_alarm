@@ -39,6 +39,8 @@
 | `POST /morning/sessions/{id}/rewake` · `/response` | 모닝콜 | 8초 무응답 재기상(AI 음악) 횟수 +1 / 첫 음성 응답 시각(= 기상 성공 시각) |
 | `POST /morning/sessions/{id}/snooze` | 모닝콜 | 미루기. 버튼은 본문 없이(5분), 말로 미루기(AI `reschedule_alarm`)는 `{"minutes_later": 1~60}` 또는 `{"at_time": "HH:MM"}`(오늘, 60분 안). 응답 `snooze_count`·`snoozes_today`·`snoozed_until` → 앱이 그 시각에 한 번 다시 예약. 버튼·말 합쳐 하루 3번(넘으면 409 `SNOOZE_LIMIT`). 다시 울리면 `POST /morning/sessions`로 같은 세션 |
 | `POST /morning/sessions/{id}/wake-check` | 브리핑 | 확인 멘트(2~3개)를 모두 마침 — 브리핑 Live의 `wake_check_done`을 앱이 전달. 이때 기상 성공 판정 |
+| `POST /morning/sessions/{id}/wake-volume` | 모닝콜 | 기상 볼륨 결과 `{"start_level": 1~5, "received_level": 1~5 \| null}` (전화를 받은 직후, 받지 않고 껐으면 null). 그날 처음 보고한 세션만 기록. 확인 질문을 마치거나 세션이 끝나면 서버가 한 번 학습 |
+| `GET /wake-volume/next` | 모닝콜 | 다음 아침 첫 모닝콜의 시작 볼륨 `start_level`과 재기상 음악 `rewake_level`(+1). 앱이 밤 대화 뒤·앱을 열 때 받아 두고 울릴 때 사용(없으면 1단계). 다음 알람이 없으면 404 `NO_UPCOMING_ALARM` |
 | `POST /morning/sessions/{id}/briefing-token` | 브리핑 | 오늘 일정·현재 위치(선택, 날씨용)를 보내면 브리핑 Live 토큰. 그날 처음이면 개인화 전략을 정해 로그 |
 | `POST /morning/sessions/{id}/fortune-token` | 포춘 | 오늘의 포춘(어젯밤 한마디, 없으면 한 줄 일기)을 AI가 그대로 읽는 Live 토큰 + `fortune_text`·`fortune_style`·`fortune_source`. 문장이 아직 없으면 이때 만든다(재연결도 같은 문장). AI 음성이 끝나면 앱이 다음 단계로 |
 | `POST /morning/sessions/{id}/coaching-token` | 루틴·콘텐츠 | `start_routine` 뒤(재연결도) 호출. 처음이면 단계를 PENDING으로 만들고 남은 단계만 토큰에. 콘텐츠는 종류·세부를 AI에 넘기고, 세부 없는 퀴즈 알람은 AI가 정한 오늘 세부를 세션 `content_option`에 남긴다(B14) |
@@ -48,7 +50,7 @@
 | `PATCH /morning/sessions/{id}/steps/{n}/duration` | 코칭 | 오늘 진행 중 변경("오늘 스트레칭 좀 적게", Live 함수를 앱이 전달). PENDING만, 30초 단위, 오늘 합계 ≤ 상한, 0초 = 오늘만 빼기 |
 | `POST /morning/sessions/{id}/end` | 종료 | `end_session` 또는 통화 종료. 기상 성공 기록 |
 | `GET /morning/sessions/{id}` · `GET /morning/sessions/today` | 루틴 화면 | 세션, 단계, 진행 개수(`finished` = "완료!") |
-| `GET /reports?period=week\|month\|year&date=` | 리포트 | 상단 `overall` = 전체 기간 누적(기상 성공률·루틴 성공률·취침 성공률 `bedtime_success_rate`), `totals`·`series` = 선택한 기간(평균 기상 시각, 루틴 완료 52/70, 그래프 칸 주: 월~일 / 월: 1주~5주 / 연: 1~12월), 현재·최장 연속 달성일. 취침(11/06): 성공률 = 밤 대화를 마친 날 ÷ 기록 기간(첫 기록일~어제, 오늘 밤을 마쳤으면 오늘까지), `avg_bed_clock` = 밤 기록이 처음 저장된 시각의 평균(자정 넘김 이어서) |
+| `GET /reports?period=week\|month\|year&date=` | 리포트 | 상단 `overall` = 전체 기간 누적(기상 성공률·루틴 성공률·취침 성공률 `bedtime_success_rate`), `totals`·`series` = 선택한 기간(평균 기상 시각, 루틴 완료 52/70, 그래프 칸 주: 월~일 / 월: 1주~5주 / 연: 1~12월), 현재·최장 연속 달성일. 취침(11/06): 성공률 = 밤 대화를 마친 날 ÷ 기록 기간(첫 기록일~어제, 오늘 밤을 마쳤으면 오늘까지), `avg_bed_clock` = 밤 기록이 처음 저장된 시각의 평균(자정 넘김 이어서). `wake_levels` = 나의 기상 단계 변화(이 기간 중 오늘까지 날짜별 시작·받은 단계, `user_set`) |
 | `GET /diary/calendar?month=YYYY-MM` | 한 줄 일기 | 날짜별 사진 URL 또는 루틴 성공률, 세션·밤 기록 여부 |
 | `GET /diary/{date}` | 일기 상세 | 그날 밤 기록(한 줄 일기)·아침 세션과 단계·사진·하루 요약. 세션은 알람이 먼저 울린 순 |
 | `PUT /diary/{date}/photo` | 일기 사진 | jpg를 본문 그대로(`Content-Type: image/jpeg`, 10MB 이하, 미래 날짜 불가). 다시 올리면 덮어씀 |
@@ -126,6 +128,14 @@ AI 쪽 브리핑 입력의 `coaching_min`은 0(코칭 안 함)/10(진행)으로�
 역할별 브랜치끼리 병합해도 된다(11/01). 같은 파일을 두 브랜치에서 고치지 않는다: base.py·models·서비스·API·requirements·
 메모리 구현·`jobs/personalization.py`는 backend-service, `repositories/supabase.py`·`jobs/maintenance.py`·`supabase/*.sql`은 backend-db,
 `ai/`는 ai 담당. 이 브랜치에는 feat/backend-db와 feat/ai가 병합돼 있어 실제 `ai` 함수로 테스트한다(`tests/test_ai_real.py`).
+
+## 기상 볼륨 개인화 (11/20 회의, AI B23, DB 11-22 `rs_wake_log`)
+그날 가장 먼저 울리는 모닝콜 하나로 하루 1행을 기록·학습한다(`services/wake_service.py`, 계산은 AI `wake_volume`).
+1. 밤 토큰(`POST /night/token`): 내일 시작 단계를 정한다. 어제보다 올라가면 밤 입력에 이전 단계를 넣어 AI가 알린다. 내일 오전(12시 전) 일정이 있으면 중요한 날(탐색 안 함).
+2. 밤 대화 저장(`POST /night/transcript`): AI가 올린다고 실제로 말했는지 확인해 확정한다. 안 알렸으면 어제 단계를 유지, 대화로 바꾼 값(`/settings/ai-change`)은 따른다.
+3. `GET /wake-volume/next`: 밤 대화가 없던 날은 이때 정하고 올리지 않는다. 같은 날 다시 정할 때는 같은 입력(prefs의 `sleep_minutes`·`important_day`)과 seed(`user|날짜`)라 밤에 알린 추천이 바뀌지 않는다.
+4. 알람이 울리면(세션 시작) `wake_next_level`을 비운다. 앱 보고 → 확인 질문을 마친 때(재기상 없음 = 확인 성공), 확인 없이 끝난 때, 받지 않은 때 한 번만 학습(`wake:user:{id}`, `wake:global`). 미루기는 볼륨 학습에 넣지 않는다.
+AI를 쓸 수 없으면 사용자 값 → 직전 단계 → 1단계로 울리고 학습은 하지 않는다.
 
 ## 기상 성공 기준 (11/01 팀 확정)
 브리핑 전 확인 멘트 2~3개(예: "잘 주무셨어요?")에 모두 응답했고, 그때까지 ① 스누즈("5분 뒤 다시 울리기")를 한 번도 하지 않았고

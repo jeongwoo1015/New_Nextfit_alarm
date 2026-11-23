@@ -1,8 +1,10 @@
 """테스트·개발용 AI 어댑터. 정해 둔 값을 돌려주고 받은 입력을 기록한다."""
 from dataclasses import dataclass, field
 
+import re
+
 from .ai_gateway import (ContentPlan, ContentStep, Fortune, LiveToken, NightContext, NightExtract, RoutineChangeRequest,
-                         StrategyDecision, fit_seconds)
+                         StrategyDecision, WakeDecision, WakeInputs, default_wake_decision, fit_seconds)
 
 STRETCH_AREAS = ("FULL", "NECK", "SHOULDER", "CHEST_BACK", "WRIST_HAND", "ELBOW_ARM", "LOW_BACK", "PELVIS", "GLUTE",
                  "THIGH", "CALF", "ANKLE_FOOT")
@@ -26,6 +28,7 @@ class FakeAIGateway:
     calls: list = field(default_factory=list)
     content_extra: tuple = ()                   # 마지막 compose_content_steps의 (english_level, context)
     fortune_plan: tuple = ()                    # 마지막 포춘 토큰의 순서표
+    wake_recommended: int = 1                   # decide_wake_level이 추천하는 시작 단계
 
     def issue_night_token(self, ctx: NightContext) -> LiveToken:
         self.calls.append(("night_token", ctx))
@@ -91,3 +94,30 @@ class FakeAIGateway:
     def today_intensity(self, base, sessions, auto):
         self.calls.append(("intensity", (base, len(sessions), auto)))
         return self.intensity if (self.intensity is not None and auto) else base
+
+    def decide_wake_level(self, user_id, session_date, personal, global_, w: WakeInputs, seed):
+        """AI decide_start_level의 사용자 우선·상승 보류 규칙만 흉내 낸다 (추천은 wake_recommended 고정)."""
+        self.calls.append(("wake_decide", (session_date, w, seed)))
+        rec = self.wake_recommended
+        row = default_wake_decision(user_id, session_date, w).row
+        source, applied = ("important_day" if w.important_day else "bandit"), rec
+        if w.next_level:
+            applied, source = w.next_level, "user_today"
+        elif w.max_start_level and rec > w.max_start_level:
+            applied, source = w.max_start_level, "user_max"
+        pending = bool(w.previous_level and applied > w.previous_level and source in ("bandit", "important_day"))
+        if pending and not w.notified:
+            applied, source, pending = w.previous_level, "hold_no_notice", False
+        row.update(context_key="short" if (w.sleep_minutes or 0) < 360 else "ok", recommended_level=rec, applied_level=applied,
+                   source=source, state="USER" if source.startswith("user") else "RECOMMENDED",
+                   propensity=0.5 if source == "bandit" else None, reason=f"가짜 결정 {source}")
+        return WakeDecision(row, pending)
+
+    def wake_raise_announced(self, ai_text, level):
+        return bool(re.search(rf"{level}\s*단계", ai_text or "") and re.search("소리|볼륨|알람", ai_text or ""))
+
+    def learn_wake(self, state, context_key, start_level, received_level, confirmed):
+        self.calls.append(("wake_learn", (context_key, start_level, received_level, confirmed)))
+        if start_level not in range(1, 6) or (received_level is not None and received_level not in range(start_level, 6)):
+            return None
+        return {"days": [*(state or {}).get("days", []), [context_key, start_level, received_level, confirmed]]}

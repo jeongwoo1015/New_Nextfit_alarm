@@ -53,6 +53,11 @@ class HistoryService:
         rec = self.r.sessions.recent_records(user_id, ALL_HISTORY_SINCE, max(end - timedelta(days=1), today) + timedelta(days=1))
         return _with_bedtime(ai_stats.report(rec, period, anchor, today), rec, today)
 
+    def wake_levels(self, user_id: str, start: date, end: date) -> list[dict]:
+        """나의 기상 단계 변화: [start, end) 중 오늘까지, 날짜 순 (내일 정해 둔 값은 넣지 않는다)."""
+        until = min(end - timedelta(days=1), today_kst(self.clock()))
+        return self.r.personalization.list_wake_logs(user_id, start, until) if until >= start else []
+
     def _photo_url(self, path: str | None) -> str | None:
         return self.r.storage.signed_url("photo", path) if path else None
 

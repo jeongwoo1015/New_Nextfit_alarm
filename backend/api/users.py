@@ -1,12 +1,14 @@
 """온보딩, 내 정보, 설정."""
 from fastapi import APIRouter, Depends, Response, status
 
-from backend.app.deps import user_service
+from backend.app.deps import user_service, wake_service
 from backend.core.auth import current_user_id
 from backend.core.errors import NotFound
+from backend.domain.wake_rules import rewake_level
 from backend.services.user_service import OnboardingInput, Profile, UserService
+from backend.services.wake_service import WakeService
 
-from .schemas import SETTING_NULLABLE, AiSettingChangeIn, AlarmOut, OnboardingIn, ProfileOut, SettingOut, SettingPatch, UserOut, UserPatch
+from .schemas import SETTING_NULLABLE, AiSettingChangeIn, AlarmOut, OnboardingIn, ProfileOut, SettingOut, SettingPatch, UserOut, UserPatch, WakeNextOut
 
 router = APIRouter(tags=["users"])
 
@@ -65,3 +67,14 @@ def ai_change_setting(body: AiSettingChangeIn, user_id: str = Depends(current_us
     ALWAYS면 앞으로의 상한(wake_max_start_level). wake_volume에 scope가 없으면 TODAY(한 번만 바뀌는 쪽).
     허용 값 밖이면 422 SETTING_VALUE_INVALID — 앱은 결과와 상관없이 AI에는 {"result":"ok"}를 돌려준다(B22)."""
     return svc.change_setting_by_voice(user_id, body.field, body.value, body.scope)
+
+
+@router.get("/wake-volume/next", response_model=WakeNextOut)
+def wake_volume_next(user_id: str = Depends(current_user_id), svc: WakeService = Depends(wake_service)):
+    """다음 아침 기상 알람의 시작 볼륨 (AI B23). 알람이 울릴 때 네트워크를 기다리지 않도록 앱이 밤 대화 뒤·앱을 열 때 받아 저장해 두고,
+    울릴 때 그 값으로 시작한다(받은 값이 없으면 1단계). 밤 대화가 없던 날은 이때 정하며 올리지 않는다.
+    다음 모닝콜이 없으면 404 NO_UPCOMING_ALARM."""
+    n = svc.next(user_id)
+    return WakeNextOut(session_date=n.session_date, alarm_id=n.alarm.alarm_id, alarm_time=n.alarm.alarm_time,
+                       start_level=n.start_level, rewake_level=rewake_level(n.start_level),
+                       source=n.row.get("source"), state=n.row.get("state"))

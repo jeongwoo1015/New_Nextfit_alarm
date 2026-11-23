@@ -10,8 +10,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta
 
 from backend.clients.ai_gateway import (AIGateway, BriefingContext, CalendarEvent, CoachingContext, CoachStep, ContentStep,
-                                        Fortune, LiveToken, Persona, night_view, persona_of,
-                                        settings_view)
+                                        Fortune, LiveToken, Persona, night_view, persona_of)
 from backend.clients.weather import NoWeather, WeatherClient
 from backend.core.errors import AppError, Conflict, NotFound, ValidationFailed
 from backend.domain import codes
@@ -22,6 +21,7 @@ from backend.domain.session_rules import (content_duration_sec, content_steps, j
                                           resolve_snapshot, routine_steps)
 from backend.domain.step_rules import apply_verdict, check_today_duration, mark, pending_steps, progress, today_total
 from backend.repositories.registry import Repositories
+from backend.services.wake_service import WakeService
 
 log = logging.getLogger(__name__)
 
@@ -100,6 +100,7 @@ class MorningService:
                  weather: WeatherClient | None = None):
         self.r, self.ai, self.clock, self.mode = repos, ai, clock, mode
         self.weather = weather or NoWeather()
+        self.wake = WakeService(repos, ai, clock)
 
     # ---------- 세션 ----------
     def start(self, user_id: str, alarm_id: str) -> SessionView:
@@ -120,6 +121,7 @@ class MorningService:
             changes["applied_intensity"] = level
         if changes:
             s = self.r.sessions.update_session(user_id, s.session_id, changes)
+        self.wake.on_session_start(user_id, s)
         v = self.view(user_id, s.session_id)
         night = self.r.nights.get_night_for_morning(user_id, s.session_date)
         return replace(v, morning_plan=self._plan(s, v.steps, night, at_start=True),
@@ -241,15 +243,21 @@ class MorningService:
             now = to_kst(self.clock())
             if s.first_response_at is None:      # 확인 멘트에 답했다는 뜻이므로 첫 응답이 빠졌으면 지금으로 채운다
                 s = self.r.sessions.update_session(user_id, session_id, {"first_response_at": now})
-            self.r.sessions.update_session(user_id, session_id, {"wake_checked_at": now, "wake_success": judge_wake(s)})
+            s = self.r.sessions.update_session(user_id, session_id, {"wake_checked_at": now, "wake_success": judge_wake(s)})
+            self.wake.learn(user_id, s)          # 기상 볼륨: 확인 질문을 마친 때 학습 (재기상이 있었으면 확인 실패)
         return self.view(user_id, session_id)
 
     def end(self, user_id: str, session_id: str) -> SessionView:
         """세션 종료. 확인 멘트를 끝내지 못한 채 끝나면 기상 실패로 남는다(WAKE_SUCCESS 기본값 FALSE)."""
         s = self._session(user_id, session_id)
         if s.session_end_at is None:
-            self.r.sessions.update_session(user_id, session_id, {"session_end_at": to_kst(self.clock())})
+            s = self.r.sessions.update_session(user_id, session_id, {"session_end_at": to_kst(self.clock())})
+            self.wake.learn(user_id, s)          # 확인 없이 끝났으면 확인 실패로 학습 (이미 학습했으면 건너뜀)
         return self.view(user_id, session_id)
+
+    def report_wake_volume(self, user_id: str, session_id: str, start_level: int, received_level: int | None) -> dict:
+        """앱 보고: 알람이 울리기 시작한 단계와 전화를 받은 단계(1~5, 못 받고 껐으면 None)."""
+        return self.wake.report(user_id, self._session(user_id, session_id), start_level, received_level)
 
     # ---------- 브리핑 ----------
     def _persona(self, user_id: str, s: MorningSession) -> Persona:
@@ -276,7 +284,7 @@ class MorningService:
                               program, content_name(s.content_type, s.content_option), s.coaching_skipped, briefing_block,
                               weather, one_liner_follows=bool(night and night.voice_audio_path),
                               plan=self._plan(s, steps, night, at_start=True), already_done=_all_done(steps),
-                              settings=settings_view(st), snoozes_today=self.snoozes_today(user_id, s.session_date))
+                              settings=self.wake.today_settings(st, s), snoozes_today=self.snoozes_today(user_id, s.session_date))
         return self.ai.issue_briefing_token(ctx)
 
     def _strategy(self, user_id: str, s: MorningSession, night) -> tuple[str, str]:

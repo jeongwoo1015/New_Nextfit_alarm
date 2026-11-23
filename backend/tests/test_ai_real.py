@@ -12,8 +12,8 @@ import pytest
 pytest.importorskip("ai.live.config")
 
 from backend.clients.ai_gateway import (BriefingContext, CalendarEvent, CoachingContext, CoachStep, ItemChange,  # noqa: E402
-                                        NightContext, NightView, Persona, RealAIGateway, SettingsView, Weather,
-                                        to_item_changes)
+                                        NightContext, NightView, Persona, RealAIGateway, SettingsView, WakeInputs,
+                                        Weather, to_item_changes)
 from backend.core.timeutil import KST  # noqa: E402
 from backend.domain.models import AlarmRoutineItem, MorningSession, RecentRecords, SessionStep  # noqa: E402
 
@@ -182,3 +182,22 @@ def test_new_ai_format_with_scope_and_duration():
         changes = [{"template_item_id": "i1", "duration_sec": 60, "scope": "always"},
                    {"template_item_id": "i2", "duration_sec": 0, "scope": "weird"}]
     assert to_item_changes(Res()) == [ItemChange("i1", 60, "ALWAYS"), ItemChange("i2", 0, "TOMORROW")]
+
+
+def test_wake_volume_uses_ai_module():
+    """기상 볼륨: 같은 seed면 같은 결정(밤에 알린 값 유지), 알리지 못하면 직전 단계 유지, 학습 결과는 저장할 수 있는 dict."""
+    gw, _ = gateway()
+    w = WakeInputs(sleep_minutes=450, previous_level=1)
+    a = gw.decide_wake_level("u1", date(2026, 11, 6), None, None, w, "u1|2026-11-06")
+    b = gw.decide_wake_level("u1", date(2026, 11, 6), None, None, w, "u1|2026-11-06")
+    assert a == b and a.row["context_key"] == "ok" and a.row["applied_level"] in (1, 3)
+    assert set(a.row) >= {"recommended_level", "applied_level", "source", "state", "explored", "propensity", "previous_level", "prefs"}
+    held = gw.decide_wake_level("u1", date(2026, 11, 6), None, None, WakeInputs(450, previous_level=1, notified=False), "s")
+    assert held.row["applied_level"] == 1 and held.raise_pending is False
+    user = gw.decide_wake_level("u1", date(2026, 11, 6), None, None, WakeInputs(450, next_level=5), "s")
+    assert (user.row["applied_level"], user.row["source"], user.row["state"]) == (5, "user_today", "USER")
+    assert gw.wake_raise_announced("내일은 알람 소리를 3단계부터 시작할게요", 3) is True
+    assert gw.wake_raise_announced("잘 자요", 3) is False
+    state = gw.learn_wake(None, "ok", 1, 3, True)
+    assert state["counts"] == {"ok|1": [0, 1], "ok|2": [0, 1], "ok|3": [1, 0]}
+    assert gw.learn_wake(state, "ok", 3, 2, True) is None                          # 시작보다 낮게 받을 수 없음
