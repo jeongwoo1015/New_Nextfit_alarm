@@ -250,7 +250,7 @@ def test_scenarios_build_valid_setup(name):
         assert s.utterances[-1] and any(w in s.utterances[-1] for w in ("잘게", "끊을게", "끝낼게"))   # 끝내는 쪽은 항상 사용자
     if s.kind == "briefing":
         assert len(s.utterances) == 2                                                                    # 확인 질문 답 + (준비됐어요 또는 작별)
-    if s.kind == "coaching":
+    if s.kind == "coaching" and "snooze" not in s.expect:           # 미루기 시나리오는 단계를 끝내지 않고 통화가 닫힌다
         removed = {k for k, v in s.expect.get("adjust", {}).items() if v == 0}                          # 오늘 뺀 단계는 판정하지 않는다
         assert set(s.expect["verdicts"]) == {st.order for st in s.inp.steps} - removed
         assert len(s.utterances) == len(s.expect["verdicts"]) + len(s.expect.get("no_verdict_turns", ())) + s.expect.get("extra_turns", 0) + (0 if s.expect.get("no_farewell") else 1)   # 판정 턴 + 시간 변경 턴 + (게임처럼 한 단계 안의 추가 대화) + 작별 인사(코칭 뒤에 다음 순서가 있어 앱이 알아서 넘어가는 시나리오는 작별이 없다)

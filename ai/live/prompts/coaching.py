@@ -4,7 +4,7 @@
 from ..inputs import CoachingInput, Step, content_kind
 from ...tasks.morning_plan import BRIEFING, COACHING, FORTUNE, ONE_LINER, neighbors
 from ...tasks.stretch_sets import AREA_NAMES, AREA_WORDS
-from .common import (MORNING_RULE, SAFETY_RULES, VOICE_RULES, clean, eul, join_blocks, morning_flow, night_record_block, persona_block,
+from .common import (MORNING_RULE, SAFETY_RULES, VOICE_RULES, clean, eul, join_blocks, morning_flow, night_record_block, persona_block, snooze_block,
                      resolve_plan, stage_name)
 
 COACH_INTRO = "당신은 사용자의 아침 루틴을 옆에서 코칭해 주는 친근한 모닝 코치입니다."
@@ -238,7 +238,7 @@ def coaching_prompt(inp: CoachingInput) -> str:
         "" if content else TIME_RULES, "" if content else ENCOURAGE_RULES, closing_rules(inp, plan), skip_all_rule(inp, plan, name, content),
         stretch_rules(inp) if kind == "STRETCH" else CONTENT_RULES.get(kind, ""),
         open_rule(inp, plan, name, content),
-        morning_flow(plan, COACHING, name), MORNING_RULE, SAFETY_RULES, VOICE_RULES, persona_block(inp.persona), steps,
+        morning_flow(plan, COACHING, name), MORNING_RULE, SAFETY_RULES, VOICE_RULES, persona_block(inp.persona), snooze_block(inp, in_steps=True), steps,
         night_record_block(inp.night) if inp.night else "",
         inp.strategy_block,
     )
