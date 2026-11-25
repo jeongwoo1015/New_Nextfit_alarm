@@ -1,35 +1,35 @@
 package com.example.respeclive
 
 import com.example.respeclive.audio.AlarmVibrator
-import com.example.respeclive.data.WakeEntry
 import com.example.respeclive.data.WakeHistory
 import com.example.respeclive.data.WakeProfile
+import com.example.respeclive.data.WakeRate
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class WakeVibrationTest {
-    private fun e(level: Int, rewake: Boolean = false) = WakeEntry(level, rewake)
+    private fun totals(n: Int, rate: Double?) = WakeRate(n, rate)
 
     @Test
-    fun fewRecordsUseSuccessRate() {
-        assertEquals(WakeProfile.NORMAL, WakeHistory.classify(listOf(e(1), e(1)), null))
-        assertEquals(WakeProfile.HARD, WakeHistory.classify(listOf(e(1)), 0.4))
-        assertEquals(WakeProfile.NORMAL, WakeHistory.classify(emptyList(), 0.9))
+    fun classifyBySuccessRate() {
+        assertEquals(WakeProfile.NORMAL, WakeHistory.classify(null))
+        assertEquals(WakeProfile.HARD, WakeHistory.classify(0.49))
+        assertEquals(WakeProfile.NORMAL, WakeHistory.classify(0.5))
+        assertEquals(WakeProfile.NORMAL, WakeHistory.classify(0.79))
+        assertEquals(WakeProfile.EASY, WakeHistory.classify(0.8))
     }
 
     @Test
-    fun easyHardNormal() {
-        assertEquals(WakeProfile.EASY, WakeHistory.classify(listOf(e(1), e(2), e(2), e(3), e(1)), null))
-        assertEquals(WakeProfile.NORMAL, WakeHistory.classify(listOf(e(1), e(2), e(1, rewake = true)), null))
-        assertEquals(WakeProfile.HARD, WakeHistory.classify(listOf(e(4), e(5), e(3)), null))
-        assertEquals(WakeProfile.HARD, WakeHistory.classify(listOf(e(1, true), e(2), e(1, true)), null))
-        assertEquals(WakeProfile.NORMAL, WakeHistory.classify(listOf(e(3), e(3), e(2)), 0.1))
-    }
-
-    @Test
-    fun onlyRecentFiveCount() {
-        val old = List(5) { e(5) }
-        assertEquals(WakeProfile.EASY, WakeHistory.classify(old + List(5) { e(1) }, null))
+    fun weekRateFirstThenOverall() {
+        // 이번 주 기록이 충분하면 이번 주
+        assertEquals(0.3, WakeHistory.pickRate(totals(3, 0.3), totals(20, 0.9))!!, 1e-9)
+        // 주 초반(기록 적음)이면 전체 기간
+        assertEquals(0.9, WakeHistory.pickRate(totals(1, 0.0), totals(20, 0.9))!!, 1e-9)
+        // 둘 다 적거나 값이 없으면 null → 보통
+        assertNull(WakeHistory.pickRate(totals(1, 0.0), totals(2, 0.0)))
+        assertNull(WakeHistory.pickRate(totals(5, null), null))
+        assertNull(WakeHistory.pickRate(null, null))
     }
 
     @Test

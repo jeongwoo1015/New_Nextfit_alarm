@@ -282,7 +282,6 @@ private fun MorningIncomingScreen(
             )
             Spacer(Modifier.height(16.dp))
             SwipeToAnswer(onComplete = {
-                WakeHistory.recordAnswer(context, level)   // 받은 단계 = 진동 유형을 나누는 기준
                 onAnswer(level)
             })
             Spacer(Modifier.height(8.dp))

@@ -2,97 +2,72 @@ package com.example.respeclive.data
 
 import android.content.Context
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 /** 기상 알람 진동 세기를 정하는 사용자 유형 */
 enum class WakeProfile { EASY, NORMAL, HARD }
 
-/** 아침 한 번의 기록: 전화를 받은 볼륨 단계와 그 뒤 다시 깨우기가 울렸는지 */
-data class WakeEntry(val receivedLevel: Int, val rewake: Boolean)
+/** 리포트 한 기간의 아침 기록 수와 기상 성공률(0~1, 기록이 없으면 null) */
+data class WakeRate(val sessions: Int, val rate: Double?)
 
 /**
- * 최근 아침 기록(기기에만 저장)으로 잘 깨는 사용자 / 보통 / 잘 못 깨는 사용자를 나눔.
- * 기록이 적으면(처음 쓰는 사람, 앱을 다시 설치) 서버 리포트의 주간 기상 성공률로 대신 판단.
- * 서버가 사용자별 기상 시작 단계를 정해 주면(AI CONTRACTS B23) 진동도 그 단계를 따라가므로 이 구분은 보조가 됨
+ * 서버 리포트의 기상 성공률로 잘 깨는 사용자 / 보통 / 잘 못 깨는 사용자를 나눔. 기기에는 받아 둔 성공률만 저장하므로
+ * 로그아웃·앱 재설치 뒤에도 서버에서 다시 받으면 같은 값이 됨.
+ * 이번 주 아침이 MIN_SESSIONS번 이상이면 이번 주 성공률, 아니면(주 초반) 전체 기간 성공률, 둘 다 적으면 보통.
+ * 서버가 사용자별 기상 시작 단계를 정해 주고(AI CONTRACTS B23) 진동도 그 단계를 따라가므로 이 구분은 보조
  */
 object WakeHistory {
     private const val PREFS = "wake_history"
-    private const val KEY_ENTRIES = "entries"            // "받은단계:다시깨우기(0/1)"를 쉼표로, 오래된 것부터
-    private const val KEY_SUCCESS_RATE = "week_success_rate"
+    private const val KEY_SUCCESS_RATE = "success_rate"
+    private val LEGACY_KEYS = listOf("entries", "week_success_rate")   // 예전 기기 기상 기록·이번 주 성공률
 
-    /** 판단에 쓰는 최근 아침 수 */
-    const val RECENT = 5
-    /** 이보다 기록이 적으면 서버 기상 성공률로 판단 */
-    const val MIN_ENTRIES = 3
-    const val EASY_MAX_AVG = 2.0
-    const val HARD_MIN_AVG = 4.0
-    const val HARD_MIN_REWAKES = 2
-    const val HARD_SUCCESS_RATE = 0.5
+    /** 이보다 아침 기록이 적은 기간의 성공률은 쓰지 않음 (월요일 하나만 있으면 0% 또는 100%라 흔들림) */
+    const val MIN_SESSIONS = 3
+    /** 성공률이 이 값 미만이면 잘 못 깨는 사용자 */
+    const val HARD_BELOW = 0.5
+    /** 성공률이 이 값 이상이면 잘 깨는 사용자 */
+    const val EASY_FROM = 0.8
 
-    private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private fun prefs(context: Context) = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun entries(context: Context): List<WakeEntry> =
-        prefs(context).getString(KEY_ENTRIES, "").orEmpty().split(',').mapNotNull { parse(it) }
-
-    private fun parse(s: String): WakeEntry? {
-        val parts = s.split(':')
-        val level = parts.getOrNull(0)?.toIntOrNull() ?: return null
-        return WakeEntry(level, parts.getOrNull(1) == "1")
-    }
-
-    private fun save(context: Context, list: List<WakeEntry>) {
-        val text = list.takeLast(RECENT).joinToString(",") { "${it.receivedLevel}:${if (it.rewake) 1 else 0}" }
-        prefs(context).edit().putString(KEY_ENTRIES, text).apply()
-    }
-
-    /** 모닝콜을 받음 (받은 순간의 볼륨 단계) */
-    fun recordAnswer(context: Context, receivedLevel: Int) {
-        save(context, entries(context) + WakeEntry(receivedLevel, rewake = false))
-    }
-
-    /** 받은 뒤 대화 중에 다시 깨우기가 울림: 가장 최근 아침에 표시 */
-    fun markRewake(context: Context) {
-        val list = entries(context)
-        val last = list.lastOrNull() ?: return
-        if (last.rewake) return
-        save(context, list.dropLast(1) + last.copy(rewake = true))
-    }
-
+    /** 알람이 울릴 때 부름: 받아 둔 성공률로 판단 (네트워크를 기다리지 않음) */
     fun profile(context: Context): WakeProfile {
         val rate = prefs(context).getFloat(KEY_SUCCESS_RATE, -1f).takeIf { it >= 0f }?.toDouble()
-        return classify(entries(context), rate)
+        return classify(rate)
     }
 
-    /** 홈을 열 때 서버 리포트에서 이번 주 기상 성공률을 받아 둠 (알람이 울릴 때는 네트워크를 기다리지 않도록) */
+    /** 홈을 열 때 서버 리포트에서 기상 성공률을 받아 둠 */
     fun refreshSuccessRate(context: Context) {
         val app = context.applicationContext
         ApiClient.scope.launch {
             val report = RespecApi.report("week") ?: return@launch
-            val rate = listOf("totals", "overall")
-                .mapNotNull { report.optJSONObject(it) }
-                .firstOrNull { it.optInt("n_sessions") > 0 && !it.isNull("wake_success_rate") }
-                ?.optDouble("wake_success_rate")
             val p = prefs(app).edit()
-            if (rate == null || rate.isNaN()) p.remove(KEY_SUCCESS_RATE) else p.putFloat(KEY_SUCCESS_RATE, rate.toFloat())
+            LEGACY_KEYS.forEach { p.remove(it) }
+            val rate = pickRate(report.optJSONObject("totals")?.toWakeRate(), report.optJSONObject("overall")?.toWakeRate())
+            if (rate == null) p.remove(KEY_SUCCESS_RATE) else p.putFloat(KEY_SUCCESS_RATE, rate.toFloat())
             p.apply()
         }
     }
 
-    /**
-     * 최근 RECENT번: 받은 단계 평균 2 이하이고 다시 깨우기 없음 → 잘 깨는 사용자,
-     * 받은 단계 평균 4 이상이거나 다시 깨우기 2번 이상 → 잘 못 깨는 사용자, 그 사이는 보통.
-     * 기록이 MIN_ENTRIES번보다 적으면 기상 성공률 50% 미만일 때만 잘 못 깨는 사용자, 아니면 보통
-     */
-    fun classify(entries: List<WakeEntry>, weekSuccessRate: Double?): WakeProfile {
-        val recent = entries.takeLast(RECENT)
-        if (recent.size < MIN_ENTRIES) {
-            return if (weekSuccessRate != null && weekSuccessRate < HARD_SUCCESS_RATE) WakeProfile.HARD else WakeProfile.NORMAL
-        }
-        val avg = recent.map { it.receivedLevel }.average()
-        val rewakes = recent.count { it.rewake }
-        return when {
-            avg >= HARD_MIN_AVG || rewakes >= HARD_MIN_REWAKES -> WakeProfile.HARD
-            avg <= EASY_MAX_AVG && rewakes == 0 -> WakeProfile.EASY
-            else -> WakeProfile.NORMAL
-        }
+    /** 로그아웃: 다음 계정은 홈을 열 때 자기 성공률을 다시 받음 */
+    fun clear(context: Context) {
+        prefs(context).edit().clear().apply()
+    }
+
+    /** 이번 주(totals) → 전체 기간(overall) 차례로, 아침 기록이 MIN_SESSIONS번 이상인 쪽의 성공률 */
+    fun pickRate(week: WakeRate?, overall: WakeRate?): Double? =
+        listOfNotNull(week, overall).firstOrNull { it.sessions >= MIN_SESSIONS && it.rate != null }?.rate
+
+    private fun JSONObject.toWakeRate() = WakeRate(
+        sessions = optInt("n_sessions"),
+        rate = if (isNull("wake_success_rate")) null else optDouble("wake_success_rate").takeIf { !it.isNaN() }
+    )
+
+    /** 성공률 50% 미만 → 잘 못 깨는 사용자, 80% 이상 → 잘 깨는 사용자, 그 사이·값 없음 → 보통 */
+    fun classify(successRate: Double?): WakeProfile = when {
+        successRate == null -> WakeProfile.NORMAL
+        successRate < HARD_BELOW -> WakeProfile.HARD
+        successRate >= EASY_FROM -> WakeProfile.EASY
+        else -> WakeProfile.NORMAL
     }
 }
