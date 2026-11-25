@@ -233,7 +233,7 @@ class MorningService:
         count = self.r.sessions.add_snooze(user_id, session_id)
         self.r.sessions.update_session(user_id, session_id, {"snoozed_until": until, "wake_success": False})
         self._fail_wake_today(user_id, s.session_date)
-        self.wake.on_snooze(user_id, s.session_date)       # 이미 확인 성공으로 학습한 기상 볼륨 기록도 한 번만 실패로 고친다
+        self.wake.on_snooze(user_id, self._session(user_id, session_id))   # 기상 볼륨: 받은 단계를 확인 실패로 학습(이미 성공으로 학습했으면 한 번 고침)
         return SnoozeResult(count, self.snoozes_today(user_id, s.session_date), until)
 
     def _fail_wake_today(self, user_id: str, session_date) -> None:

@@ -143,7 +143,8 @@ class WakeService:
         if row and row.get("start_level") is not None:
             return row
         row = self.r.personalization.save_wake_result(user_id, s.session_date, start_level, received_level, None, s.session_id)
-        if received_level is None or s.wake_checked_at is not None or s.session_end_at is not None:
+        if (received_level is None or s.wake_checked_at is not None or s.session_end_at is not None
+                or self._snoozes_today(user_id, s.session_date) > 0):   # 미룬 뒤 보고(앱 미루기 버튼: 미룬 순간의 단계)는 결과가 정해졌으니 바로 학습
             self.learn(user_id, s)
         return self.r.personalization.get_wake_log(user_id, s.session_date) or row
 
@@ -172,12 +173,17 @@ class WakeService:
     def _snoozes_today(self, user_id: str, d: date) -> int:
         return sum(x.snooze_count for x in self.r.sessions.recent_records(user_id, d, d).sessions)
 
-    def on_snooze(self, user_id: str, d: date) -> bool:
-        """미루기를 받았을 때(11/24 AI B25): 그날 기록을 이미 확인 성공으로 학습했으면 한 번만 확인 실패로 고친다.
-        기록의 confirmed를 먼저 False로 바꿔 두 번 고치지 않게 하고, 내 기록·전체 기록의 받은 단계 칸을 성공 1 → 실패 1로 옮긴다.
-        아직 학습 전이면 할 일이 없다(학습할 때 미룬 횟수를 보고 확인 실패로 넣는다). 실패해도 미루기는 그대로 된다."""
+    def on_snooze(self, user_id: str, s: MorningSession) -> bool:
+        """미루기를 받았을 때(11/24 AI B25). 미룬 날은 받은 단계도 실패로 센다(11/25 결정, 볼륨 학습에서도 실패).
+        - 받은 단계를 보고했는데 아직 학습 전이면 지금 확인 실패로 학습한다(다시 울린 알람에서 확인·종료가 오지 않아도 남도록).
+        - 이미 확인 성공으로 학습했으면 한 번만 확인 실패로 고친다: 기록의 confirmed를 먼저 False로 바꿔 두 번 고치지 않게 하고,
+          내 기록·전체 기록의 받은 단계 칸을 성공 1 → 실패 1로 옮긴다.
+        아직 보고 전이면 할 일이 없다(보고가 오면 바로 확인 실패로 학습한다). 실패해도 미루기는 그대로 된다."""
+        d = s.session_date
         try:
             row = self.r.personalization.get_wake_log(user_id, d)
+            if row and row.get("start_level") is not None and row.get("received_level") is not None and not row.get("learned_at"):
+                return self.learn(user_id, s)
             if not row or not row.get("learned_at") or row.get("confirmed") is not True or row.get("received_level") is None:
                 return False
             self.r.personalization.save_wake_result(user_id, d, row["start_level"], row["received_level"], False, row.get("session_id"))

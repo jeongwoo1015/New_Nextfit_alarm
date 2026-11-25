@@ -400,7 +400,7 @@ class SnoozeIn(BaseModel):
 class WakeVolumeIn(BaseModel):
     """아침 기상 볼륨 결과 (앱 보고). 재기상(8초 무응답 음악)은 서버가 세션 기록으로 따로 본다."""
     start_level: WakeLevel                 # 알람이 울리기 시작한 단계
-    received_level: WakeLevel | None       # 전화를 받은 순간의 단계, 받지 않고 껐으면 null
+    received_level: WakeLevel | None       # 반응한 순간의 단계: 받기·미루기 버튼을 누른 단계. 끝까지 반응 없이 꺼졌을 때만 null (null = 시작~5단계 모두 실패로 학습)
 
     @model_validator(mode="after")
     def _not_below_start(self):
