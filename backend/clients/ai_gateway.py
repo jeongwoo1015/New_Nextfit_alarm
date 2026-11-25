@@ -7,6 +7,7 @@
 import importlib.util
 import logging
 import random
+import time as _time
 from dataclasses import asdict, dataclass, field
 from datetime import date, time
 from typing import Protocol
@@ -19,6 +20,13 @@ from backend.domain.models import (AlarmRoutineItem, MorningSession, NightRecord
                                    UserSetting)
 
 log = logging.getLogger(__name__)
+
+# 끝말잇기 판정 시간 예산 (앱 RespecApi WORDCHAIN_TURN_TIMEOUT_MS = 6초보다 먼저 끝낸다).
+# GeminiText 기본값(HTTP 12초, 한 호출 30초)에 judge_wordchain 재시도(최대 3번)가 겹치면 수십 초가 걸려,
+# 앱이 포기한 뒤에도 서버 스레드와 Gemini 사용량을 계속 쓴다. 보통 판정은 0.7~1.5초(AI B26).
+WORDCHAIN_BUDGET_SEC = 4.5
+WORDCHAIN_HTTP_TIMEOUT_SEC = 2.5
+WORDCHAIN_MIN_CALL_SEC = 0.8        # 남은 시간이 이보다 적으면 새 호출을 시작하지 않는다
 
 AUTH_TOKEN_URL = "https://generativelanguage.googleapis.com/v1alpha/auth_tokens"
 LIVE_WS_URL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained"
@@ -335,10 +343,11 @@ def to_night_record_fields(row: dict) -> dict:
 
 
 class RealAIGateway:
-    def __init__(self, api_key: str, http: httpx.Client | None = None, llm=None):
+    def __init__(self, api_key: str, http: httpx.Client | None = None, llm=None, clock=_time.monotonic):
         self._key = api_key
         self._http = http or httpx.Client(timeout=15)
         self._llm = llm
+        self._clock = clock
 
     @property
     def llm(self):
@@ -523,10 +532,36 @@ class RealAIGateway:
         그 밖의 예외(네트워크 등)도 판정하지 못한 것이므로 FAILED로 맞춘다."""
         from ai.tasks.wordchain import judge_wordchain
         try:
-            return judge_wordchain(list(words), word, self.llm).to_dict()
+            return judge_wordchain(list(words), word, _BudgetLLM(self._wordchain_llm, WORDCHAIN_BUDGET_SEC, self._clock)).to_dict()
         except Exception:
             log.exception("끝말잇기 판정 실패")
             return {"status": "FAILED"}
+
+
+    def _wordchain_llm(self, remaining: float):
+        """남은 시간에 맞춘 GeminiText: HTTP 한 번은 timeout, 다음 모델로 넘어가는 것은 deadline 안에서만(그 뒤 한 번 더 timeout).
+        테스트처럼 llm을 넣어 만들었으면 그대로 쓴다."""
+        if self._llm is not None:
+            return self._llm
+        from ai.tasks.llm import GeminiText
+        timeout = min(WORDCHAIN_HTTP_TIMEOUT_SEC, remaining)
+        return GeminiText(api_key=self._key, timeout=timeout, deadline=max(0.3, remaining - timeout))
+
+
+class _BudgetLLM:
+    """judge_wordchain에 넘기는 llm. 호출마다 남은 시간을 보고, 모자라면 LLMError를 던져 AI가 FAILED로 끝내게 한다
+    (AI는 LLMError를 호출 실패로 세고 두 번이면 멈춘다)."""
+
+    def __init__(self, make, budget: float, clock):
+        self.make, self.budget, self.clock = make, budget, clock
+        self.start = clock()
+
+    def generate_json(self, system: str, user: str) -> dict:
+        from ai.tasks.llm import LLMError
+        remaining = self.budget - (self.clock() - self.start)
+        if remaining < WORDCHAIN_MIN_CALL_SEC:
+            raise LLMError(f"끝말잇기 판정 시간 예산 초과 ({self.budget:g}초)")
+        return self.make(remaining).generate_json(system, user)
 
 
 class UnavailableAIGateway:
