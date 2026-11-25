@@ -5,6 +5,8 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.respeclive.ui.nexty.NextyMotion
+import com.example.respeclive.ui.nexty.nextyKeyFaces
+import com.example.respeclive.ui.nexty.nextyKeyProps
 import com.example.respeclive.ui.nexty.nextyKeyPoses
 import com.example.respeclive.ui.nexty.renderNextyPose
 import org.junit.Test
@@ -27,8 +29,11 @@ class NextyPoseSnapshot {
             mkdirs()
         }
         NextyMotion.entries.filter { wanted == null || it.name in wanted }.forEach { motion ->
+            val faces = nextyKeyFaces(motion)
+            val props = nextyKeyProps(motion)
             nextyKeyPoses(motion).forEachIndexed { i, pose ->
-                val bitmap = renderNextyPose(motion, pose, 520, 480).asAndroidBitmap()
+                val (face, zz) = faces[i]
+                val bitmap = renderNextyPose(motion, pose, 520, 480, face, zz, night = motion == NextyMotion.HOME_NIGHT, prop = props[i]).asAndroidBitmap()
                 File(dir, "%s_%03d.png".format(motion.name, i)).outputStream().use {
                     bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
                 }

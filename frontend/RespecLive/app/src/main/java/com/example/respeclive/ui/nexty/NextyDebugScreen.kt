@@ -35,6 +35,7 @@ private val FACE_LABELS = mapOf(
     NextyFace.HAPPY to "칭찬",
     NextyFace.GRIN to "활짝",
     NextyFace.WINCE to "찡그림",
+    NextyFace.FIGHT to "파이팅",
     NextyFace.SLEEPY to "졸림",
     NextyFace.FOCUS to "집중"
 )

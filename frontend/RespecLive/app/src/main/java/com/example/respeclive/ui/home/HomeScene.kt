@@ -28,7 +28,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.unit.dp
 import com.example.respeclive.ui.nexty.NextyCharacter
-import com.example.respeclive.ui.nexty.NextyFace
 import com.example.respeclive.ui.nexty.NextyMotion
 import com.example.respeclive.ui.theme.RespecColors
 import kotlin.math.cos
@@ -58,7 +57,7 @@ private val STARS = listOf(
 
 /**
  * 홈 위쪽의 넥스티 장면. 화면 양옆 끝까지 채우고, 앞 언덕은 화면 바탕색이라 아래 목록과 경계 없이 이어짐.
- * 낮이면 해·구름과 손 흔드는 넥스티, 밤이면 달·별과 졸린 수면모자 넥스티.
+ * 낮이면 해·구름과 넥스티(간간이 인사·파이팅), 밤이면 달·별과 수면모자 넥스티(가끔 잠들기·졸기).
  */
 @Composable
 fun HomeScene(night: Boolean, modifier: Modifier = Modifier) {
@@ -81,8 +80,8 @@ fun HomeScene(night: Boolean, modifier: Modifier = Modifier) {
         }
         // 넥스티 캔버스는 발 아래 여백이 있어(높이의 약 15%) 발이 앞 언덕 꼭대기에 닿도록 아래 여백을 줌
         NextyCharacter(
-            motion = if (night) NextyMotion.IDLE else NextyMotion.WAVE,
-            face = if (night) NextyFace.SLEEPY else NextyMotion.WAVE.face,
+            // 낮: 기본 표정으로 서 있다가 간간이 인사·파이팅·뒤꿈치 들기 / 밤: 수면모자를 쓰고 가끔 잠들기·졸기·뒤꿈치 들기
+            motion = if (night) NextyMotion.HOME_NIGHT else NextyMotion.HOME_DAY,
             night = night,
             modifier = Modifier
                 .align(Alignment.BottomCenter)

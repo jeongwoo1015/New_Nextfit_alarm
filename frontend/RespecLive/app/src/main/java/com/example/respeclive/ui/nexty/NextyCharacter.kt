@@ -1,6 +1,8 @@
 package com.example.respeclive.ui.nexty
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -45,6 +47,7 @@ private val NIGHT_CAP = Color(0xFF4A5AA8)
 private val BELLY = Color(0xFFFFDDB0)
 private val BLUSH = Color(0xFFFF9E8F)
 private val WATER = Color(0xFF9CD3F2)
+private val ZZ_COLOR = Color(0xFFE6E2FF)
 
 /** 그리는 좌표계 (몸 중심 x = 100). 화면 크기에 맞춰 통째로 늘리거나 줄임. 좌우 여백은 팔을 뻗을 자리 */
 private const val CANVAS_W = 260f
@@ -57,11 +60,11 @@ private const val LOWER_ARM = 16f
 private const val MAX_UPPER_REACH = 1.5f
 private const val SHOULDER_X = 54f
 private const val SHOULDER_Y = 128f
-private const val CROSS_ARM_DROP = 28f      // 오답 X 팔을 어깨 높이에서 내린 정도 (눈이 보이도록)
+private const val CROSS_ARM_DROP = 5f      // 오답 X 팔을 어깨 높이에서 내린 정도
 private const val HUG_ARM_DROP = 40f        // 상체 비틀기: 엇갈린 손끝이 반대쪽 어깨 앞(입 아래)에 오도록 더 내림
 
 /** 표정 (눈과 입만 바뀜) */
-enum class NextyFace { NORMAL, HAPPY, GRIN, SLEEPY, FOCUS, WINCE }
+enum class NextyFace { NORMAL, HAPPY, GRIN, SLEEPY, FOCUS, WINCE, FIGHT }
 
 /**
  * 동작에 함께 그리는 소품·효과.
@@ -72,7 +75,7 @@ enum class NextyFace { NORMAL, HAPPY, GRIN, SLEEPY, FOCUS, WINCE }
  * LEG_*: 앉은 자세에서 양반다리 대신 따로 그리는 다리 (act로 진행, 음수면 반대쪽 다리)
  */
 enum class NextyProp {
-    NONE, CUP, MEMO, SUN, STRETCH_LINES, SPARKLES, WELCOME_SPARKLES, ARM_CIRCLE, ARM_CROSS,
+    NONE, STRETCH_LINES, WELCOME_SPARKLES, ARM_CIRCLE, ARM_CROSS, FIGHT_FISTS,
     RAISED_HAND, WRIST_CIRCLE, CUE_CHIN, CUE_HEAD, CUE_PELVIS, CROSS_PULL, WRIST_UP, WRIST_DOWN, CALF_WALL,
     CUE_SHRUG, TWIST_HUG, LEG_FIGURE_FOUR, LEG_TOE_PULL, LEG_OUT_TOWEL, LEG_ANKLE_CIRCLE
 }
@@ -126,7 +129,9 @@ data class NextyPose(
     val act: Float = 0f,
     val forearmsBehind: Boolean = false,
     val shrug: Float = 0f,
-    val arch: Float = 0f
+    val arch: Float = 0f,
+    val lift: Float = 0f,          // 선 자세에서 뒤꿈치를 들어 몸이 올라간 정도
+    val lean: Float = 0f           // 선 자세에서 왼발(화면 왼쪽)을 축으로 몸 전체를 기울인 각도 (-: 왼쪽, 오른발이 같이 뜸)
 ) {
     /** 좌우를 바꾼 자세 (팔과 다리를 서로 바꿈) */
     fun mirrored() = swappedLegs().copy(
@@ -168,11 +173,24 @@ private fun lerp(a: NextyPose, b: NextyPose, t: Float) = NextyPose(
     act = lerp(a.act, b.act, t),
     forearmsBehind = if (t < 0.5f) a.forearmsBehind else b.forearmsBehind,
     shrug = lerp(a.shrug, b.shrug, t),
-    arch = lerp(a.arch, b.arch, t)
+    arch = lerp(a.arch, b.arch, t),
+    lift = lerp(a.lift, b.lift, t),
+    lean = lerp(a.lean, b.lean, t)
 )
 
-/** 자세로 이동하는 데 걸리는 시간. 같은 자세를 다시 넣으면 그만큼 유지됨 */
-data class NextyStep(val pose: NextyPose, val ms: Int)
+/**
+ * 자세로 이동하는 데 걸리는 시간. 같은 자세를 다시 넣으면 그만큼 유지됨.
+ * face가 있으면 이 단계 동안 그 표정(없으면 화면이 정한 표정), zz면 머리 옆에 Zz를 띄움 (잠든 모습).
+ * prop이 있으면 이 단계 동안 그 소품 (없으면 동작의 소품. 홈 화면에서 파이팅 주먹·강조선을 그릴 때)
+ */
+data class NextyStep(
+    val pose: NextyPose,
+    val ms: Int,
+    val easing: Easing = FastOutSlowInEasing,
+    val face: NextyFace? = null,
+    val zz: Boolean = false,
+    val prop: NextyProp? = null
+)
 
 /** 반복되는 동작. posture는 몸 자세(서서·양반다리·누워서·옆으로 누워서), face는 이 동작의 기본 표정 */
 enum class NextyMotion(
@@ -183,18 +201,25 @@ enum class NextyMotion(
     val steps: List<NextyStep>
 ) {
     IDLE("기본", NextyPosture.STAND, NextyFace.NORMAL, NextyProp.NONE, listOf(NextyStep(NextyPose(), 1000))),
+    // 홈 화면(낮): 기본 표정으로 바로 서 있는 시간이 대부분이고, 간간이 인사·파이팅·뒤꿈치 들기를 불규칙하게 함.
+    // 화면에서는 homeDaySegment로 매번 새로 고름. 여기 단계는 검사용 그림과 대표 순서
+    HOME_DAY("홈(낮)", NextyPosture.STAND, NextyFace.NORMAL, NextyProp.NONE, homeDaySample()),
+    // 홈 화면(밤): 수면모자를 쓴 기본 표정이 대부분이고, 가끔 잠들기(눈 감고 Zz)·졸기·뒤꿈치 들기를 함 (homeNightSegment)
+    HOME_NIGHT("홈(밤)", NextyPosture.STAND, NextyFace.NORMAL, NextyProp.NONE, homeNightSample()),
     WELCOME(
         "반기기", NextyPosture.STAND, NextyFace.GRIN, NextyProp.WELCOME_SPARKLES,
         listOf(
-            NextyStep(welcomePose(158f), 700),
-            NextyStep(welcomePose(148f), 700)
+            NextyStep(greetPose(154f, lean = 0f), 400, SWAY),
+            NextyStep(greetPose(122f, lean = 0f), 400, SWAY)
         )
     ),
+    // 로그인 화면 인사: 서 있기 → 인사하기(왼쪽으로 기울어 왼발로 서서 짧은 오른팔 흔들기) → 뒤꿈치 살짝 들기를 차례로 반복
+    HELLO("인사", NextyPosture.STAND, NextyFace.GRIN, NextyProp.NONE, helloSteps()),
     WAVE(
         "손 흔들기", NextyPosture.STAND, NextyFace.GRIN, NextyProp.NONE,
         listOf(
-            NextyStep(wavePose(150f, 18f), 450),
-            NextyStep(wavePose(128f, 36f), 450)
+            NextyStep(greetPose(154f, lean = 0f), 400, SWAY),
+            NextyStep(greetPose(122f, lean = 0f), 400, SWAY)
         )
     ),
     // 퀴즈 정답: 두 팔을 둥글게 들어 머리 위에서 맞닿는 동그라미(O). 팔은 자세 대신 곡선으로 그림 (ARM_CIRCLE)
@@ -213,43 +238,8 @@ enum class NextyMotion(
             NextyStep(NextyPose(tilt = 3f), 450)
         )
     ),
-    CHEER(
-        "칭찬", NextyPosture.STAND, NextyFace.HAPPY, NextyProp.SPARKLES,
-        listOf(
-            NextyStep(wavePose(150f, 18f), 350),
-            NextyStep(wavePose(128f, 36f), 350)
-        )
-    ),
-    WATER(
-        "물 한 컵 마시기", NextyPosture.STAND, NextyFace.NORMAL, NextyProp.CUP,
-        listOf(
-            NextyStep(cupLowPose(), 700), NextyStep(cupLowPose(), 700),
-            NextyStep(cupHighPose(), 800), NextyStep(cupHighPose(), 1200)
-        )
-    ),
-    STRETCH(
-        "가벼운 스트레칭", NextyPosture.STAND, NextyFace.HAPPY, NextyProp.STRETCH_LINES,
-        listOf(
-            NextyStep(armsUpPose(), 900),
-            NextyStep(armsUpPose().copy(stretch = 1.06f), 800),
-            NextyStep(armsUpPose().copy(stretch = 1.06f), 1300),
-            NextyStep(armsUpPose(), 800)
-        )
-    ),
-    SUNLIGHT(
-        "햇빛 보기", NextyPosture.STAND, NextyFace.NORMAL, NextyProp.SUN,
-        listOf(
-            NextyStep(sunPose(-3f), 1000), NextyStep(sunPose(-3f), 1000),
-            NextyStep(sunPose(-8f), 900), NextyStep(sunPose(-8f), 1000)
-        )
-    ),
-    TODO(
-        "오늘 할 일 정하기", NextyPosture.STAND, NextyFace.NORMAL, NextyProp.MEMO,
-        listOf(
-            NextyStep(memoPose(0f), 800), NextyStep(memoPose(0f), 900),
-            NextyStep(memoPose(4f), 500), NextyStep(memoPose(-4f), 500)
-        )
-    ),
+    // 파이팅 ("아자자자!!"): 한 주먹은 얼굴 옆으로 번쩍, 다른 주먹은 배 앞에. 힘준 눈 > <과 외치는 입, 둘레에 강조선 (FIGHT_FISTS)
+    FIGHTING("파이팅", NextyPosture.STAND, NextyFace.FIGHT, NextyProp.FIGHT_FISTS, fightingSteps()),
     // ---- 아침 스트레칭: ai/tasks/stretch_sets.py의 동작 34개(MOVE_NAMES)와 이름(label)이 같음. 안내 문장의 순서·머무는 시간을 따라 움직임 ----
     // 누워서
     LIE_REACH(
@@ -565,33 +555,122 @@ private fun deepBreaths() = List(3) {
     listOf(NextyStep(relaxedPose().copy(stretch = 1.04f), 1300), NextyStep(relaxedPose(), 1300))
 }.flatten()
 
-// 두 팔을 머리 양옆으로 들어 반기기
-private fun welcomePose(shoulder: Float) = NextyPose(
-    leftShoulder = shoulder, leftElbow = 20f, rightShoulder = shoulder, rightElbow = 20f, leftReach = 3f, rightReach = 3f
+
+// ---- 인사(HELLO): 서 있기 → 인사하기 → 뒤꿈치 들기를 차례로 ----
+private const val HELLO_LIFT = 7f           // 뒤꿈치를 들어 몸이 올라가는 정도
+private const val HELLO_REACH = 1.15f       // 흔드는 팔 길이 배율 (짧은 팔이 귀여워서 조금만 늘림)
+private const val HELLO_LEAN = -11f         // 인사할 때 왼발을 축으로 몸을 대각선으로 기울임 (오른발이 같이 뜸)
+private val LEAN_PIVOT = Offset(77f, 203f)  // 왼발 바닥 가운데
+private val SWAY = CubicBezierEasing(0.37f, 0f, 0.63f, 1f)     // 흔들기: 양 끝에서 천천히 멈췄다 도는 부드러운 곡선
+
+// 짧은 오른팔을 곧게 펴 어깨 위로 듦 (팔꿈치를 굽히지 않고 팔 전체를 흔듦). 손 흔들기는 모두 이 자세를 씀.
+// lean: 로그인 인사는 왼발을 축으로 몸을 대각선으로 기울임(HELLO_LEAN), 다른 화면은 바로 선 채 0
+private fun greetPose(shoulder: Float, lean: Float = HELLO_LEAN) = NextyPose(
+    lean = lean, rightShoulder = shoulder, rightElbow = 0f, rightReach = HELLO_REACH
 )
 
-// 한 팔을 들어 흔들기
-private fun wavePose(shoulder: Float, elbow: Float) = NextyPose(rightShoulder = shoulder, rightElbow = elbow, rightReach = 1.9f)
+/** 인사하기: 기울며 오른팔을 들고 어깨를 축으로 부드럽게 네 번 흔든 뒤 천천히 섬 */
+private fun greetSteps(): List<NextyStep> =
+    listOf(NextyStep(greetPose(138f), 520)) +
+        List(4) { i -> NextyStep(greetPose(if (i % 2 == 0) 154f else 122f), 400, SWAY) } +
+        NextyStep(greetPose(138f), 220, SWAY) +
+        NextyStep(NextyPose(), 520)
 
-// 두 손으로 컵을 배 앞에 / 입 가까이
-private fun cupLowPose() = NextyPose(
-    leftShoulder = 25f, leftElbow = -115f, rightShoulder = 25f, rightElbow = -115f, leftReach = 3f, rightReach = 3f
+/** 뒤꿈치를 살짝 들었다 내리기 두 번 */
+private fun heelSteps(): List<NextyStep> = List(2) {
+    listOf(
+        NextyStep(NextyPose(lift = HELLO_LIFT, stretch = 1.02f), 220),
+        NextyStep(NextyPose(lift = HELLO_LIFT, stretch = 1.02f), 140),
+        NextyStep(NextyPose(), 260)
+    )
+}.flatten()
+
+// 파이팅 ("아자자자!!"): 왼팔(화면 왼쪽)은 팔꿈치를 굽혀 주먹을 얼굴 옆으로 번쩍, 오른팔은 팔꿈치를 접어 주먹을 가슴에 모음.
+// up이면 위 주먹이 조금 더 올라가고 몸도 살짝 들림
+private fun fightPose(up: Boolean) = if (up) {
+    NextyPose(leftShoulder = 152f, leftElbow = 22f, leftReach = 1.25f, rightShoulder = 42f, rightElbow = -162f, rightReach = 1.3f,
+        stretch = 1.03f, lift = 3f, tilt = 2f)
+} else {
+    NextyPose(leftShoulder = 138f, leftElbow = 34f, leftReach = 1.25f, rightShoulder = 40f, rightElbow = -160f, rightReach = 1.3f, tilt = 2f)
+}
+
+/** 파이팅: 위 주먹을 세 번 힘차게 들썩이고 잠깐 멈춤 */
+private fun fightingSteps(): List<NextyStep> =
+    listOf(NextyStep(fightPose(up = false), 380)) +
+        List(3) { listOf(NextyStep(fightPose(up = true), 150), NextyStep(fightPose(up = false), 190)) }.flatten() +
+        NextyStep(fightPose(up = false), 600)
+
+/** 홈 화면의 파이팅: 주먹을 쥐고 들썩인 뒤 바로 섬 (파이팅 표정·주먹·강조선은 이 단계들에만) */
+private fun homeFightSteps(): List<NextyStep> =
+    fightingSteps().map { it.copy(face = NextyFace.FIGHT, prop = NextyProp.FIGHT_FISTS) } +
+        NextyStep(NextyPose(), 420, face = NextyFace.NORMAL)
+
+/** 표정이 없는 단계에 표정을 붙임 */
+private fun List<NextyStep>.withFace(face: NextyFace) = map { if (it.face == null) it.copy(face = face) else it }
+
+/** 기본 표정으로 바로 서 있기 */
+private fun standStep(ms: Int) = NextyStep(NextyPose(), ms, face = NextyFace.NORMAL)
+
+// ---- 홈 화면 낮·밤 ----
+/** 낮 한 토막: 오래 서 있다가 가끔 한 동작. 서 있는 시간이 대부분이 되도록 동작 없이 넘어가는 토막도 둠 */
+internal fun homeDaySegment(r: Random): List<NextyStep> {
+    val stand = standStep(3000 + r.nextInt(3500))
+    return listOf(stand) + when (r.nextInt(10)) {
+        in 0..1 -> emptyList()                                       // 계속 서 있기
+        in 2..4 -> homeFightSteps()                                  // 파이팅
+        in 5..7 -> greetSteps().withFace(NextyFace.GRIN)             // 인사 (몸을 기울여 손 흔들기)
+        else -> heelSteps().withFace(NextyFace.HAPPY)                // 뒤꿈치 들기
+    }
+}
+
+private val DOZE_EASE = CubicBezierEasing(0.2f, 0f, 0.4f, 1f)      // 졸 때 천천히 기울다 멈춤
+
+// 잠든 자세: 몸이 살짝 처지고 얼굴이 조금 내려감
+private fun sleepPose(deep: Float = 1f) = NextyPose(stretch = 1f - 0.03f * deep, faceY = 2.5f * deep, tilt = 2f * deep)
+
+/** 잠들기: 눈이 감기며 몸이 처지고 Zz가 뜬 채 한동안 잠 → 깨어 기본 표정 */
+private fun sleepSteps(r: Random): List<NextyStep> = listOf(
+    NextyStep(sleepPose(0.5f), 900, face = NextyFace.SLEEPY),
+    NextyStep(sleepPose(), 1100, face = NextyFace.SLEEPY, zz = true),
+    NextyStep(sleepPose(), 3500 + r.nextInt(3500), face = NextyFace.SLEEPY, zz = true),
+    NextyStep(NextyPose(), 700, face = NextyFace.NORMAL)
 )
-private fun cupHighPose() = NextyPose(
-    leftShoulder = 60f, leftElbow = -150f, rightShoulder = 60f, rightElbow = -150f, leftReach = 3f, rightReach = 3f
-)
+
+/** 졸기: 눈을 감고 천천히 몸이 기울다가 퍼뜩 깨어 바로 섬, 1~2번 */
+private fun dozeSteps(r: Random): List<NextyStep> = List(1 + r.nextInt(2)) {
+    listOf(
+        NextyStep(NextyPose(), 300, face = NextyFace.SLEEPY),
+        NextyStep(NextyPose(tilt = 7f, stretch = 0.97f, faceY = 3f), 1600 + r.nextInt(600), DOZE_EASE, NextyFace.SLEEPY),
+        NextyStep(NextyPose(tilt = -1.5f, stretch = 1.01f), 220, face = NextyFace.NORMAL),
+        NextyStep(NextyPose(), 500, face = NextyFace.NORMAL)
+    )
+}.flatten()
+
+/** 밤 한 토막: 수면모자를 쓴 채 오래 서 있다가 가끔 잠들기·졸기·뒤꿈치 들기 */
+internal fun homeNightSegment(r: Random): List<NextyStep> {
+    val stand = standStep(3000 + r.nextInt(3500))
+    return listOf(stand) + when (r.nextInt(10)) {
+        in 0..1 -> emptyList()
+        in 2..4 -> sleepSteps(r)
+        in 5..7 -> dozeSteps(r)
+        else -> heelSteps().withFace(NextyFace.NORMAL)
+    }
+}
+
+/** 검사용 대표 순서 */
+private fun homeDaySample() = listOf(standStep(1000)) + homeFightSteps() + greetSteps().withFace(NextyFace.GRIN) +
+    heelSteps().withFace(NextyFace.HAPPY)
+private fun homeNightSample() = listOf(standStep(1000)) + sleepSteps(Random(1)) + dozeSteps(Random(3)) +
+    heelSteps().withFace(NextyFace.NORMAL)
+
+/** 서 있기 → 인사하기 → 서 있기 → 뒤꿈치 들기 (규칙적으로 반복) */
+private fun helloSteps(): List<NextyStep> =
+    listOf(NextyStep(NextyPose(), 900)) + greetSteps() + NextyStep(NextyPose(), 900) + heelSteps()
+
 
 // 두 팔을 머리 위로 모으기
 private fun armsUpPose() = NextyPose(
     leftShoulder = 165f, leftElbow = 60f, rightShoulder = 165f, rightElbow = 60f, leftReach = 4.4f, rightReach = 4.4f
-)
-
-// 손으로 그늘을 만들고 해 쪽을 바라봄 (해는 왼쪽 위)
-private fun sunPose(tilt: Float) = NextyPose(tilt = tilt, rightShoulder = 150f, rightElbow = 80f, rightReach = 2.4f)
-
-// 두 손으로 메모를 들고 있음
-private fun memoPose(tilt: Float) = NextyPose(
-    tilt = tilt, leftShoulder = 28f, leftElbow = -118f, rightShoulder = 28f, rightElbow = -118f, leftReach = 2.7f, rightReach = 2.7f
 )
 
 // 팔에 힘을 빼고 몸 옆에 내림 (스트레칭 사이의 기본 자세). 누운 자세에서는 팔이 몸 옆에, 다리는 쭉 뻗음
@@ -657,14 +736,26 @@ fun NextyCharacter(
     var from by remember { mutableStateOf(NextyPose()) }
     var to by remember { mutableStateOf(NextyPose()) }
     val progress = remember { Animatable(1f) }
+    var stepFace by remember { mutableStateOf<NextyFace?>(null) }
+    var stepProp by remember { mutableStateOf<NextyProp?>(null) }
+    var zz by remember { mutableStateOf(false) }
 
     LaunchedEffect(motion) {
         while (true) {
-            for (step in motion.steps) {
+            // 홈 화면 낮·밤은 매번 다른 토막을 골라 불규칙하게
+            val steps = when (motion) {
+                NextyMotion.HOME_DAY -> homeDaySegment(Random.Default)
+                NextyMotion.HOME_NIGHT -> homeNightSegment(Random.Default)
+                else -> motion.steps
+            }
+            for (step in steps) {
                 from = lerp(from, to, progress.value)
                 to = step.pose
+                stepFace = step.face
+                stepProp = step.prop
+                zz = step.zz
                 progress.snapTo(0f)
-                progress.animateTo(1f, tween(step.ms, easing = FastOutSlowInEasing))
+                progress.animateTo(1f, tween(step.ms, easing = step.easing))
             }
         }
     }
@@ -705,16 +796,18 @@ fun NextyCharacter(
 
     Canvas(modifier) {
         drawNextyFrame(
-            motion, lerp(from, to, progress.value), face, night, breath, eyeOpen,
+            motion, lerp(from, to, progress.value), stepFace ?: face, night, breath, eyeOpen,
             // 말하는 동안은 다물어도 말하는 입 모양을 유지 (0이면 표정의 기본 입)
-            mouthOpen = if (speaking) maxOf(mouth.value, 0.001f) else mouth.value
+            mouthOpen = if (speaking) maxOf(mouth.value, 0.001f) else mouth.value,
+            zz = zz, prop = stepProp ?: motion.prop
         )
     }
 }
 
 /** 캔버스 크기에 맞춰 넥스티 한 순간을 그림 (화면과 검사용 그림이 같은 코드를 씀) */
 private fun DrawScope.drawNextyFrame(
-    motion: NextyMotion, pose: NextyPose, face: NextyFace, night: Boolean, breath: Float, eyeOpen: Float, mouthOpen: Float
+    motion: NextyMotion, pose: NextyPose, face: NextyFace, night: Boolean, breath: Float, eyeOpen: Float, mouthOpen: Float,
+    zz: Boolean = false, prop: NextyProp = motion.prop
 ) {
     val s = min(size.width / CANVAS_W, size.height / CANVAS_H)
     translate((size.width - CANVAS_W * s) / 2f, (size.height - CANVAS_H * s) / 2f) {
@@ -722,7 +815,8 @@ private fun DrawScope.drawNextyFrame(
             // 누운 자세는 매트가 가운데 오도록 옮김
             val lying = motion.posture == NextyPosture.LIE || motion.posture == NextyPosture.SIDE
             translate(MARGIN_X + if (lying) LIE_SHIFT_X else 0f, if (lying) LIE_SHIFT_Y else 0f) {
-                drawNexty(pose, motion.posture, motion.prop, face, night, breath, eyeOpen, mouthOpen)
+                drawNexty(pose, motion.posture, prop, face, night, breath, eyeOpen, mouthOpen)
+                if (zz) drawZz(breath)
             }
         }
     }
@@ -742,15 +836,26 @@ internal fun nextyKeyPoses(motion: NextyMotion, between: Int = 1): List<NextyPos
     return out
 }
 
+/** 검사용: 동작의 단계 자세마다 표정·Zz (nextyKeyPoses와 같은 순서, 중간 자세는 다음 단계의 것) */
+internal fun nextyKeyFaces(motion: NextyMotion, between: Int = 1): List<Pair<NextyFace, Boolean>> =
+    motion.steps.flatMap { step -> List(between + 1) { (step.face ?: motion.face) to step.zz } }
+
+/** 검사용: 동작의 단계 자세마다 소품 (nextyKeyPoses와 같은 순서) */
+internal fun nextyKeyProps(motion: NextyMotion, between: Int = 1): List<NextyProp> =
+    motion.steps.flatMap { step -> List(between + 1) { step.prop ?: motion.prop } }
+
 /** 검사용: 한 자세를 그린 그림 (숨쉬기·깜박임 없이) */
-internal fun renderNextyPose(motion: NextyMotion, pose: NextyPose, width: Int, height: Int): androidx.compose.ui.graphics.ImageBitmap {
+internal fun renderNextyPose(
+    motion: NextyMotion, pose: NextyPose, width: Int, height: Int,
+    face: NextyFace = motion.face, zz: Boolean = false, night: Boolean = false, prop: NextyProp = motion.prop
+): androidx.compose.ui.graphics.ImageBitmap {
     val bitmap = androidx.compose.ui.graphics.ImageBitmap(width, height)
     androidx.compose.ui.graphics.drawscope.CanvasDrawScope().draw(
         androidx.compose.ui.unit.Density(1f), androidx.compose.ui.unit.LayoutDirection.Ltr,
         androidx.compose.ui.graphics.Canvas(bitmap), Size(width.toFloat(), height.toFloat())
     ) {
         drawRect(Color(0xFF2B2440))
-        drawNextyFrame(motion, pose, motion.face, night = false, breath = 0f, eyeOpen = 1f, mouthOpen = 0f)
+        drawNextyFrame(motion, pose, face, night = night, breath = 0f, eyeOpen = 1f, mouthOpen = 0f, zz = zz, prop = prop)
     }
     return bitmap
 }
@@ -773,7 +878,7 @@ private fun DrawScope.drawNexty(
     val lying = posture == NextyPosture.LIE || posture == NextyPosture.SIDE
 
     when (posture) {
-        NextyPosture.STAND -> if (prop == NextyProp.CALF_WALL) drawCalfWall(pose) else drawFeet()
+        NextyPosture.STAND -> if (prop == NextyProp.CALF_WALL) drawCalfWall(pose) else drawFeet(pose.lift, pose.lean)
         NextyPosture.SIT -> when {
             isBedLegs(prop) -> drawBed()          // 다리는 몸 앞에 그림 (아래 drawBedLegs)
             isSitLegs(prop) -> drawSitLegs(pose, prop)
@@ -783,7 +888,10 @@ private fun DrawScope.drawNexty(
     }
     drawBackgroundProp(prop, breath)
 
-    // 누운 자세: 선 자세로 그린 것을 머리가 왼쪽으로 가게 눕힘. hip만큼 등 위쪽을 축으로 엉덩이를 듦
+    // 누운 자세: 선 자세로 그린 것을 머리가 왼쪽으로 가게 눕힘. hip만큼 등 위쪽을 축으로 엉덩이를 듦.
+    // 발꿈치를 들면(lift) 발은 그대로 두고 몸만 올림. lean이면 왼발을 축으로 몸 전체를 기울임
+    rotate(pose.lean, LEAN_PIVOT) {
+    translate(0f, -pose.lift) {
     rotate(if (lying) -90f else 0f, LIE_PIVOT) {
         rotate(-pose.hip, HIP_PIVOT) {
             rotate(pose.tilt, base) {
@@ -807,7 +915,6 @@ private fun DrawScope.drawNexty(
                     // 고개를 돌려 얼굴이 옆으로 옮겨 가도 몸 밖으로 나가지 않게 몸 윤곽 안에만 그림
                     clipPath(bodyPath()) { translate(pose.faceX, pose.faceY) { drawFace(face, eyeOpen, mouthOpen) } }
                     if (night) drawNightCap()
-                    drawHeldProp(prop, pose)
                 }
                 // 가슴 쪽으로 당기거나 천장으로 든 다리는 몸 앞에 다시 그림 (그 위에 다리를 잡은 손이 오도록 팔보다 먼저)
                 if (lying) drawLyingLegs(pose, posture, front = true)
@@ -829,6 +936,8 @@ private fun DrawScope.drawNexty(
                 }
             }
         }
+    }
+    }
     }
     // 침대에 걸터앉은 동작: 무릎 위를 가로지르는 다리와 발끝을 잡는 손은 몸 앞에
     if (posture == NextyPosture.SIT && isBedLegs(prop)) drawBedLegs(pose, prop)
@@ -961,7 +1070,7 @@ private fun DrawScope.drawFace(face: NextyFace, eyeOpen: Float, mouthOpen: Float
                 OUTLINE, 20f, 140f, false, Offset(x - 7f, 102f), Size(14f, 10f),
                 style = Stroke(OUTLINE_W, cap = StrokeCap.Round)
             )
-            NextyFace.WINCE -> {   // 찡그린 눈 > <
+            NextyFace.WINCE, NextyFace.FIGHT -> {   // 찡그린 눈 > < (파이팅은 힘준 눈)
                 val inward = if (x < 100f) 1f else -1f
                 val eye = Path().apply {
                     moveTo(x - 6f * inward, 103f)
@@ -988,6 +1097,10 @@ private fun DrawScope.drawFace(face: NextyFace, eyeOpen: Float, mouthOpen: Float
                 drawOval(BLUSH, Offset(93f, 130f), Size(14f, 7f))
             }
             NextyFace.SLEEPY -> drawOval(OUTLINE, Offset(96f, 125f), Size(8f, 6f))
+            NextyFace.FIGHT -> {   // 외치는 입: 크게 벌린 둥근 입과 혀
+                drawRoundRect(OUTLINE, Offset(90f, 115f), Size(20f, 19f), CornerRadius(9f))
+                drawOval(BLUSH, Offset(94f, 125f), Size(12f, 7f))
+            }
             NextyFace.WINCE -> {   // 물결 입
                 val wave = Path().apply {
                     moveTo(88f, 128f)
@@ -1231,6 +1344,14 @@ private fun DrawScope.drawMitten(
 
 /** 오른팔 끝의 손: 주먹 쥐었다 펴기(RAISED_HAND), 손목 돌리기(WRIST_CIRCLE) */
 private fun DrawScope.drawHand(prop: NextyProp, pose: NextyPose) {
+    if (prop == NextyProp.FIGHT_FISTS) {     // 파이팅: 두 손 모두 짧고 둥근 주먹
+        listOf(true, false).forEach { left ->
+            val (_, m, e) = if (left) armPoints(true, pose.leftShoulder, pose.leftElbow, pose.leftReach)
+            else armPoints(false, pose.rightShoulder, pose.rightElbow, pose.rightReach)
+            drawMitten(e, angleOf(m, e), 12f, palm = true, thumbRight = true, k = 1.3f, details = false)   // 두 주먹 모두 엄지가 바깥쪽
+        }
+        return
+    }
     if (prop != NextyProp.RAISED_HAND && prop != NextyProp.WRIST_CIRCLE) return
     val (_, mid, end) = armPoints(false, pose.rightShoulder, pose.rightElbow, pose.rightReach)
     val dir = angleOf(mid, end)
@@ -1334,7 +1455,15 @@ private fun DrawScope.drawCalfWall(pose: NextyPose) {
 /** 몸과 함께 기울지 않는 효과: 해, 스트레칭 선, 반짝임 */
 private fun DrawScope.drawBackgroundProp(prop: NextyProp, breath: Float) {
     when (prop) {
-        NextyProp.SUN -> drawSun(Offset(24f, 56f), 13f + breath * 1.5f)
+        NextyProp.FIGHT_FISTS -> {   // 파이팅: 몸 둘레로 퍼지는 짧은 강조선 (숨에 맞춰 살짝 커짐)
+            val c = Offset(100f, 118f)
+            listOf(-150f, -120f, -60f, -30f, 0f, 180f, 25f, 155f).forEach { deg ->
+                val r = Math.toRadians(deg.toDouble())
+                val dir = Offset(cos(r).toFloat(), sin(r).toFloat())
+                val inner = 92f + breath * 3f
+                drawLine(SUN_RAY, c + dir * inner, c + dir * (inner + 14f), 4f, StrokeCap.Round)
+            }
+        }
         NextyProp.STRETCH_LINES -> {
             val pull = breath * 3f
             listOf(
@@ -1344,10 +1473,6 @@ private fun DrawScope.drawBackgroundProp(prop: NextyProp, breath: Float) {
                 val dir = if (a.x < 100f) -pull else pull
                 drawLine(OUTLINE, a + Offset(dir, 0f), b + Offset(dir, 0f), OUTLINE_W, StrokeCap.Round)
             }
-        }
-        NextyProp.SPARKLES -> {
-            drawSparkle(Offset(12f, 96f), 11f + breath * 3f)
-            drawSparkle(Offset(190f, 62f), 8f + (1f - breath) * 3f)
         }
         NextyProp.ARM_CIRCLE -> {   // 동그라미 팔 바깥의 반짝임
             drawSparkle(Offset(4f, 60f), 9f + breath * 3f)
@@ -1362,50 +1487,19 @@ private fun DrawScope.drawBackgroundProp(prop: NextyProp, breath: Float) {
     }
 }
 
-/** 두 손 사이에 드는 소품. 손을 따라 움직임 */
-private fun DrawScope.drawHeldProp(prop: NextyProp, pose: NextyPose) {
-    if (prop != NextyProp.CUP && prop != NextyProp.MEMO) return
-    val left = armPoints(true, pose.leftShoulder, pose.leftElbow, pose.leftReach).third
-    val right = armPoints(false, pose.rightShoulder, pose.rightElbow, pose.rightReach).third
-    val center = lerpOffset(left, right, 0.5f)
-    if (prop == NextyProp.CUP) drawCup(center) else drawMemo(center)
-}
-
-private fun DrawScope.drawCup(c: Offset) {
-    val cup = Path().apply {
-        moveTo(c.x - 14f, c.y - 18f)
-        lineTo(c.x + 14f, c.y - 18f)
-        lineTo(c.x + 11f, c.y + 16f)
-        lineTo(c.x - 11f, c.y + 16f)
-        close()
+/** 잠든 넥스티 머리 오른쪽 위의 Zz (숨에 맞춰 살짝 떠오름). 밤하늘에서도 보이게 밝은 색 */
+private fun DrawScope.drawZz(breath: Float) {
+    val rise = breath * 3f
+    listOf(Triple(166f, 74f, 5f), Triple(182f, 56f, 7.5f)).forEach { (x, y, h) ->
+        val c = Offset(x, y - rise)
+        val z = Path().apply {
+            moveTo(c.x - h, c.y - h)
+            lineTo(c.x + h, c.y - h)
+            lineTo(c.x - h, c.y + h)
+            lineTo(c.x + h, c.y + h)
+        }
+        drawPath(z, ZZ_COLOR, style = Stroke(h * 0.45f, cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
-    drawPath(cup, Color.White)
-    drawRect(WATER, Offset(c.x - 11.5f, c.y - 6f), Size(23f, 21f))
-    drawPath(cup, OUTLINE, style = Stroke(OUTLINE_W, join = StrokeJoin.Round))
-}
-
-private fun DrawScope.drawMemo(c: Offset) {
-    val topLeft = Offset(c.x - 28f, c.y - 28f)
-    val size = Size(56f, 50f)
-    drawRoundRect(Color.White, topLeft, size, CornerRadius(5f))
-    drawRoundRect(OUTLINE, topLeft, size, CornerRadius(5f), style = Stroke(OUTLINE_W))
-    val check = Path().apply {
-        moveTo(c.x - 20f, c.y - 8f)
-        lineTo(c.x - 12f, c.y)
-        lineTo(c.x + 2f, c.y - 16f)
-    }
-    drawPath(check, OUTLINE, style = Stroke(OUTLINE_W, cap = StrokeCap.Round, join = StrokeJoin.Round))
-    drawLine(OUTLINE, Offset(c.x + 7f, c.y - 12f), Offset(c.x + 20f, c.y - 12f), 3f, StrokeCap.Round)
-    drawLine(OUTLINE, Offset(c.x + 7f, c.y - 2f), Offset(c.x + 20f, c.y - 2f), 3f, StrokeCap.Round)
-}
-
-private fun DrawScope.drawSun(c: Offset, radius: Float) {
-    repeat(8) { i ->
-        val r = Math.toRadians(i * 45.0)
-        val dir = Offset(sin(r).toFloat(), cos(r).toFloat())
-        drawLine(SUN_RAY, c + dir * (radius + 6f), c + dir * (radius + 14f), 4f, StrokeCap.Round)
-    }
-    drawCircle(SUN_RAY, radius, c)
 }
 
 /** 끝이 네 개인 반짝임 */
@@ -1461,11 +1555,19 @@ private fun armVector(side: Float, degrees: Float, length: Float): Offset {
     return Offset(side * sin(r).toFloat() * length, cos(r).toFloat() * length)
 }
 
-private fun DrawScope.drawFeet() {
-    listOf(62f, 108f).forEach { x ->
-        drawOval(BODY, Offset(x, 186f), Size(30f, 18f))
-        drawOval(OUTLINE, Offset(x, 186f), Size(30f, 18f), style = Stroke(OUTLINE_W))
+/**
+ * 선 자세의 두 발. lift만큼 뒤꿈치를 들면 발끝으로 서서 발이 짧아 보이고 살짝 올라감.
+ * lean만큼 몸을 왼발을 축으로 기울이면 오른발은 몸과 함께 돌아 저절로 뜸 (왼발은 바닥에 그대로)
+ */
+private fun DrawScope.drawFeet(lift: Float = 0f, lean: Float = 0f) {
+    val h = 18f - lift * 0.5f
+    val top = 186f - lift * 0.4f
+    fun foot(x: Float) {
+        drawOval(BODY, Offset(x, top), Size(30f, h))
+        drawOval(OUTLINE, Offset(x, top), Size(30f, h), style = Stroke(OUTLINE_W))
     }
+    foot(62f)
+    rotate(lean, LEAN_PIVOT) { foot(108f) }
 }
 
 private fun DrawScope.drawCrossedLegs() {
@@ -1809,7 +1911,7 @@ private fun DrawScope.drawSideFace(eye: Offset, turn: Float, face: NextyFace, ey
                     NextyFace.FOCUS, NextyFace.SLEEPY -> drawArc(
                         OUTLINE, 20f, 140f, false, Offset(x - 7f, 102f), Size(14f, 10f), style = Stroke(OUTLINE_W, cap = StrokeCap.Round)
                     )
-                    NextyFace.WINCE -> {
+                    NextyFace.WINCE, NextyFace.FIGHT -> {
                         val e = Path().apply { moveTo(x - 6f, 103f); lineTo(x + 5f, 109f); lineTo(x - 6f, 115f) }
                         drawPath(e, OUTLINE, style = Stroke(OUTLINE_W, cap = StrokeCap.Round, join = StrokeJoin.Round))
                     }
