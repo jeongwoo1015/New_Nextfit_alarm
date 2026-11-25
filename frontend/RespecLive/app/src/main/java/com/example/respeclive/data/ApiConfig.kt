@@ -13,7 +13,7 @@ object ApiConfig {
     val SUPABASE_URL: String = BuildConfig.SUPABASE_URL
     val SUPABASE_ANON_KEY: String = BuildConfig.SUPABASE_ANON_KEY
 
-    /** 프로토타입용 테스트 계정 (로그인 화면이 생기기 전까지 사용). 온보딩을 마친 계정이어야 함 */
+    /** 테스트 계정: 디버그 빌드의 로그인 화면에 미리 채워 둠 (비어 있으면 빈 칸) */
     val DEV_EMAIL: String = BuildConfig.SUPABASE_DEV_EMAIL
     val DEV_PASSWORD: String = BuildConfig.SUPABASE_DEV_PASSWORD
 

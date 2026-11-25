@@ -113,6 +113,7 @@ class SleepMusicService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        com.example.respeclive.data.ServerAuth.init(applicationContext)
         player = SleepMusicPlayer(this)
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(

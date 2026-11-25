@@ -28,6 +28,8 @@ import com.example.respeclive.alarm.AlarmLaunch
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
 import com.example.respeclive.data.RespecApi
+import com.example.respeclive.data.ServerAuth
+import com.example.respeclive.ui.login.LoginScreen
 import com.example.respeclive.ui.alarm.AlarmEditScreen
 import com.example.respeclive.ui.home.HomeScreen
 import com.example.respeclive.ui.morning.MorningCallScreen
@@ -71,7 +73,10 @@ private fun titleFor(route: String?) = when (route) {
     else -> ""
 }
 
-/** 앱 시작: 서버에서 온보딩 여부를 확인(GET /users/me)해 온보딩 또는 메인 화면으로. 서버에 연결되지 않으면 메인으로 */
+/**
+ * 앱 시작: 로그인돼 있지 않으면 로그인 화면. 로그인돼 있으면 서버에서 온보딩 여부를 확인(GET /users/me)해 온보딩 또는 메인 화면으로.
+ * 서버에 연결되지 않으면 메인으로. 로그아웃하거나 로그인이 만료되면 다시 로그인 화면으로
+ */
 @Composable
 fun AppNavHost(
     launch: AlarmLaunch? = null,
@@ -80,7 +85,12 @@ fun AppNavHost(
     val context = LocalContext.current
     // 화면이 다시 만들어져도(가로 회전·다크 모드 전환 등) 시작 화면부터 다시 나오지 않도록 저장
     var needOnboarding by rememberSaveable { mutableStateOf<Boolean?>(null) }
-    LaunchedEffect(Unit) {
+    val loggedIn = ServerAuth.loggedIn
+    LaunchedEffect(loggedIn) {
+        if (!loggedIn) {
+            needOnboarding = null   // 다음에 로그인하는 계정의 온보딩 여부를 다시 확인
+            return@LaunchedEffect
+        }
         val profile = withTimeoutOrNull(8_000) { RespecApi.profile() }
         needOnboarding = profile != null && !profile.optBoolean("onboarding_done", true)
         // 다른 기기에서 바꾼 테마도 따라가도록 서버 설정 값으로 맞춤
@@ -93,7 +103,9 @@ fun AppNavHost(
         startShown = true
     }
     when {
-        needOnboarding == null || !startShown -> StartScreen()
+        !startShown -> StartScreen()
+        !loggedIn -> LoginScreen()
+        needOnboarding == null -> StartScreen()
         needOnboarding == true -> OnboardingScreen(onDone = { needOnboarding = false })
         else -> MainNav(launch, onLaunchHandled)
     }

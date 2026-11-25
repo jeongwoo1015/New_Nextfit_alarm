@@ -20,12 +20,12 @@ Gemini Live는 서버가 발급한 1회용 토큰으로 앱이 직접 연결한�
 | `audio/` | 알람음·진동, 재기상 음악, 수면 음악(포그라운드 서비스), 목소리 녹음·재생·받아쓰기, 통화 오디오 |
 | `data/` | 서버 API(`RespecApi`, `ApiClient`), 로그인(`ServerAuth`), 설정 값(`ApiConfig`), 기기 저장값(기상 볼륨·미루기·끝말잇기 단어 등), 캘린더·위치 |
 | `live/` | Gemini Live 연결(`LiveClient`, `LiveSession`)과 마이크 입력·음성 출력 |
-| `navigation/` | 화면 이동(`AppNavHost`). 시작 때 `GET /users/me`로 온보딩 여부 확인 |
+| `navigation/` | 화면 이동(`AppNavHost`). 로그인돼 있지 않으면 로그인 화면, 로그인 뒤 `GET /users/me`로 온보딩 여부 확인 |
 | `ui/` | 화면별 Compose 코드 (아래 표) |
 
 | `ui/` 하위 | 화면 |
 |---|---|
-| `start/`, `onboarding/` | 시작 화면, 온보딩 |
+| `start/`, `login/`, `onboarding/` | 시작 화면, 로그인·회원가입, 온보딩 |
 | `home/` | 홈(알람 목록) |
 | `alarm/` | 알람 추가·설정, 모닝콜 유형 |
 | `morning/` | 모닝콜(전화 받기) → 브리핑·코칭 대화 → 포춘 → 아침 리포트 |
@@ -53,8 +53,11 @@ SUPABASE_DEV_PASSWORD=<테스트 계정 비밀번호>
 - `API_BASE_URL`이 비어 있으면 `http://127.0.0.1:8000`
   - 에뮬레이터: `http://10.0.2.2:8000`
   - 실기기(USB): `adb reverse tcp:8000 tcp:8000` 후 `http://127.0.0.1:8000`
-- 로그인 화면이 아직 없어서 `SUPABASE_DEV_*` 테스트 계정으로 Supabase Auth 이메일 로그인을 하고,
-  받은 access token을 `Authorization: Bearer`로 보낸다(`data/ServerAuth.kt`). 값이 비어 있으면 서버 요청이 모두 실패한다.
+- 로그인 화면(`ui/login/LoginScreen.kt`)에서 Supabase Auth 이메일 로그인·회원가입을 하고, 받은 access token을
+  `Authorization: Bearer`로 보낸다(`data/ServerAuth.kt`). refresh token을 기기에 저장해 다음 실행부터는 자동으로 이어지고,
+  만료되거나 설정 화면에서 로그아웃하면 로그인 화면으로 돌아간다. `SUPABASE_URL`·`SUPABASE_ANON_KEY`가 비어 있으면 로그인할 수 없다.
+- `SUPABASE_DEV_*`(선택)는 디버그 빌드의 로그인 화면에 미리 채워 두는 테스트 계정이다.
+- 회원가입 뒤 바로 로그인되려면 Supabase 대시보드에서 이메일 인증(Confirm email)을 꺼 두어야 한다. 켜 두면 인증 메일의 링크를 누른 뒤 로그인한다.
 
 ## 실행
 

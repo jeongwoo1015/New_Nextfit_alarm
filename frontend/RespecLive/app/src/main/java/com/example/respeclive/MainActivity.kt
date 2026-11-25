@@ -30,6 +30,7 @@ import com.example.respeclive.alarm.AlarmScheduler
 import com.example.respeclive.alarm.BedtimeReminder
 import com.example.respeclive.data.AlarmRepository
 import com.example.respeclive.data.AlarmType
+import com.example.respeclive.data.ServerAuth
 import com.example.respeclive.data.WakeLevelPrefs
 import com.example.respeclive.navigation.AppNavHost
 import com.example.respeclive.ui.common.StartupPermissions
@@ -54,6 +55,7 @@ class MainActivity : ComponentActivity() {
         AppTheme.init(applicationContext)
         applySystemBars(AppTheme.isDark)
 
+        ServerAuth.init(applicationContext)
         AlarmRepository.init(applicationContext)
         WakeLevelPrefs.init(applicationContext)
         AlarmNotifier.ensureChannel(this)

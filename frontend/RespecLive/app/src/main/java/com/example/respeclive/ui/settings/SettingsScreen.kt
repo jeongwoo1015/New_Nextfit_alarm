@@ -23,11 +23,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +44,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.example.respeclive.BuildConfig
 import com.example.respeclive.audio.AlarmVibrator
+import com.example.respeclive.data.AlarmRepository
+import com.example.respeclive.data.ServerAuth
+import com.example.respeclive.data.WakeHistory
+import kotlinx.coroutines.launch
 import com.example.respeclive.ui.common.SubScreenHeaderTop
 import com.example.respeclive.ui.theme.RespecColors
 
@@ -88,6 +94,34 @@ fun SettingsScreen(onBack: () -> Unit) {
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
+    }
+
+    val scope = rememberCoroutineScope()
+    var confirmLogout by remember { mutableStateOf(false) }
+    var loggingOut by remember { mutableStateOf(false) }
+    if (confirmLogout) {
+        AlertDialog(
+            onDismissRequest = { if (!loggingOut) confirmLogout = false },
+            containerColor = RespecColors.Card,
+            title = { Text("로그아웃할까요?", color = RespecColors.Text, fontWeight = FontWeight.Bold) },
+            text = { Text("이 기기에 예약된 알람이 꺼져요. 다시 로그인하면 서버에 저장된 알람을 다시 받아요.", color = RespecColors.TextSub) },
+            confirmButton = {
+                TextButton(enabled = !loggingOut, onClick = {
+                    loggingOut = true
+                    scope.launch {
+                        ServerAuth.signOut()
+                        AlarmRepository.clear(context)
+                        WakeHistory.clear(context)
+                        // 로그인 상태가 바뀌면 AppNavHost가 로그인 화면으로 바꿈
+                    }
+                }) { Text("로그아웃", color = RespecColors.Danger, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(enabled = !loggingOut, onClick = { confirmLogout = false }) {
+                    Text("취소", color = RespecColors.TextSub)
+                }
+            }
+        )
     }
 
     val pkg = Uri.parse("package:${context.packageName}")
@@ -197,6 +231,14 @@ fun SettingsScreen(onBack: () -> Unit) {
             SettingRow("개인정보처리방침", trailing = { LinkIcon() }) { openUrl(PRIVACY_URL) }
             Divider()
             SettingRow("이용약관", trailing = { LinkIcon() }) { openUrl(TERMS_URL) }
+        }
+
+        Section("계정") {
+            SettingRow("로그인한 계정", trailing = {
+                Text(ServerAuth.email ?: "-", color = RespecColors.TextSub, fontSize = 14.sp)
+            })
+            Divider()
+            SettingRow("로그아웃", "이 기기에 예약된 알람도 함께 꺼져요", trailing = { Chevron() }) { confirmLogout = true }
         }
 
         Spacer(Modifier.height(24.dp))

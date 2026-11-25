@@ -34,6 +34,14 @@ object AlarmRepository {
         alarms.addAll(parse(raw))
     }
 
+    /** 로그아웃: 이 계정의 알람 예약을 모두 끄고 기기 사본을 지움 (다음 계정은 로그인 뒤 서버에서 다시 받음) */
+    fun clear(context: Context) {
+        val app = context.applicationContext
+        alarms.forEach { AlarmScheduler.cancel(app, it.id) }
+        alarms.clear()
+        persist(app)
+    }
+
     fun get(id: Int): Alarm? = alarms.firstOrNull { it.id == id }
 
     fun nextId(): Int = (alarms.maxOfOrNull { it.id } ?: 0) + 1
