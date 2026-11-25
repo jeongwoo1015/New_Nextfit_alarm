@@ -296,6 +296,8 @@ class AIGateway(Protocol):
                        steps: list[SessionStep]) -> StrategyLearning: ...    # 코칭 강도: 그날 결과로 보상을 매기고 학습 (11/21)
     def learn_wake(self, state: dict | None, context_key: str, start_level: int, received_level: int | None,
                    confirmed: bool) -> dict | None: ...                     # 반영한 새 학습 상태, 값이 잘못됐으면 None
+    def correct_wake(self, state: dict | None, context_key: str, received_level: int) -> dict | None: ...
+    # 이미 확인 성공으로 학습한 날을 실패로 고침(11/24 미루기): 받은 단계 칸의 성공 1 → 실패 1. 옮길 성공이 없으면 None
 
 
 def _wake(v) -> time | None:
@@ -500,6 +502,18 @@ class RealAIGateway:
         ladder = WakeLadder.from_dict(state)
         return ladder.to_dict() if learn_wake(ladder, context_key, start_level, received_level, confirmed) else None
 
+    def correct_wake(self, state, context_key, received_level) -> dict | None:
+        """AI에 되돌리는 함수가 없어 서버가 WakeLadder 칸을 직접 고친다(11/25, AI 파트에 공유).
+        칸 키는 AI의 WakeLadder._k로 만들어 저장 형식에 따로 기대지 않는다. 형식이 바뀌면 test_ai_gateway가 잡는다."""
+        from ai.personalization.wake_volume import WakeLadder
+        ladder = WakeLadder.from_dict(state)
+        success, _ = ladder.get(context_key, received_level)
+        if success < 1:
+            return None
+        ladder.counts[WakeLadder._k(context_key, received_level)][0] -= 1
+        ladder.add(context_key, received_level, False)
+        return ladder.to_dict()
+
 
 class UnavailableAIGateway:
     """GEMINI_API_KEY가 없거나 `ai` 패키지가 없을 때 (예: feat/backend-service 단독 실행)."""
@@ -535,6 +549,9 @@ class UnavailableAIGateway:
 
     def learn_wake(self, state, context_key, start_level, received_level, confirmed):
         return None             # 학습 없이 기록만 남는다
+
+    def correct_wake(self, state, context_key, received_level):
+        return None
 
     def learn_strategy(self, bandit_state, log, session, steps):
         return StrategyLearning(None, None)

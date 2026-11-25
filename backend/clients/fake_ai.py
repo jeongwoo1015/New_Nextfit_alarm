@@ -132,3 +132,12 @@ class FakeAIGateway:
         if start_level not in range(1, 6) or (received_level is not None and received_level not in range(start_level, 6)):
             return None
         return {"days": [*(state or {}).get("days", []), [context_key, start_level, received_level, confirmed]]}
+
+    def correct_wake(self, state, context_key, received_level):
+        self.calls.append(("wake_correct", (context_key, received_level)))
+        days = [list(d) for d in (state or {}).get("days", [])]
+        hit = next((d for d in reversed(days) if d[0] == context_key and d[2] == received_level and d[3] is True), None)
+        if hit is None:
+            return None
+        hit[3] = False
+        return {**(state or {}), "days": days}
