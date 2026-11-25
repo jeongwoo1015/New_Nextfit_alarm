@@ -21,10 +21,11 @@ from backend.domain.models import (AlarmRoutineItem, MorningSession, NightRecord
 
 log = logging.getLogger(__name__)
 
-# 끝말잇기 판정 시간 예산 (앱 RespecApi WORDCHAIN_TURN_TIMEOUT_MS = 6초보다 먼저 끝낸다).
+# 끝말잇기 판정 시간 예산 (앱 요청 11/25: 5초 안에 답이 없으면 5xx. 네트워크 시간을 빼고 서버 안에서 최악 약 4.1초).
 # GeminiText 기본값(HTTP 12초, 한 호출 30초)에 judge_wordchain 재시도(최대 3번)가 겹치면 수십 초가 걸려,
 # 앱이 포기한 뒤에도 서버 스레드와 Gemini 사용량을 계속 쓴다. 보통 판정은 0.7~1.5초(AI B26).
-WORDCHAIN_BUDGET_SEC = 4.5
+WORDCHAIN_BUDGET_SEC = 4.0
+WORDCHAIN_DEADLINE_FLOOR_SEC = 0.05  # 남은 시간이 짧을 때 deadline 최솟값(0이면 첫 시도도 못 한다). 넘칠 수 있는 최대 시간
 WORDCHAIN_HTTP_TIMEOUT_SEC = 2.5
 WORDCHAIN_MIN_CALL_SEC = 0.8        # 남은 시간이 이보다 적으면 새 호출을 시작하지 않는다
 
@@ -545,7 +546,7 @@ class RealAIGateway:
             return self._llm
         from ai.tasks.llm import GeminiText
         timeout = min(WORDCHAIN_HTTP_TIMEOUT_SEC, remaining)
-        return GeminiText(api_key=self._key, timeout=timeout, deadline=max(0.3, remaining - timeout))
+        return GeminiText(api_key=self._key, timeout=timeout, deadline=max(WORDCHAIN_DEADLINE_FLOOR_SEC, remaining - timeout))
 
 
 class _BudgetLLM:

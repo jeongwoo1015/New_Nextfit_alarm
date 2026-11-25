@@ -81,17 +81,18 @@ class Mono:
 
 
 def test_wordchain_stops_within_budget():
-    """앱이 6초에 포기하므로 서버도 4.5초 예산 안에서 멈춘다: 남은 시간이 모자라면 새 호출을 하지 않고 FAILED."""
+    """앱 요청(5초 안에 실패 응답)대로 4초 예산 안에서 멈춘다: 남은 시간이 모자라면 새 호출을 하지 않고 FAILED."""
     from backend.clients.ai_gateway import WORDCHAIN_BUDGET_SEC
     clock = Mono()
     llm = SlowLLM(clock, 2.0)
     assert RealAIGateway("k", llm=llm, clock=clock).judge_wordchain(["기차", "차표"], "표정") == {"status": "FAILED"}
-    assert llm.calls == 2 and clock.t <= WORDCHAIN_BUDGET_SEC                    # 3번째(4초 시점, 남은 0.5초)는 시작하지 않음
+    assert llm.calls == 2 and clock.t <= WORDCHAIN_BUDGET_SEC                    # 3번째(4초 시점, 남은 0초)는 시작하지 않음
 
 
 def test_wordchain_gemini_gets_remaining_time():
-    from backend.clients.ai_gateway import WORDCHAIN_HTTP_TIMEOUT_SEC
+    from backend.clients.ai_gateway import WORDCHAIN_BUDGET_SEC, WORDCHAIN_DEADLINE_FLOOR_SEC, WORDCHAIN_HTTP_TIMEOUT_SEC
     gw = RealAIGateway("k")
-    full, short = gw._wordchain_llm(4.5), gw._wordchain_llm(1.5)
-    assert full.deadline + WORDCHAIN_HTTP_TIMEOUT_SEC <= 4.5 + 1e-9
-    assert short.deadline + 1.5 <= 1.5 + 0.3 + 1e-9                             # 남은 시간이 짧으면 HTTP 시간도 줄임
+    full, short = gw._wordchain_llm(WORDCHAIN_BUDGET_SEC), gw._wordchain_llm(1.5)
+    assert full.deadline + WORDCHAIN_HTTP_TIMEOUT_SEC <= WORDCHAIN_BUDGET_SEC + 1e-9
+    assert short.deadline + 1.5 <= 1.5 + WORDCHAIN_DEADLINE_FLOOR_SEC + 1e-9    # 남은 시간이 짧으면 HTTP 시간도 줄임
+    assert WORDCHAIN_BUDGET_SEC + WORDCHAIN_DEADLINE_FLOOR_SEC < 4.5                # 앱 5초 기준에 네트워크 여유

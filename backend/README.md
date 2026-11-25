@@ -41,7 +41,7 @@
 | `POST /morning/sessions/{id}/wake-check` | 브리핑 | 확인 멘트(2~3개)를 모두 마침 — 브리핑 Live의 `wake_check_done`을 앱이 전달. 이때 기상 성공 판정 |
 | `POST /morning/sessions/{id}/wake-volume` | 모닝콜 | 기상 볼륨 결과 `{"start_level": 1~5, "received_level": 1~5 \| null}` (전화를 받은 직후, 받지 않고 껐으면 null). 그날 처음 보고한 세션만 기록. 확인 질문을 마치거나 세션이 끝나면 서버가 한 번 학습 |
 | `PUT /morning/sessions/{id}/steps/{n}/score` | 게임 | 게임 기록 `{"score": 주고받은 횟수}`(앱이 셈, 이어 하기로 다시 보내면 바뀜). 게임(QUIZ) 세션만, 아니면 422 `NOT_GAME_SESSION`. 응답 `best_score`(같은 게임 최고 기록)·`is_best`. 말한 단어는 서버에 저장하지 않음(기기에만, 11/23) |
-| `POST /wordchain/turn` | 게임 | 끝말잇기 글자 판정(AI B26) `{"words": [이어진 단어…], "word": "이번 단어"}` → `{"valid", "next", "reason"}`. 맞음 `next`=넥스티 단어(null이면 이을 단어 없음 = 넥스티 패배), 틀림 `reason`(화면에 그대로). AI가 판정하지 못하면 503 `WORDCHAIN_FAILED`, AI 없음 503 `AI_UNAVAILABLE`. 보통 1초 안팎, 앱이 6초에 포기하므로 서버도 4.5초 예산 안에서 멈춤(넘으면 `WORDCHAIN_FAILED`). 기록 저장 안 함 |
+| `POST /wordchain/turn` | 게임 | 끝말잇기 글자 판정(AI B26) `{"words": [이어진 단어…], "word": "이번 단어"}` → `{"valid", "next", "reason"}`. 맞음 `next`=넥스티 단어(null이면 이을 단어 없음 = 넥스티 패배), 틀림 `reason`(화면에 그대로). AI가 판정하지 못하면 503 `WORDCHAIN_FAILED`, AI 없음 503 `AI_UNAVAILABLE`. 보통 1초 안팎, 앱 요청대로 5초 안에 답하도록 서버는 4초 예산 안에서 멈춤(넘으면 `WORDCHAIN_FAILED`). 기록 저장 안 함 |
 | `GET /wake-volume/next` | 모닝콜 | 다음 아침 첫 모닝콜의 시작 볼륨 `start_level`과 재기상 음악 `rewake_level`(+1). 앱이 밤 대화 뒤·앱을 열 때 받아 두고 울릴 때 사용(없으면 1단계). 다음 알람이 없으면 404 `NO_UPCOMING_ALARM` |
 | `POST /morning/sessions/{id}/briefing-token` | 브리핑 | 오늘 일정·현재 위치(선택, 날씨용)를 보내면 브리핑 Live 토큰. 그날 처음이면 개인화 전략을 정해 로그 |
 | `POST /morning/sessions/{id}/fortune-token` | 포춘 | 오늘의 포춘(어젯밤 한마디, 없으면 한 줄 일기)을 AI가 그대로 읽는 Live 토큰 + `fortune_text`·`fortune_style`·`fortune_source`. 문장이 아직 없으면 이때 만든다(재연결도 같은 문장). AI 음성이 끝나면 앱이 다음 단계로 |
