@@ -34,7 +34,6 @@ import com.example.respeclive.ui.alarm.AlarmEditScreen
 import com.example.respeclive.ui.home.HomeScreen
 import com.example.respeclive.ui.morning.MorningCallScreen
 import com.example.respeclive.ui.morning.MorningReportScreen
-import com.example.respeclive.ui.nexty.NextyDebugScreen
 import com.example.respeclive.ui.night.NightCallScreen
 import com.example.respeclive.ui.night.NightChatScreen
 import com.example.respeclive.ui.diary.DiaryDayScreen
@@ -163,11 +162,9 @@ private fun MainNav(
                         nav.navigate("nightCall")
                     },
                     onCreateAlarm = { nav.navigate("alarmEdit/-1") },
-                    onEditAlarm = { id -> nav.navigate("alarmEdit/$id") },
-                    onOpenDebug = { nav.navigate("nextyDebug") }
+                    onEditAlarm = { id -> nav.navigate("alarmEdit/$id") }
                 )
             }
-            composable("nextyDebug") { NextyDebugScreen(onBack = { nav.popBackStack() }) }
             // 콘텐츠 탭 (예전 루틴 탭 자리, 경로 이름은 그대로): 오늘 한 스트레칭·영어 문장·게임, 끝말잇기 기록·이어 하기(글자 입력)
             composable("routine") { ContentScreen(onResumeGame = { sid -> nav.navigate("wordChain/$sid") }) }
             composable("wordChain/{sessionId}") { entry ->

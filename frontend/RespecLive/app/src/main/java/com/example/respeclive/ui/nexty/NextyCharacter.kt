@@ -61,7 +61,6 @@ private const val MAX_UPPER_REACH = 1.5f
 private const val SHOULDER_X = 54f
 private const val SHOULDER_Y = 128f
 private const val CROSS_ARM_DROP = 5f      // 오답 X 팔을 어깨 높이에서 내린 정도
-private const val HUG_ARM_DROP = 40f        // 상체 비틀기: 엇갈린 손끝이 반대쪽 어깨 앞(입 아래)에 오도록 더 내림
 
 /** 표정 (눈과 입만 바뀜) */
 enum class NextyFace { NORMAL, HAPPY, GRIN, SLEEPY, FOCUS, WINCE, FIGHT }
@@ -75,7 +74,7 @@ enum class NextyFace { NORMAL, HAPPY, GRIN, SLEEPY, FOCUS, WINCE, FIGHT }
  * LEG_*: 앉은 자세에서 양반다리 대신 따로 그리는 다리 (act로 진행, 음수면 반대쪽 다리)
  */
 enum class NextyProp {
-    NONE, STRETCH_LINES, WELCOME_SPARKLES, ARM_CIRCLE, ARM_CROSS, FIGHT_FISTS,
+    NONE, STRETCH_LINES, WELCOME_SPARKLES, ARM_CIRCLE, ARM_CROSS, FIGHT_FISTS, BACK_VIEW, BLADE_FRONT,
     RAISED_HAND, WRIST_CIRCLE, CUE_CHIN, CUE_HEAD, CUE_PELVIS, CROSS_PULL, WRIST_UP, WRIST_DOWN, CALF_WALL,
     CUE_SHRUG, TWIST_HUG, LEG_FIGURE_FOUR, LEG_TOE_PULL, LEG_OUT_TOWEL, LEG_ANKLE_CIRCLE
 }
@@ -294,8 +293,8 @@ enum class NextyMotion(
     // 천장으로 뻗은 손이 손목을 축으로 바깥쪽으로 두 바퀴, 안쪽으로 두 바퀴 돎
     WRIST_ROLL(
         "손목 돌리기", NextyPosture.LIE, NextyFace.FOCUS, NextyProp.WRIST_CIRCLE,
-        listOf(NextyStep(ceilingArmPose(), 900)) +
-            listOf(180f, 360f, 540f, 720f, 540f, 360f, 180f, 0f).map { NextyStep(ceilingArmPose().copy(wristTurn = it), 650) }
+        listOf(NextyStep(wristRollArmPose(), 900)) +
+            listOf(180f, 360f, 540f, 720f, 540f, 360f, 180f, 0f).map { NextyStep(wristRollArmPose().copy(wristTurn = it), 650) }
     ),
     // 무릎을 세운 채 허리를 누르면 무릎이 머리 쪽으로, 띄우면 발 쪽으로 살짝 흔들림
     PELVIC_TILT(
@@ -441,14 +440,16 @@ enum class NextyMotion(
             }.flatten()
         }
     ),
-    // 팔꿈치를 접어 두 팔을 뒤로 당기며 가슴이 열림
+    // 앞모습(BLADE_FRONT)으로 두 팔을 들어 팔꿈치를 굽혀 손을 위로(골대 모양) 보인 뒤, 뒷모습(BACK_VIEW)으로 돌아
+    // 팔꿈치를 아래 뒤로 당기며 날개뼈를 모아 머묾. act가 날개뼈를 모은 정도 (등의 날개뼈 선이 가운데로 모임)
     BLADE_SQUEEZE(
-        "날개뼈 모으기", NextyPosture.SIT, NextyFace.FOCUS, NextyProp.NONE,
-        bladeSqueezePose().let { squeeze ->
+        "날개뼈 모으기", NextyPosture.SIT, NextyFace.FOCUS, NextyProp.BLADE_FRONT,
+        listOf(NextyStep(relaxedPose(), 500), NextyStep(bladeOpenPose(), 1000), NextyStep(bladeOpenPose(), 1600)) +
+            NextyStep(bladeOpenPose(), 400, prop = NextyProp.BACK_VIEW) +
             List(3) {
-                listOf(NextyStep(squeeze, 900), NextyStep(squeeze, 2200), NextyStep(relaxedPose(), 900), NextyStep(relaxedPose(), 600))
-            }.flatten()
-        }
+                listOf(NextyStep(bladeSqueezePose(), 900), NextyStep(bladeSqueezePose(), 2400), NextyStep(bladeOpenPose(), 900), NextyStep(bladeOpenPose(), 500))
+                    .map { it.copy(prop = NextyProp.BACK_VIEW) }
+            }.flatten() + NextyStep(relaxedPose(), 900, prop = NextyProp.BACK_VIEW)
     ),
     // 두 팔을 옆으로 벌리고 가슴을 앞과 위로 밂 (몸이 늘어나고 얼굴이 살짝 들림)
     CHEST_OPEN(
@@ -459,7 +460,7 @@ enum class NextyMotion(
             }.flatten()
         }
     ),
-    // 두 팔을 가슴 앞에서 엇갈려 어깨를 잡고, 상체를 좌우로 돌림 (얼굴이 옆으로 옮겨 감)
+    // 짧은 두 팔을 가슴 앞에 모으고, 상체를 좌우로 돌림 (얼굴이 옆으로 옮겨 감)
     SIT_TWIST(
         "앉아서 상체 비틀기", NextyPosture.SIT, NextyFace.FOCUS, NextyProp.TWIST_HUG,
         holdBothSides(relaxedPose().copy(faceX = -15f, tilt = -3f), reachMs = 1000, holdMs = 2200)
@@ -497,12 +498,12 @@ enum class NextyMotion(
             reachMs = 1300, holdMs = 6000
         )
     ),
-    // 4자 스트레칭처럼 발목을 반대쪽 무릎에 올리고, 같은 쪽 손으로 발가락을 잡아 정강이 쪽으로 당김 (발끝이 위로 들림).
-    // 당기는 팔은 drawBedLegs가 몸 앞에 따로 그려서 자세의 팔은 몸 안에 숨김
+    // 오른 발목을 왼 무릎에 올리고(4자), 왼손을 내려 발가락을 잡아 정강이 쪽(위)으로 당겨 머묾. 반대쪽도.
+    // 팔은 보통 팔처럼 그림(위팔은 몸 뒤, 아래팔은 몸 앞). 손 끝의 주먹은 발 위에 drawBedLegs가 그림
     SIT_TOE_PULL(
         "앉아서 발끝 당기기", NextyPosture.SIT, NextyFace.FOCUS, NextyProp.LEG_TOE_PULL,
-        relaxedPose().copy(act = 1f, leftShoulder = 0f, leftElbow = 0f, leftReach = 0.3f, faceY = 4f).let { hold ->
-            val pulled = hold.copy(nearAnkle = 1f)
+        toePullPose(pulled = false).let { hold ->
+            val pulled = toePullPose(pulled = true)
             listOf(hold to pulled, hold.mirrored() to pulled.mirrored()).flatMap { (h, p) ->
                 listOf(NextyStep(h, 1200), NextyStep(p, 1100), NextyStep(p, 5000), NextyStep(h, 800), NextyStep(relaxedPose(), 900))
             }
@@ -688,7 +689,10 @@ private fun lieReachPose() = relaxedPose().copy(
 )
 
 // 누운 채 한 팔을 천장으로 뻗음 (뒤쪽 팔은 앞쪽 팔에 가려지므로 몸 옆에 둠)
-private fun ceilingArmPose() = relaxedPose().copy(rightShoulder = 90f, rightElbow = 0f, rightReach = 1.5f)
+private fun ceilingArmPose() = relaxedPose().copy(rightShoulder = 90f, rightElbow = 0f, rightReach = 1.2f)
+
+// 손목 돌리기: 천장으로 뻗은 팔을 조금 짧게 (손과 둘레 화살표가 화면 위로 잘리지 않게)
+private fun wristRollArmPose() = ceilingArmPose().copy(rightReach = 0.8f)
 
 // 누운 채 왼쪽 무릎을 가슴으로 당겨 손으로 감쌈. 다른 다리는 매트 위에 쭉 뻗음
 private fun kneeHugPose() = relaxedPose().copy(
@@ -706,15 +710,28 @@ private fun elbowBehindPose() = NextyPose(
     forearmsBehind = true
 )
 
-// 팔꿈치를 접어 두 팔을 몸 옆으로 당김 (팔뚝은 바깥 위로). 가슴이 열려 몸이 살짝 늘어남
-private fun bladeSqueezePose() = relaxedPose().copy(
-    leftShoulder = 32f, leftElbow = 68f, leftReach = 2f, rightShoulder = 32f, rightElbow = 68f, rightReach = 2f, stretch = 1.03f
+// 날개뼈 모으기(뒷모습): 두 팔을 어깨 높이로 들고 팔꿈치를 굽혀 손을 위로 (골대 모양)
+private fun bladeOpenPose() = NextyPose(
+    leftShoulder = 96f, leftElbow = 84f, leftReach = 1.35f, rightShoulder = 96f, rightElbow = 84f, rightReach = 1.35f
+)
+
+// 날개뼈 모으기: 팔꿈치를 아래 뒤로 당겨 날개뼈를 모음 (손은 위를 향한 채, 가슴이 열려 몸이 살짝 늘어남)
+private fun bladeSqueezePose() = NextyPose(
+    leftShoulder = 74f, leftElbow = 104f, leftReach = 1.35f, rightShoulder = 74f, rightElbow = 104f, rightReach = 1.35f,
+    stretch = 1.03f, act = 1f
 )
 
 // 두 팔을 옆으로 벌리고 가슴을 앞과 위로 (얼굴이 살짝 들림)
 private fun chestOpenPose() = relaxedPose().copy(
     leftShoulder = 100f, leftElbow = 8f, leftReach = 2.2f, rightShoulder = 100f, rightElbow = 8f, rightReach = 2.2f,
     stretch = 1.05f, faceY = -3f
+)
+
+// 발끝 당기기: 짧은 왼팔을 몸 앞으로 내려 무릎 위 발의 발끝을 잡음 (팔꿈치까지 몸 윤곽 안에 두어 몸 색이 윤곽선 밖으로 나오지 않게).
+// 각도는 손이 발끝(쉴 때 바깥 아래, 당기면 위)을 잡도록 맞춘 값 (발목~발끝이 손과 무릎 사이에 보이게)
+private fun toePullPose(pulled: Boolean) = relaxedPose().copy(
+    act = 1f, faceY = 4f, leftReach = 1.5f,
+    leftShoulder = if (pulled) -45f else -9f, leftElbow = if (pulled) -2f else -41f, nearAnkle = if (pulled) 1f else 0f
 )
 
 // 왼쪽 벽을 왼손으로 어깨 높이에서 짚고 몸을 벽 쪽으로 기울임. 다리는 CALF_WALL이 act만큼 뒤로 뺌
@@ -844,10 +861,11 @@ internal fun nextyKeyFaces(motion: NextyMotion, between: Int = 1): List<Pair<Nex
 internal fun nextyKeyProps(motion: NextyMotion, between: Int = 1): List<NextyProp> =
     motion.steps.flatMap { step -> List(between + 1) { step.prop ?: motion.prop } }
 
-/** 검사용: 한 자세를 그린 그림 (숨쉬기·깜박임 없이) */
+/** 검사용: 한 자세를 그린 그림 (깜박임 없이, 숨쉬기는 breath 0~1) */
 internal fun renderNextyPose(
     motion: NextyMotion, pose: NextyPose, width: Int, height: Int,
-    face: NextyFace = motion.face, zz: Boolean = false, night: Boolean = false, prop: NextyProp = motion.prop
+    face: NextyFace = motion.face, zz: Boolean = false, night: Boolean = false, prop: NextyProp = motion.prop,
+    breath: Float = 0f
 ): androidx.compose.ui.graphics.ImageBitmap {
     val bitmap = androidx.compose.ui.graphics.ImageBitmap(width, height)
     androidx.compose.ui.graphics.drawscope.CanvasDrawScope().draw(
@@ -855,7 +873,7 @@ internal fun renderNextyPose(
         androidx.compose.ui.graphics.Canvas(bitmap), Size(width.toFloat(), height.toFloat())
     ) {
         drawRect(Color(0xFF2B2440))
-        drawNextyFrame(motion, pose, face, night = night, breath = 0f, eyeOpen = 1f, mouthOpen = 0f, zz = zz, prop = prop)
+        drawNextyFrame(motion, pose, face, night = night, breath = breath, eyeOpen = 1f, mouthOpen = 0f, zz = zz, prop = prop)
     }
     return bitmap
 }
@@ -880,7 +898,7 @@ private fun DrawScope.drawNexty(
     when (posture) {
         NextyPosture.STAND -> if (prop == NextyProp.CALF_WALL) drawCalfWall(pose) else drawFeet(pose.lift, pose.lean)
         NextyPosture.SIT -> when {
-            isBedLegs(prop) -> drawBed()          // 다리는 몸 앞에 그림 (아래 drawBedLegs)
+            isBedLegs(prop) -> { drawBed(); drawBedLegsBehind(pose, prop) }   // 내린 다리는 몸 뒤, 무릎에 올린 다리는 몸 앞 (drawBedLegs)
             isSitLegs(prop) -> drawSitLegs(pose, prop)
             else -> drawCrossedLegs()
         }
@@ -911,9 +929,10 @@ private fun DrawScope.drawNexty(
                             drawArmBehind(left = false, pose.rightShoulder, pose.rightElbow, pose.rightReach)
                         }
                     }
-                    drawBody()
-                    // 고개를 돌려 얼굴이 옆으로 옮겨 가도 몸 밖으로 나가지 않게 몸 윤곽 안에만 그림
-                    clipPath(bodyPath()) { translate(pose.faceX, pose.faceY) { drawFace(face, eyeOpen, mouthOpen) } }
+                    drawBody(belly = prop != NextyProp.BACK_VIEW)
+                    // 고개를 돌려 얼굴이 옆으로 옮겨 가도 몸 밖으로 나가지 않게 몸 윤곽 안에만 그림. 뒷모습이면 얼굴 대신 등
+                    if (prop == NextyProp.BACK_VIEW) drawBack(pose.act)
+                    else clipPath(bodyPath()) { translate(pose.faceX, pose.faceY) { drawFace(face, eyeOpen, mouthOpen) } }
                     if (night) drawNightCap()
                 }
                 // 가슴 쪽으로 당기거나 천장으로 든 다리는 몸 앞에 다시 그림 (그 위에 다리를 잡은 손이 오도록 팔보다 먼저)
@@ -922,7 +941,7 @@ private fun DrawScope.drawNexty(
                     if (prop == NextyProp.ARM_CROSS) {
                         drawCrossArms()
                     } else if (prop == NextyProp.TWIST_HUG) {
-                        drawCrossArms(HUG_ARM_DROP)
+                        drawChestArms()
                     } else if (isPoseArms(prop)) {
                         drawPoseArms(prop, pose.act, front = true)
                     } else if (!customArmsOf(prop) && !pose.forearmsBehind) {
@@ -940,7 +959,7 @@ private fun DrawScope.drawNexty(
     }
     }
     // 침대에 걸터앉은 동작: 무릎 위를 가로지르는 다리와 발끝을 잡는 손은 몸 앞에
-    if (posture == NextyPosture.SIT && isBedLegs(prop)) drawBedLegs(pose, prop)
+    if (posture == NextyPosture.SIT && isBedLegs(prop)) drawBedLegs(pose, prop, breath)
 }
 
 private fun customArmsOf(prop: NextyProp) =
@@ -1048,11 +1067,26 @@ private fun bodyPath(): Path {
     }
 }
 
-private fun DrawScope.drawBody() {
+private fun DrawScope.drawBody(belly: Boolean = true) {
     val body = bodyPath()
     drawPath(body, BODY)
-    drawOval(BELLY, Offset(68f, 140f), Size(64f, 46f))
+    if (belly) drawOval(BELLY, Offset(68f, 140f), Size(64f, 46f))
     drawPath(body, OUTLINE, style = Stroke(OUTLINE_W))
+}
+
+/** 뒷모습의 등: 가운데 등골 선과 양쪽 날개뼈 선. squeeze(0~1)만큼 날개뼈가 가운데로 모임 */
+private fun DrawScope.drawBack(squeeze: Float) {
+    val k = squeeze.coerceIn(0f, 1f)
+    val line = OUTLINE.copy(alpha = 0.45f)
+    drawLine(line, Offset(100f, 132f), Offset(100f, 176f), 2.4f, StrokeCap.Round)
+    listOf(-1f, 1f).forEach { side ->
+        val x = 100f + side * (24f - 9f * k)
+        val blade = Path().apply {
+            moveTo(x + side * 6f, 116f)
+            quadraticTo(x - side * 4f, 128f, x + side * 2f, 146f)
+        }
+        drawPath(blade, line, style = Stroke(2.6f, cap = StrokeCap.Round))
+    }
 }
 
 private fun DrawScope.drawFace(face: NextyFace, eyeOpen: Float, mouthOpen: Float) {
@@ -1148,6 +1182,25 @@ private fun DrawScope.drawCrossArms(drop: Float = CROSS_ARM_DROP) {
         }
         drawPath(arm, OUTLINE, style = Stroke(ARM_W + OUTLINE_W * 2f, cap = StrokeCap.Round, join = StrokeJoin.Round))
         drawPath(arm, BODY, style = Stroke(ARM_W, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+/** 상체 비틀기: 짧은 두 팔을 어깨에서 둥글게 굽혀 가슴 앞에 모음 (동그란 두 손이 가운데에서 맞닿음) */
+private fun DrawScope.drawChestArms() {
+    listOf(1f, -1f).forEach { side ->
+        fun x(v: Float) = 100f + side * (v - 100f)
+        val start = Offset(x(100f - SHOULDER_X), 134f)
+        val control = Offset(x(56f), 158f)
+        val end = Offset(x(89f), 151f)
+        val arm = Path().apply {
+            moveTo(start.x, start.y)
+            quadraticTo(control.x, control.y, end.x, end.y)
+        }
+        // 팔과 동그란 손의 윤곽선을 먼저 모두 그리고 그 위에 몸 색을 칠해 손목에 선이 생기지 않게 함
+        drawPath(arm, OUTLINE, style = Stroke(ARM_W + OUTLINE_W * 2f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawCircle(OUTLINE, 7.5f + OUTLINE_W, end)
+        drawPath(arm, BODY, style = Stroke(ARM_W, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawCircle(BODY, 7.5f, end)
     }
 }
 
@@ -1278,24 +1331,36 @@ private fun DrawScope.drawPoseArms(prop: NextyProp, act: Float, front: Boolean) 
         listOf(lerpOffset(p[0], p[1], 0.45f), p[1], p[2]),
         listOf(lerpOffset(p[0], p[1], 0.3f), p[1], p[2])
     )
-    inFront(doArm)
-    if (prop != NextyProp.CROSS_PULL) {
-        // 돕는 팔 → 손바닥(손등) → 그 위에 돕는 손: 손이 가려지지 않고 손끝(손등)만 잡은 것처럼 보이게
+    if (prop == NextyProp.CROSS_PULL) {
+        // 당기는 팔(위팔·어깨)을 먼저, 그 위에 가로지르는 팔(손이 당기는 쪽 어깨 위로 옴), 마지막으로 팔꿈치를 거는 손만 다시
         inFront(helpArm)
-        val up = prop == NextyProp.WRIST_UP
-        drawMitten(doArm[2], if (up) -90f else 90f, 30f * amount, palm = up, thumbRight = if (up) flip else !flip, k = 1.5f, armDegrees = angleOf(doArm[1], doArm[2]))
-        drawCircle(OUTLINE, 7f + OUTLINE_W, helpArm[2])
-        drawCircle(BODY, 7f, helpArm[2])
+        inFront(doArm)
+        listOf(Offset(168f, 112f) to Offset(178f, 104f), Offset(174f, 128f) to Offset(186f, 126f), Offset(168f, 144f) to Offset(178f, 150f))
+            .forEach { (a, b) ->
+                val p = if (flip) mirrorX(a) else a
+                val q = if (flip) mirrorX(b) else b
+                drawLine(OUTLINE.copy(alpha = amount), p, q, OUTLINE_W * 0.8f, StrokeCap.Round)
+            }
+        drawLimb(
+            listOf(lerpOffset(helpArm[1], helpArm[2], 0.62f), helpArm[2]),
+            listOf(lerpOffset(helpArm[1], helpArm[2], 0.55f), helpArm[2])
+        )
         return
     }
-    // 어깨 교차 당기기: 당겨지는 어깨 뒤쪽의 늘어나는 선, 그 위에 팔꿈치를 거는 팔
-    listOf(Offset(168f, 112f) to Offset(178f, 104f), Offset(174f, 128f) to Offset(186f, 126f), Offset(168f, 144f) to Offset(178f, 150f))
-        .forEach { (a, b) ->
-            val p = if (flip) mirrorX(a) else a
-            val q = if (flip) mirrorX(b) else b
-            drawLine(OUTLINE.copy(alpha = amount), p, q, OUTLINE_W * 0.8f, StrokeCap.Round)
-        }
-    inFront(helpArm)
+    inFront(doArm)
+    run {
+        val up = prop == NextyProp.WRIST_UP
+        fun doHand() = drawMitten(doArm[2], if (up) -90f else 90f, 30f * amount, palm = up, thumbRight = if (up) flip else !flip, k = 1.5f,
+            details = up, armDegrees = angleOf(doArm[1], doArm[2]))   // 손등(뒤쪽 늘이기)은 선 없이 매끈하게
+        // 앞쪽 늘이기: 돕는 팔 → 손바닥 → 그 위에 돕는 손 (손가락 끝만 잡은 것처럼).
+        // 뒤쪽 늘이기: 손등 → 그 위에 돕는 팔과 손 (손등을 누르는 손이 위)
+        if (up) { inFront(helpArm); doHand() } else { doHand(); inFront(helpArm) }
+        drawCircle(OUTLINE, 7f + OUTLINE_W, helpArm[2])
+        drawCircle(BODY, 7f, helpArm[2])
+        // 돕는 손과 팔 사이 손목 선 지우기: 팔 쪽에서 손 가운데까지 몸 색을 이어 칠함
+        drawLine(BODY, polar(helpArm[2], angleOf(helpArm[1], helpArm[2]), -14f), helpArm[2], ARM_W, StrokeCap.Butt)
+        return
+    }
 }
 
 /**
@@ -1352,6 +1417,14 @@ private fun DrawScope.drawHand(prop: NextyProp, pose: NextyPose) {
         }
         return
     }
+    if (prop == NextyProp.BACK_VIEW || prop == NextyProp.BLADE_FRONT) {   // 날개뼈 모으기: 위를 향한 두 손 (엄지는 머리 쪽)
+        listOf(true, false).forEach { left ->
+            val (_, m, e) = if (left) armPoints(true, pose.leftShoulder, pose.leftElbow, pose.leftReach)
+            else armPoints(false, pose.rightShoulder, pose.rightElbow, pose.rightReach)
+            if (pose.leftShoulder > 40f) drawMitten(e, angleOf(m, e), 15f, palm = prop == NextyProp.BLADE_FRONT, thumbRight = left, k = 1.2f, details = false)
+        }
+        return
+    }
     if (prop != NextyProp.RAISED_HAND && prop != NextyProp.WRIST_CIRCLE) return
     val (_, mid, end) = armPoints(false, pose.rightShoulder, pose.rightElbow, pose.rightReach)
     val dir = angleOf(mid, end)
@@ -1364,15 +1437,15 @@ private fun DrawScope.drawHand(prop: NextyProp, pose: NextyPose) {
     // 손목을 축으로 손끝이 원을 그리며 돎: 옆으로 기울고, 화면 쪽·반대쪽으로 갈 때 짧아 보임. 손바닥·손등이 번갈아 보임
     val t = Math.toRadians(pose.wristTurn.toDouble())
     val handDir = dir + 40f * sin(t).toFloat()
-    val length = 22f * (0.62f + 0.38f * ((cos(t).toFloat() + 1f) / 2f))
-    // 손을 둘러싼 동그란 화살표
-    val c = polar(end, dir, 12f)
+    val length = 20f * (0.62f + 0.38f * ((cos(t).toFloat() + 1f) / 2f))
+    // 손을 둘러싼 동그란 화살표 (화면 위로 잘리지 않게 작게)
+    val c = polar(end, dir, 11f)
     rotate(dir, c) {
-        drawArc(CUE, 30f, 290f, false, Offset(c.x - 13f, c.y - 24f), Size(26f, 48f), style = Stroke(3f, cap = StrokeCap.Round))
-        val tip = Offset(c.x + 13f * cos(Math.toRadians(320.0)).toFloat(), c.y + 24f * sin(Math.toRadians(320.0)).toFloat())
+        drawArc(CUE, 30f, 290f, false, Offset(c.x - 12f, c.y - 20f), Size(24f, 40f), style = Stroke(3f, cap = StrokeCap.Round))
+        val tip = Offset(c.x + 12f * cos(Math.toRadians(320.0)).toFloat(), c.y + 20f * sin(Math.toRadians(320.0)).toFloat())
         drawArrowHead(tip, 230f)
     }
-    drawMitten(end, handDir, length, palm = cos(t) >= 0.0, thumbRight = true, k = 1.25f)
+    drawMitten(end, handDir, length, palm = cos(t) >= 0.0, thumbRight = false, k = 1.15f, armDegrees = dir)   // 엄지는 왼쪽, 손목만 돎
 }
 
 /** 움직이는 방향을 알려 주는 화살표 (몸과 함께 눕고 기욺) */
@@ -1668,7 +1741,8 @@ private fun DrawScope.drawFoot(ankle: Offset, degrees: Float, length: Float, leg
         )
         drawRoundRect(BODY, topLeft, size, CornerRadius(8.5f))
     }
-    drawLine(BODY, polar(ankle, legDegrees, -12f), ankle, SIT_LEG_W, StrokeCap.Butt)
+    // 발 윤곽선이 정강이 속에 선으로 남지 않게, 발의 옆 윤곽선(발목에서 약 12.5)보다 길게 몸 색을 이어 칠함
+    drawLine(BODY, polar(ankle, legDegrees, -16f), ankle, SIT_LEG_W, StrokeCap.Butt)
 }
 
 // ---------------- 침대에 걸터앉아 발목을 무릎에 올리는 동작 (4자 · 발끝 당기기) ----------------
@@ -1682,67 +1756,73 @@ private fun DrawScope.drawBed() {
 private const val BED_KNEE_Y = 204f        // 침대 앞 끝에 걸친 무릎 (앞에서 보면 허벅지는 짧아져 몸에 가려짐)
 private const val BED_FOOT_Y = 225f        // 발이 캔버스 아래(240) 안에 들어오도록
 
-/**
- * 침대 끝에 걸터앉은 두 다리 (오른다리로 하는 쪽 기준, act 음수면 좌우 반대). act 0이면 두 다리를 침대 앞으로 내림,
- * 1이면 오른 무릎을 바깥으로 벌리고 오른 발목을 왼 무릎 위에 올려 정강이가 무릎 위를 가로지름 (4자).
- * 발끝 당기기(LEG_TOE_PULL)는 왼손이 몸 옆에서 내려와 발가락을 잡고, nearAnkle(0~1)만큼 발끝을 정강이 쪽(위)으로 당김
- */
-private fun DrawScope.drawBedLegs(pose: NextyPose, prop: NextyProp) {
+/** 다리 위치 (오른다리로 하는 쪽 기준, flip이면 좌우 반대). amount 0: 두 다리를 침대 앞으로 내림, 1: 오른 발목을 왼 무릎 위에 올림 */
+private class BedLegs(pose: NextyPose, prop: NextyProp) {
     val amount = abs(pose.act).coerceIn(0f, 1f)
     val flip = pose.act < 0f
+    val toePull = prop == NextyProp.LEG_TOE_PULL
     fun m(p: Offset) = if (flip) mirrorX(p) else p
     fun dir(degrees: Float) = if (flip) 180f - degrees else degrees
 
-    // 받치는 왼다리: 무릎에서 바닥으로 곧게 내림, 발은 앞을 향해 납작하게
-    val otherKnee = m(Offset(78f, BED_KNEE_Y))
+    // 받치는 왼다리: 몸 아래(몸에 가려짐)에서 바닥으로 곧게 내림
+    val otherTop = m(Offset(78f, LEG_TOP_Y))
     val otherAnkle = m(Offset(76f, BED_FOOT_Y))
-    drawLimb(listOf(otherKnee, otherAnkle), listOf(otherKnee, otherAnkle), SIT_LEG_W)
-    drawHangingFoot(otherAnkle)
 
-    // 하는 오른다리: 엉덩이(몸 가장자리) → 무릎 → 발목. 내린 다리에서 4자로
-    // 발끝 당기기는 발목을 무릎 바깥쪽에 올려 발이 몸 밖으로 나오게 함 (손이 몸 옆으로 내려와 잡을 수 있게)
-    val toePull = prop == NextyProp.LEG_TOE_PULL
-    val hip = m(Offset(128f, 192f))
-    val knee = m(lerpOffset(Offset(122f, BED_KNEE_Y), Offset(166f, 198f), amount))
-    val ankle = m(lerpOffset(Offset(124f, BED_FOOT_Y), if (toePull) Offset(66f, 190f) else Offset(86f, 194f), amount))
-    // 내린 다리는 허벅지가 보이지 않고, 벌린 무릎은 몸 가장자리에서 허벅지가 나옴
-    val thighStart = lerpOffset(knee, hip, amount)
-    drawLimb(
-        listOf(lerpOffset(thighStart, knee, 0.35f), knee, ankle),
-        listOf(lerpOffset(thighStart, knee, 0.15f), knee, ankle),
-        SIT_LEG_W
-    )
+    // 하는 오른다리: 엉덩이 → 무릎 → 발목. 발끝 당기기는 발목을 받치는 다리의 무릎 꼭대기(몸 아래 끝)에 올려 정강이가 그 위를 가로지름
+    // 4자 스트레칭도 발끝 당기기와 같은 다리 위치·길이 (허벅지가 정강이 아래로 비치지 않게 엉덩이를 조금 높게)
+    val hip = m(Offset(124f, 184f))
+    val knee = m(lerpOffset(Offset(122f, BED_KNEE_Y), Offset(146f, 192f), amount))
+    val ankle = m(lerpOffset(Offset(124f, BED_FOOT_Y), Offset(84f, 190f), amount))
+    // 내린 다리는 몸 아래에서 곧게, 벌린 무릎은 몸 가장자리에서 허벅지가 나옴
+    val thighStart = lerpOffset(Offset(knee.x, LEG_TOP_Y), hip, amount)
+    val raised = amount >= 0.5f
+}
+
+private const val LEG_TOP_Y = 180f        // 내린 다리가 시작하는 높이 (몸 아래쪽 안, 몸에 가려짐)
+
+/** 몸 뒤의 다리: 받치는 다리와 하는 다리. 몸 아래·안쪽에서 나와 몸과 떨어져 보이지 않음 (무릎에 올린 정강이는 drawBedLegs가 몸 앞에 다시) */
+private fun DrawScope.drawBedLegsBehind(pose: NextyPose, prop: NextyProp) {
+    val l = BedLegs(pose, prop)
+    drawLimb(listOf(l.otherTop, l.otherAnkle), listOf(l.otherTop, l.otherAnkle), SIT_LEG_W)
+    drawHangingFoot(l.otherAnkle)
+    // 하는 다리는 늘 몸 뒤에서 나옴 (허벅지가 몸 안쪽에서 시작해 윤곽선 밖으로 색이 나오거나 선이 끊기지 않게)
+    drawLimb(listOf(l.thighStart, l.knee, l.ankle), listOf(l.thighStart, l.knee, l.ankle), SIT_LEG_W)
+    if (!l.raised) drawHangingFoot(l.ankle)
+}
+
+/**
+ * 침대 끝에 걸터앉아 오른 발목을 왼 무릎에 올린 다리 (몸 앞). act 음수면 좌우 반대.
+ * 1이면 오른 무릎을 바깥으로 벌리고 오른 발목을 왼 무릎 위에 올려 정강이가 무릎 위를 가로지름 (4자).
+ * 발끝 당기기(LEG_TOE_PULL)는 자세의 왼팔 끝 주먹이 발끝을 잡고, nearAnkle(0~1)만큼 발끝을 정강이 쪽(위)으로 당김
+ */
+private fun DrawScope.drawBedLegs(pose: NextyPose, prop: NextyProp, breath: Float = 0f) {
+    val l = BedLegs(pose, prop)
+    if (!l.raised) return
+    val amount = l.amount
+    val flip = l.flip
+    val toePull = l.toePull
+    val knee = l.knee
+    val ankle = l.ankle
+    fun dir(degrees: Float) = l.dir(degrees)
+    // 무릎 위를 가로지르는 정강이만 몸 앞에 다시 그림. 윤곽선은 무릎 조금 지나서부터 (무릎에 둥근 이음새 선이 생기지 않게)
+    drawLimb(listOf(lerpOffset(knee, ankle, 0.15f), ankle), listOf(knee, ankle), SIT_LEG_W)
     // 무릎 위의 발: 발끝이 바깥(왼쪽), 당기면 정강이 쪽(위)으로 들림
     // 반대쪽(mirrored)은 두 다리 값을 서로 바꾸므로 당긴 정도가 farAnkle로 옮겨 감
     val pull = if (toePull) maxOf(pose.nearAnkle, pose.farAnkle).coerceIn(0f, 1f) else 0f
-    // 발끝 당기기: 쉴 때는 발끝이 바깥 아래, 당기면 발끝이 위(정강이 쪽)로 섬
-    val footDegrees = dir(if (toePull) lerp(200f, 262f, pull) else 196f)
+    // 발끝 당기기: 쉴 때는 발끝이 바깥 위로 비스듬히, 당기면 발끝이 위(정강이 쪽)로 섬
+    val footDegrees = dir(if (toePull) lerp(232f, 268f, pull) else 196f)
     val footLength = if (toePull) 28f else 24f
-    if (amount < 0.5f) {
-        drawHangingFoot(ankle)
-    } else {
-        drawFoot(ankle, footDegrees, footLength * (amount - 0.5f) / 0.5f, angleOf(knee, ankle))
-    }
-    if (!toePull || amount < 0.02f) return
+    drawFoot(ankle, footDegrees, footLength * (amount - 0.5f) / 0.5f, angleOf(knee, ankle))
+    if (!toePull) return
 
-    // 발가락을 잡는 왼손: 어깨에서 몸 앞을 따라 비스듬히 내려와 발가락을 감쌈 (팔꿈치는 몸 가장자리에서 살짝만 굽힘).
-    // 몸 앞으로 나오는 부분만 그림. 자세의 왼팔은 몸 안에 숨겨 둠
-    val shoulder = m(Offset(100f - SHOULDER_X, SHOULDER_Y))
-    val elbow = m(lerpOffset(Offset(42f, 151f), Offset(38f, 156f), amount))
-    val hand = lerpOffset(m(Offset(38f, 172f)), polar(ankle, footDegrees, footLength - 5f), amount)
-    // 몸 밖에서는 팔 전체를(어깨는 몸 뒤에서 나온 것처럼), 몸 안에서는 몸 앞을 지나는 아래팔만 그림.
-    // 둘이 몸 윤곽에서 맞닿아 팔꿈치·몸 가장자리에 이음새 선이 생기지 않음
-    val body = bodyPath()
-    clipPath(body, ClipOp.Difference) { drawLimb(listOf(shoulder, elbow, hand), listOf(shoulder, elbow, hand)) }
-    clipPath(body) { drawLimb(listOf(elbow, hand), listOf(elbow, hand)) }
-    // 손: 팔 방향으로 조금 긴 주먹 (발가락 위를 덮음)
-    rotate(angleOf(elbow, hand), hand) {
-        val size = Size(20f, 16f)
-        val topLeft = Offset(hand.x - 8f, hand.y - size.height / 2f)
-        drawRoundRect(OUTLINE, topLeft - Offset(OUTLINE_W, OUTLINE_W), Size(size.width + OUTLINE_W * 2f, size.height + OUTLINE_W * 2f), CornerRadius(8f + OUTLINE_W))
-        drawRoundRect(BODY, topLeft, size, CornerRadius(8f))
+    // 발가락을 잡는 주먹: 팔은 자세대로 그려져 있고(왼팔, 반대쪽이면 오른팔), 그 끝에 주먹을 발 위로 그림.
+    // 팔은 몸과 같이 숨쉬기 크기로 그려지므로 주먹도 같은 크기로
+    if (amount < 0.05f) return
+    val (_, mid, hand) = if (flip) armPoints(false, pose.rightShoulder, pose.rightElbow, pose.rightReach)
+    else armPoints(true, pose.leftShoulder, pose.leftElbow, pose.leftReach)
+    scale(1f - breath * 0.012f, pose.stretch + breath * 0.016f, Offset(100f, 196f)) {
+        drawMitten(hand, angleOf(mid, hand), 11f, palm = false, thumbRight = flip, k = 1.2f, details = false)   // 엄지는 몸 안쪽
     }
-    drawLine(BODY, polar(hand, angleOf(elbow, hand), -14f), hand, ARM_W, StrokeCap.Butt)
 }
 
 /** 바닥에 내린 발 (앞에서 본 납작한 발) */
@@ -1774,7 +1854,7 @@ private val BODY_CENTER = Offset(100f, 124f)
 // 네발 몸통: 무릎 꿇고 상체를 세운 몸처럼 길쭉해 보이도록 조금 길고 얇게 (다리가 보이면 같은 비율도 짧아 보임)
 private const val ALL4_LENGTH = 1.12f
 private const val ALL4_THICKNESS = 0.96f
-private const val ALL4_BODY_Y = 124f      // 네발 몸 가운데 높이 (클수록 몸이 낮아져 바닥까지 보이는 팔다리가 짧아짐)
+private const val ALL4_BODY_Y = 136f      // 네발 몸 가운데 높이 (클수록 몸이 낮아져 바닥까지 보이는 팔다리가 짧아짐. 짧은 팔다리가 귀엽게)
 
 /** 옆에서 본 바닥 (매트 단면) */
 private fun DrawScope.drawFloor() {
@@ -1800,7 +1880,7 @@ private fun DrawScope.drawOnFloor(
     val kneel = posture == NextyPosture.KNEEL
     val fold = if (kneel) pose.act.coerceIn(0f, 1f) else 1f
     val angle = (if (kneel) -80f * fold else -90f) + pose.tilt
-    val center = if (kneel) lerpOffset(Offset(112f, 120f), Offset(98f, 150f), fold) else Offset(98f, ALL4_BODY_Y - pose.arch * 6f)
+    val center = if (kneel) lerpOffset(Offset(112f, 132f), Offset(98f, 150f), fold) else Offset(98f, ALL4_BODY_Y - pose.arch * 6f)
     // 몸 모양은 바꾸지 않음 (등을 말고 펼 때는 몸 전체가 오르내리고 고개만 움직임). 네발 몸통은 아기 자세(숨 들이쉰 길이)와 같게 조금 길게
     val sx = FLOOR_SCALE * (if (kneel) 1f else ALL4_THICKNESS) * (1f - breath * 0.012f)    // 몸 앞뒤 두께 (네발이면 화면 위아래)
     val sy = FLOOR_SCALE * ((if (kneel) 1f else ALL4_LENGTH) * pose.stretch + breath * 0.016f)   // 머리 ~ 엉덩이 길이
@@ -1819,43 +1899,54 @@ private fun DrawScope.drawOnFloor(
     val knee: Offset
     val foot: Offset
     if (kneel) {
-        shoulder = onScreen(Offset(56f, 120f))
-        hand = lerpOffset(Offset(52f, 178f), Offset(4f, FLOOR_CONTACT_Y), fold)
+        // 어깨: 상체를 세우면 얼굴(입·볼) 아래, 숙이면 머리 앞쪽 아래(얼굴 바로 뒤)로 옮겨 감 (몸 가운데에서 팔이 나와 빠져 보이지 않게)
+        shoulder = onScreen(lerpOffset(Offset(64f, 142f), Offset(55f, 101f), fold))
+        // 손: 숙이면 머리 조금 앞 바닥까지만 뻗음 (짧은 팔)
+        hand = lerpOffset(Offset(52f, 178f), Offset(24f, FLOOR_CONTACT_Y), fold)
         // 무릎 꿇고 뒤꿈치에 앉은 다리: 엉덩이 → 앞쪽 바닥의 무릎(허벅지는 정강이 위에 거의 눕힘) → 바닥에 붙인 정강이 → 엉덩이 바로 밑의 발.
         // 숙이면 무릎은 가슴 아래로, 발은 그대로 엉덩이 밑에
-        hip = lerpOffset(Offset(104f, 180f), Offset(144f, 184f), fold)
-        knee = lerpOffset(Offset(50f, FLOOR_CONTACT_Y), Offset(98f, FLOOR_CONTACT_Y), fold)
-        foot = lerpOffset(Offset(118f, FLOOR_CONTACT_Y + 2f), Offset(156f, FLOOR_CONTACT_Y + 2f), fold)
+        hip = lerpOffset(Offset(106f, 186f), Offset(144f, 184f), fold)   // 세우면 엉덩이를 뒤꿈치에 붙이고 앉음
+        // 짧은 다리: 무릎과 발을 엉덩이 가까이
+        knee = lerpOffset(Offset(64f, FLOOR_CONTACT_Y), Offset(114f, FLOOR_CONTACT_Y), fold)
+        foot = lerpOffset(Offset(112f, FLOOR_CONTACT_Y + 2f), Offset(150f, FLOOR_CONTACT_Y + 2f), fold)
     } else {
-        shoulder = onScreen(Offset(60f, 88f))
-        hip = onScreen(Offset(60f, 176f))
-        hand = Offset(64f, FLOOR_CONTACT_Y)
-        knee = Offset(142f, FLOOR_CONTACT_Y)
-        foot = Offset(176f, FLOOR_CONTACT_Y + 2f)
+        // 어깨는 머리 바로 아래가 아니라 몸 앞쪽 가운데쯤 (팔이 얼굴 밑에 붙지 않게), 손은 어깨 바로 아래 바닥
+        shoulder = onScreen(Offset(60f, 110f))
+        hip = onScreen(Offset(50f, 160f))   // 몸 아래쪽 가까이, 엉덩이 끝보다 안쪽 (다리 이음새가 몸 밖으로 어긋나 보이지 않게)
+        hand = Offset(84f, FLOOR_CONTACT_Y)
+        // 짧은 다리: 무릎은 엉덩이 바로 아래, 바닥에 붙인 정강이도 짧게
+        knee = Offset(132f, FLOOR_CONTACT_Y)
+        foot = Offset(146f, FLOOR_CONTACT_Y + 2f)
     }
     val nearLeg = listOf(hip, knee, foot)
     listOf(Offset(9f, -2f), Offset.Zero).forEach { o ->
         // 아기 자세의 바깥쪽(화면에 가까운) 다리는 몸에 가려지지 않게 몸 앞에 그림 (아래)
         if (!kneel) {
-            val leg = nearLeg.map { it + o }
-            drawLimb(leg, leg, LEG_W)
+            // 바깥쪽 다리는 몸 앞에 따로 그림 (아래)
+            if (o != Offset.Zero) {
+                val leg = nearLeg.map { it + o }
+                drawLimb(leg, leg, LEG_W)
+            }
         } else if (o != Offset.Zero) {
             drawFoldedLeg(nearLeg.map { it + o })
         }
-        val arm = listOf(shoulder + o, hand + o)
-        drawLimb(arm, arm)
+        // 바깥쪽(화면에 가까운) 팔은 몸 앞에 따로 그림 (아래)
+        if (o != Offset.Zero) {
+            val arm = listOf(shoulder + o, hand + o)
+            drawLimb(arm, arm)
+        }
     }
 
     // 몸통은 옆모습: 윤곽만 돌려 그리고, 얼굴과 꼭지는 몸과 함께 눕히지 않고 머리 앞쪽에 거의 바로 세워 붙임.
     // lean 0: 상체를 세움(얼굴은 몸 왼쪽 위) ~ 1: 몸이 가로(얼굴은 머리 끝 = 화면 왼쪽). 고개(tilt)는 얼굴도 따라 기욺
     val baseAngle = angle - pose.tilt
     val lean = (-baseAngle / 90f).coerceIn(0f, 1f)
-    val faceTurn = baseAngle * 0.2f + pose.tilt
+    // 햇살 꼭지: 정수리(서 있을 때의 머리 꼭대기)에 붙여 몸과 같이 돌림 (엎드리면 머리가 향한 앞쪽으로 뻗음)
     if (!night) {
-        val root = onScreen(lerpOffset(Offset(100f, 60f), Offset(140f, 74f), lean))
         val rayRoot = Offset(100f, 60f)
+        val root = onScreen(rayRoot)
         translate(root.x - rayRoot.x, root.y - rayRoot.y) {
-            rotate(baseAngle * 0.35f + pose.tilt, rayRoot) { scale(FLOOR_SCALE, FLOOR_SCALE, rayRoot) { drawSunRays() } }
+            rotate(angle, rayRoot) { scale(FLOOR_SCALE, FLOOR_SCALE, rayRoot) { drawSunRays() } }
         }
     }
     translate(center.x - BODY_CENTER.x, center.y - BODY_CENTER.y) {
@@ -1871,13 +1962,31 @@ private fun DrawScope.drawOnFloor(
     }
     // 아기 자세: 바깥쪽 다리는 몸 앞에 (몸에 가려지지 않게)
     if (kneel) drawFoldedLeg(nearLeg)
-    drawSideFace(onScreen(lerpOffset(Offset(60f, 106f), Offset(108f, 78f), lean)) + Offset(pose.faceX, pose.faceY),
-        faceTurn, face, eyeOpen, mouthOpen)
+    // 얼굴: 상체를 세우면 몸 왼쪽(앞)에서 왼쪽을 봄. 엎드리면 얼굴이 머리 아래쪽에서 바닥을 봄
+    // (눈은 정수리 쪽, 입은 그보다 가슴 쪽이고 둘 다 아래 윤곽선 바로 안쪽. 볼은 눈 뒤). 옆얼굴은 몸과 같이 돌림
+    val faceShift = Offset(pose.faceX, pose.faceY)
+    drawSideFace(
+        eye = onScreen(lerpOffset(Offset(62f, 104f), Offset(72f, 68f), lean)) + faceShift,
+        mouth = onScreen(lerpOffset(Offset(41f, 121f), Offset(52f, 82f), lean)) + faceShift,
+        blush = onScreen(lerpOffset(Offset(72f, 120f), Offset(84f, 82f), lean)) + faceShift,
+        turn = angle, face = face, eyeOpen = eyeOpen, mouthOpen = mouthOpen
+    )
+    // 바깥쪽 팔(네발·아기 자세)은 몸 앞에 통째로 그림 (얼굴보다 나중: 바닥을 보는 얼굴의 입은 바닥에 뻗은 팔에 가려짐). 팔 양옆 윤곽선이 몸통 안 어깨까지 이어지고 위끝은 열려 있음
+    // (몸 색을 어깨 위로 조금 더 칠해 윤곽선 위끝의 둥근 선을 덮음)
+    run {
+        val up = polar(shoulder, angleOf(hand, shoulder), 8f)
+        drawLimb(listOf(shoulder, hand), listOf(up, hand))
+    }
+    // 네발 자세의 바깥쪽 다리도 몸 앞에: 엉덩이 이음새(다리 양옆 윤곽선)가 몸통 안까지 보이고 위끝은 열려 있음
+    if (!kneel) {
+        val (h, k, f) = nearLeg
+        drawLimb(listOf(h, k, f), listOf(polar(h, angleOf(k, h), 8f), h, k, f), LEG_W)
+    }
 }
 
 /**
- * 무릎 꿇어 접은 다리 (엉덩이 · 무릎 · 발). 다리는 한 덩어리로 그리고, 허벅지 아래쪽이 정강이에 맞닿는 곳에만
- * 선을 그음 (무릎 안쪽에서 시작해 허벅지가 정강이에서 떨어지기 전까지)
+ * 무릎 꿇어 접은 다리 (엉덩이 · 무릎 · 발). 다리는 한 덩어리로 그리고, 허벅지 뒤쪽(엉덩이 쪽)의 아래 윤곽선만 그음.
+ * 무릎이 접히는 안쪽에는 선을 긋지 않음
  */
 private fun DrawScope.drawFoldedLeg(leg: List<Offset>) {
     val (hip, knee, _) = leg
@@ -1889,43 +1998,52 @@ private fun DrawScope.drawFoldedLeg(leg: List<Offset>) {
     var n = Offset(-along.y / len, along.x / len)
     if (n.y < 0f) n = -n
     val edge = n * (LEG_W / 2f)
-    drawLine(OUTLINE, knee + along * 0.06f + edge, knee + along * 0.7f + edge, OUTLINE_W, StrokeCap.Round)
+    drawLine(OUTLINE, knee + along * 0.4f + edge, knee + along * 0.95f + edge, OUTLINE_W, StrokeCap.Round)
 }
 
 /**
- * 왼쪽을 보는 옆얼굴: 눈 하나, 그 뒤 아래의 볼, 앞쪽 아래의 입. eye는 눈 가운데, turn은 얼굴을 기울인 각도.
+ * 왼쪽을 보는 옆얼굴. 앞에서 본 얼굴을 돌린 것이 아니라 옆모습으로 그림: 좁은 눈 하나, 그 뒤 아래의 작은 볼,
+ * 머리 앞쪽 윤곽선에 붙은 입. eye·mouth·blush는 화면 위치, turn은 얼굴의 기울기 (0이면 똑바로, 얼굴이 왼쪽을 봄).
  * 바닥 위 자세의 몸 크기(FLOOR_SCALE)에 맞춰 줄여 그림
  */
-private fun DrawScope.drawSideFace(eye: Offset, turn: Float, face: NextyFace, eyeOpen: Float, mouthOpen: Float) {
+private fun DrawScope.drawSideFace(
+    eye: Offset, mouth: Offset, blush: Offset, turn: Float, face: NextyFace, eyeOpen: Float, mouthOpen: Float
+) {
+    val k = FLOOR_SCALE
+    rotate(turn, blush) { drawOval(BLUSH, Offset(blush.x - 7f * k, blush.y - 4.5f * k), Size(14f * k, 9f * k)) }
+    // 눈: 옆에서 보면 폭이 좁음
     rotate(turn, eye) {
-        scale(FLOOR_SCALE, FLOOR_SCALE, eye) {
-            drawOval(BLUSH, Offset(eye.x + 3f, eye.y + 10f), Size(18f, 11f))
-            // 눈: 앞에서 본 얼굴과 같은 모양 (drawFace의 눈 높이 110 기준을 눈 위치로 옮김)
-            translate(0f, eye.y - 110f) {
-                val x = eye.x
-                when (face) {
-                    NextyFace.NORMAL -> drawOpenEye(x, eyeOpen)
-                    NextyFace.HAPPY, NextyFace.GRIN -> drawArc(
-                        OUTLINE, 200f, 140f, false, Offset(x - 7f, 103f), Size(14f, 12f), style = Stroke(OUTLINE_W, cap = StrokeCap.Round)
-                    )
-                    NextyFace.FOCUS, NextyFace.SLEEPY -> drawArc(
-                        OUTLINE, 20f, 140f, false, Offset(x - 7f, 102f), Size(14f, 10f), style = Stroke(OUTLINE_W, cap = StrokeCap.Round)
-                    )
-                    NextyFace.WINCE, NextyFace.FIGHT -> {
-                        val e = Path().apply { moveTo(x - 6f, 103f); lineTo(x + 5f, 109f); lineTo(x - 6f, 115f) }
-                        drawPath(e, OUTLINE, style = Stroke(OUTLINE_W, cap = StrokeCap.Round, join = StrokeJoin.Round))
-                    }
+        val x = eye.x
+        val y = eye.y
+        when (face) {
+            NextyFace.NORMAL -> {
+                val h = 12f * k * eyeOpen.coerceIn(0f, 1f)
+                if (h < 1.5f) {
+                    drawLine(OUTLINE, Offset(x - 3.5f * k, y), Offset(x + 3.5f * k, y), OUTLINE_W, StrokeCap.Round)
+                } else {
+                    drawOval(OUTLINE, Offset(x - 3.5f * k, y - h / 2f), Size(7f * k, h))
+                    if (eyeOpen > 0.6f) drawCircle(Color.White, 1.6f * k, Offset(x - 1f * k, y - 3f * k))
                 }
             }
-            // 입: 눈 앞쪽 아래
-            if (mouthOpen > 0f) {
-                drawOval(OUTLINE, Offset(eye.x - 15f, eye.y + 10f), Size(9f, 4f + mouthOpen * 4f))
-            } else {
-                drawArc(
-                    OUTLINE, 30f, 120f, false, Offset(eye.x - 17f, eye.y + 4f), Size(13f, 11f),
-                    style = Stroke(OUTLINE_W, cap = StrokeCap.Round)
-                )
+            NextyFace.HAPPY, NextyFace.GRIN -> drawArc(     // 웃는 눈 ∩ (좁게)
+                OUTLINE, 200f, 140f, false, Offset(x - 5f * k, y - 5f * k), Size(10f * k, 10f * k), style = Stroke(OUTLINE_W, cap = StrokeCap.Round)
+            )
+            NextyFace.FOCUS, NextyFace.SLEEPY -> {           // 감은 눈 ∪ (좁게) + 앞쪽 끝의 짧은 속눈썹
+                drawArc(OUTLINE, 20f, 140f, false, Offset(x - 5f * k, y - 5f * k), Size(10f * k, 8f * k), style = Stroke(OUTLINE_W, cap = StrokeCap.Round))
+                drawLine(OUTLINE, Offset(x - 4.5f * k, y + 0.5f * k), Offset(x - 7.5f * k, y - 1.5f * k), OUTLINE_W * 0.8f, StrokeCap.Round)
             }
+            NextyFace.WINCE, NextyFace.FIGHT -> {           // > (옆에서 본 찡그린 눈 하나)
+                val e = Path().apply { moveTo(x + 3f * k, y - 5f * k); lineTo(x - 3f * k, y); lineTo(x + 3f * k, y + 5f * k) }
+                drawPath(e, OUTLINE, style = Stroke(OUTLINE_W, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
+        }
+    }
+    // 입: 머리 앞쪽 윤곽선 바로 안쪽의 작은 입 (옆에서 본 미소, 말할 때는 작게 벌림)
+    rotate(turn, mouth) {
+        if (mouthOpen > 0f) {
+            drawOval(OUTLINE, Offset(mouth.x - 1f * k, mouth.y - 2f * k), Size(6f * k, (3f + mouthOpen * 4f) * k))
+        } else {
+            drawArc(OUTLINE, 20f, 110f, false, Offset(mouth.x - 1f * k, mouth.y - 4f * k), Size(9f * k, 7f * k), style = Stroke(OUTLINE_W, cap = StrokeCap.Round))
         }
     }
 }

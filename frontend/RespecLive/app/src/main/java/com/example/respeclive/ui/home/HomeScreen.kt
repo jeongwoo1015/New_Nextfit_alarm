@@ -37,8 +37,7 @@ import kotlinx.coroutines.launch
 fun HomeScreen(
     onStartNightChat: () -> Unit,
     onCreateAlarm: () -> Unit,
-    onEditAlarm: (Int) -> Unit,
-    onOpenDebug: () -> Unit
+    onEditAlarm: (Int) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -120,10 +119,6 @@ fun HomeScreen(
                         border = BorderStroke(2.dp, RespecColors.Purple)
                     ) {
                         Text("+ 나만의 알람 만들기", color = RespecColors.Purple, fontWeight = FontWeight.Bold)
-                    }
-                    // 디버그 (나만의 알람 만들기 바로 아래): 넥스티 디버그 화면
-                    TextButton(onClick = onOpenDebug, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                        Text("디버그", color = RespecColors.TextSub, fontSize = 13.sp)
                     }
                     // 떠 있는 대화 버튼이 마지막 카드의 스위치를 가리지 않도록 버튼 높이만큼 비워 둠
                     Spacer(Modifier.height(72.dp))
