@@ -23,9 +23,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -37,6 +43,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -45,6 +55,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.example.respeclive.BuildConfig
 import com.example.respeclive.audio.AlarmVibrator
 import com.example.respeclive.data.AlarmRepository
+import com.example.respeclive.data.RespecApi
 import com.example.respeclive.data.ServerAuth
 import com.example.respeclive.data.WakeHistory
 import kotlinx.coroutines.launch
@@ -118,6 +129,109 @@ fun SettingsScreen(onBack: () -> Unit) {
             },
             dismissButton = {
                 TextButton(enabled = !loggingOut, onClick = { confirmLogout = false }) {
+                    Text("취소", color = RespecColors.TextSub)
+                }
+            }
+        )
+    }
+
+    // 회원 탈퇴: 비밀번호로 본인 확인 → 서버에서 계정과 기록을 모두 지운 뒤 로그아웃처럼 기기 데이터를 비움
+    var confirmWithdraw by remember { mutableStateOf(false) }
+    var withdrawing by remember { mutableStateOf(false) }
+    var withdrawPassword by remember { mutableStateOf("") }
+    var showWithdrawPassword by remember { mutableStateOf(false) }
+    var withdrawError by remember { mutableStateOf<String?>(null) }
+    fun closeWithdraw() {
+        confirmWithdraw = false
+        withdrawPassword = ""
+        showWithdrawPassword = false
+        withdrawError = null
+    }
+    if (confirmWithdraw) {
+        AlertDialog(
+            onDismissRequest = { if (!withdrawing) closeWithdraw() },
+            containerColor = RespecColors.Card,
+            title = { Text("정말 탈퇴할까요?", color = RespecColors.Text, fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text(
+                        if (withdrawing) "계정을 지우고 있어요. 잠시만 기다려 주세요."
+                        else "알람, 대화 기록, 일기와 사진, 목소리 등 모든 기록이 지워지고 되돌릴 수 없어요.\n탈퇴하려면 비밀번호를 입력해 주세요.",
+                        color = RespecColors.TextSub
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    OutlinedTextField(
+                        value = withdrawPassword,
+                        onValueChange = { if (it.length <= 100) { withdrawPassword = it; withdrawError = null } },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !withdrawing,
+                        singleLine = true,
+                        isError = withdrawError != null,
+                        shape = RoundedCornerShape(16.dp),
+                        placeholder = { Text("비밀번호", color = RespecColors.TextSub) },
+                        visualTransformation = if (showWithdrawPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                        trailingIcon = {
+                            IconButton(onClick = { showWithdrawPassword = !showWithdrawPassword }) {
+                                Icon(
+                                    if (showWithdrawPassword) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                    contentDescription = if (showWithdrawPassword) "비밀번호 숨기기" else "비밀번호 보기",
+                                    tint = RespecColors.TextSub
+                                )
+                            }
+                        },
+                        supportingText = withdrawError?.let { { Text(it, fontSize = 12.sp) } },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = RespecColors.Text,
+                            unfocusedTextColor = RespecColors.Text,
+                            disabledTextColor = RespecColors.TextSub,
+                            focusedContainerColor = RespecColors.Background,
+                            unfocusedContainerColor = RespecColors.Background,
+                            disabledContainerColor = RespecColors.Background,
+                            focusedBorderColor = RespecColors.Lime,
+                            unfocusedBorderColor = RespecColors.CardBorder,
+                            disabledBorderColor = RespecColors.CardBorder,
+                            errorBorderColor = RespecColors.Danger,
+                            errorContainerColor = RespecColors.Background,
+                            errorTextColor = RespecColors.Text,
+                            errorSupportingTextColor = RespecColors.Danger,
+                            errorCursorColor = RespecColors.Lime,
+                            cursorColor = RespecColors.Lime
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                // 비밀번호를 입력해야 누를 수 있음
+                TextButton(enabled = !withdrawing && withdrawPassword.isNotEmpty(), onClick = {
+                    withdrawing = true
+                    scope.launch {
+                        val wrong = ServerAuth.verifyPassword(withdrawPassword)
+                        if (wrong != null) {
+                            withdrawing = false
+                            withdrawError = wrong
+                        } else if (RespecApi.deleteAccount()) {
+                            ServerAuth.signOut()
+                            AlarmRepository.clear(context)
+                            WakeHistory.clear(context)
+                            Toast.makeText(context, "탈퇴했어요. 그동안 함께해 줘서 고마워요", Toast.LENGTH_LONG).show()
+                            // 로그인 상태가 바뀌면 AppNavHost가 로그인 화면으로 바꿈
+                        } else {
+                            withdrawing = false
+                            closeWithdraw()
+                            Toast.makeText(context, "탈퇴하지 못했어요. 인터넷 연결을 확인하고 다시 해 주세요", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }) {
+                    Text(
+                        "탈퇴",
+                        color = if (withdrawPassword.isNotEmpty()) RespecColors.Danger else RespecColors.TextSub,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(enabled = !withdrawing, onClick = { closeWithdraw() }) {
                     Text("취소", color = RespecColors.TextSub)
                 }
             }
@@ -239,6 +353,8 @@ fun SettingsScreen(onBack: () -> Unit) {
             })
             Divider()
             SettingRow("로그아웃", "이 기기에 예약된 알람도 함께 꺼져요", trailing = { Chevron() }) { confirmLogout = true }
+            Divider()
+            SettingRow("회원 탈퇴", "계정과 모든 기록이 지워지고 되돌릴 수 없어요", trailing = { Chevron() }) { confirmWithdraw = true }
         }
 
         Spacer(Modifier.height(24.dp))

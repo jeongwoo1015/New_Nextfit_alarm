@@ -57,6 +57,15 @@ object RespecApi {
     }
 
     /**
+     * 회원 탈퇴: 서버가 목소리·음성·사진 파일과 계정을 지움 (되돌릴 수 없음). 성공하면 true.
+     * 파일을 지우느라 오래 걸릴 수 있어 기다리는 시간을 넉넉히
+     */
+    suspend fun deleteAccount(): Boolean {
+        val r = ApiClient.delete("/users/me", timeoutMs = 60_000L) ?: return false
+        return r.ok
+    }
+
+    /**
      * 설정 수정 (user_call_name, tone, personality, intensity, auto_intensity, english_level, voice_type, music_genre, theme 중
      * 보낸 항목만) → SettingOut
      */

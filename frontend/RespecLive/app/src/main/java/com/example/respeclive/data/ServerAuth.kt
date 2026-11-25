@@ -124,6 +124,33 @@ object ServerAuth {
         }
     }
 
+    /**
+     * 회원 탈퇴 전 본인 확인: 로그인한 이메일과 입력한 비밀번호로 로그인해 봄 (받은 세션은 저장하지 않음).
+     * 맞으면 null, 틀리거나 확인하지 못하면 화면에 보일 문구
+     */
+    suspend fun verifyPassword(password: String): String? = withContext(Dispatchers.IO) {
+        val mail = email ?: return@withContext "로그인한 이메일을 알 수 없어요. 다시 로그인한 뒤 해 주세요"
+        if (!configured) return@withContext "로그인 서버 설정이 없어요"
+        try {
+            val request = Request.Builder()
+                .url(ApiConfig.SUPABASE_URL.trimEnd('/') + "/auth/v1/token?grant_type=password")
+                .header("apikey", ApiConfig.SUPABASE_ANON_KEY)
+                .post(JSONObject().put("email", mail).put("password", password).toString().toRequestBody(JSON))
+                .build()
+            http.newCall(request).execute().use { resp ->
+                when {
+                    resp.isSuccessful -> null
+                    resp.code == 400 || resp.code == 401 -> "비밀번호가 맞지 않아요"
+                    resp.code == 429 -> "시도가 너무 많아요. 잠시 뒤 다시 해 주세요"
+                    else -> "비밀번호를 확인하지 못했어요 (HTTP ${resp.code})"
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "비밀번호 확인 실패: ${e.message}")
+            "로그인 서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요"
+        }
+    }
+
     /** 로그아웃: 서버 세션을 끊고(실패해도 무시) 기기에 저장한 토큰을 지움 */
     suspend fun signOut() {
         val token = mutex.withLock { accessToken }
