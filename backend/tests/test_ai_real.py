@@ -183,7 +183,9 @@ def test_decide_strategy_with_real_records():
 
     # 학습 상태가 아직 없어도 bandit 방식이면 Bandit이 고른다 (None을 넘기면 규칙으로 돌아가 학습이 시작되지 않았다)
     b = gw.decide_strategy("u1", RecentRecords(sessions, steps, []), d0, None, "FRIENDLY", "bandit", None)
-    assert b.log_row["source"] == "bandit" and b.log_row["context_key"]
+    assert b.log_row["source"] == "bandit" and b.log_row["context_key"] == "ok"      # B27: 상황 칸은 피곤 여부 2칸(tired/ok)
+    t = gw.decide_strategy("u1", RecentRecords(sessions, steps, []), d0, "TIRED", "FRIENDLY", "bandit", None)
+    assert t.log_row["context_key"] == "tired"
     row = {k: v for k, v in b.log_row.items() if k in StrategyLog.__dataclass_fields__}
     lg = StrategyLog(**{**row, "log_id": "l1", "session_date": d0, "session_id": "s6"})
     today = MorningSession("s6", "u1", "a1", d0, "ROUTINE", "t", None, None, time(7), time(7))
