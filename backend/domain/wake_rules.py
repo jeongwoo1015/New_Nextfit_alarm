@@ -62,6 +62,7 @@ def raise_pending(row: dict | None) -> bool:
                 and row["applied_level"] > row["previous_level"] and row.get("source") in RAISE_SOURCES)
 
 
-def confirmed(s: MorningSession) -> bool:
-    """받은 뒤 확인 질문에 답했고 재기상(8초 무응답 음악)이 없었는가. 미루기는 사용자가 고른 일이라 보지 않는다."""
-    return s.wake_checked_at is not None and s.rewake_count == 0
+def confirmed(s: MorningSession, snoozes_today: int = 0) -> bool:
+    """받은 뒤 확인 질문에 답했고 재기상(8초 무응답 음악)이 없었고 그날 미루지 않았는가.
+    11/24 결정(AI B25): 미루면 그날 기상은 실패이므로 볼륨 학습도 확인 실패로 넣는다(실패를 성공으로 배우면 사다리가 잘못 움직인다)."""
+    return s.wake_checked_at is not None and s.rewake_count == 0 and s.snooze_count == 0 and snoozes_today == 0

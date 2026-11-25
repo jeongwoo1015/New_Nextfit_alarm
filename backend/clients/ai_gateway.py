@@ -5,7 +5,9 @@
 루틴 항목 "사용 중" = 알람 항목 시간이 0보다 큼.
 """
 import importlib.util
+import logging
 import random
+import time as _time
 from dataclasses import asdict, dataclass, field
 from datetime import date, time
 from typing import Protocol
@@ -17,6 +19,15 @@ from backend.core.errors import ServiceUnavailable
 from backend.domain.models import (AlarmRoutineItem, MorningSession, NightRecord, RecentRecords, SessionStep, StrategyLog,
                                    UserSetting)
 
+log = logging.getLogger(__name__)
+
+# 끝말잇기 판정 시간 예산 (앱 요청 11/25: 5초 안에 답이 없으면 5xx. 네트워크 시간을 빼고 서버 안에서 최악 약 4.1초).
+# GeminiText 기본값(HTTP 12초, 한 호출 30초)에 judge_wordchain 재시도(최대 3번)가 겹치면 수십 초가 걸려,
+# 앱이 포기한 뒤에도 서버 스레드와 Gemini 사용량을 계속 쓴다. 보통 판정은 0.7~1.5초(AI B26).
+WORDCHAIN_BUDGET_SEC = 4.0
+WORDCHAIN_DEADLINE_FLOOR_SEC = 0.05  # 남은 시간이 짧을 때 deadline 최솟값(0이면 첫 시도도 못 한다). 넘칠 수 있는 최대 시간
+WORDCHAIN_HTTP_TIMEOUT_SEC = 2.5
+WORDCHAIN_MIN_CALL_SEC = 0.8        # 남은 시간이 이보다 적으면 새 호출을 시작하지 않는다
 
 AUTH_TOKEN_URL = "https://generativelanguage.googleapis.com/v1alpha/auth_tokens"
 LIVE_WS_URL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained"
@@ -142,6 +153,7 @@ class CoachingContext:
     content_option: str = ""
     plan: tuple[str, ...] = ()
     stretch_routines: tuple = ()            # ((부위, (CoachStep, ...)), ...) 있으면 AI가 부위를 묻고 select_stretch_area (AI B17)
+    snoozes_today: int = 0                  # 오늘 미룬 횟수 (버튼·말 합산). 루틴·콘텐츠 통화에서도 말로 미룰 수 있어 한도 판단에 쓴다 (AI B25)
 
 
 @dataclass(frozen=True)
@@ -295,6 +307,10 @@ class AIGateway(Protocol):
                        steps: list[SessionStep]) -> StrategyLearning: ...    # 코칭 강도: 그날 결과로 보상을 매기고 학습 (11/21)
     def learn_wake(self, state: dict | None, context_key: str, start_level: int, received_level: int | None,
                    confirmed: bool) -> dict | None: ...                     # 반영한 새 학습 상태, 값이 잘못됐으면 None
+    def correct_wake(self, state: dict | None, context_key: str, received_level: int) -> dict | None: ...
+    def judge_wordchain(self, words: list[str], word: str) -> dict: ...
+    # 끝말잇기 글자 판정 (AI B26): {"valid": true, "next": "정원"|None} / {"valid": false, "reason": "…"} / {"status": "FAILED"}
+    # 이미 확인 성공으로 학습한 날을 실패로 고침(11/24 미루기): 받은 단계 칸의 성공 1 → 실패 1. 옮길 성공이 없으면 None
 
 
 def _wake(v) -> time | None:
@@ -328,10 +344,11 @@ def to_night_record_fields(row: dict) -> dict:
 
 
 class RealAIGateway:
-    def __init__(self, api_key: str, http: httpx.Client | None = None, llm=None):
+    def __init__(self, api_key: str, http: httpx.Client | None = None, llm=None, clock=_time.monotonic):
         self._key = api_key
         self._http = http or httpx.Client(timeout=15)
         self._llm = llm
+        self._clock = clock
 
     @property
     def llm(self):
@@ -412,7 +429,8 @@ class RealAIGateway:
             steps=tuple(step(s) for s in ctx.steps),
             resumed=ctx.resumed, night=self._night(ai, ctx.night), strategy_block=ctx.strategy_block,
             content_type=ctx.content_type, content_option=ctx.content_option, plan=ctx.plan,
-            stretch_routines=tuple((area, tuple(step(s) for s in steps)) for area, steps in ctx.stretch_routines))
+            stretch_routines=tuple((area, tuple(step(s) for s in steps)) for area, steps in ctx.stretch_routines),
+            snoozes_today=ctx.snoozes_today)
         return self._issue("coaching", build_setup("coaching", inp))
 
     def compose_content_steps(self, content_type: str, content_option: str | None, duration_sec: int, today: date,
@@ -498,6 +516,54 @@ class RealAIGateway:
         ladder = WakeLadder.from_dict(state)
         return ladder.to_dict() if learn_wake(ladder, context_key, start_level, received_level, confirmed) else None
 
+    def correct_wake(self, state, context_key, received_level) -> dict | None:
+        """AI에 되돌리는 함수가 없어 서버가 WakeLadder 칸을 직접 고친다(11/25, AI 파트에 공유).
+        칸 키는 AI의 WakeLadder._k로 만들어 저장 형식에 따로 기대지 않는다. 형식이 바뀌면 test_ai_gateway가 잡는다."""
+        from ai.personalization.wake_volume import WakeLadder
+        ladder = WakeLadder.from_dict(state)
+        success, _ = ladder.get(context_key, received_level)
+        if success < 1:
+            return None
+        ladder.counts[WakeLadder._k(context_key, received_level)][0] -= 1
+        ladder.add(context_key, received_level, False)
+        return ladder.to_dict()
+
+    def judge_wordchain(self, words: list[str], word: str) -> dict:
+        """AI는 규칙 위반이면 AI를 부르지 않고 거르고, 호출 실패(LLMError·응답 형식)는 FAILED로 준다.
+        그 밖의 예외(네트워크 등)도 판정하지 못한 것이므로 FAILED로 맞춘다."""
+        from ai.tasks.wordchain import judge_wordchain
+        try:
+            return judge_wordchain(list(words), word, _BudgetLLM(self._wordchain_llm, WORDCHAIN_BUDGET_SEC, self._clock)).to_dict()
+        except Exception:
+            log.exception("끝말잇기 판정 실패")
+            return {"status": "FAILED"}
+
+
+    def _wordchain_llm(self, remaining: float):
+        """남은 시간에 맞춘 GeminiText: HTTP 한 번은 timeout, 다음 모델로 넘어가는 것은 deadline 안에서만(그 뒤 한 번 더 timeout).
+        테스트처럼 llm을 넣어 만들었으면 그대로 쓴다."""
+        if self._llm is not None:
+            return self._llm
+        from ai.tasks.llm import GeminiText
+        timeout = min(WORDCHAIN_HTTP_TIMEOUT_SEC, remaining)
+        return GeminiText(api_key=self._key, timeout=timeout, deadline=max(WORDCHAIN_DEADLINE_FLOOR_SEC, remaining - timeout))
+
+
+class _BudgetLLM:
+    """judge_wordchain에 넘기는 llm. 호출마다 남은 시간을 보고, 모자라면 LLMError를 던져 AI가 FAILED로 끝내게 한다
+    (AI는 LLMError를 호출 실패로 세고 두 번이면 멈춘다)."""
+
+    def __init__(self, make, budget: float, clock):
+        self.make, self.budget, self.clock = make, budget, clock
+        self.start = clock()
+
+    def generate_json(self, system: str, user: str) -> dict:
+        from ai.tasks.llm import LLMError
+        remaining = self.budget - (self.clock() - self.start)
+        if remaining < WORDCHAIN_MIN_CALL_SEC:
+            raise LLMError(f"끝말잇기 판정 시간 예산 초과 ({self.budget:g}초)")
+        return self.make(remaining).generate_json(system, user)
+
 
 class UnavailableAIGateway:
     """GEMINI_API_KEY가 없거나 `ai` 패키지가 없을 때 (예: feat/backend-service 단독 실행)."""
@@ -533,6 +599,11 @@ class UnavailableAIGateway:
 
     def learn_wake(self, state, context_key, start_level, received_level, confirmed):
         return None             # 학습 없이 기록만 남는다
+
+    def correct_wake(self, state, context_key, received_level):
+        return None
+
+    judge_wordchain = _fail     # 앱은 오류면 자기 규칙·단어 목록으로 이어 간다
 
     def learn_strategy(self, bandit_state, log, session, steps):
         return StrategyLearning(None, None)

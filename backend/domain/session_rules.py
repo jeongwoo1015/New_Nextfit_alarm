@@ -69,8 +69,9 @@ def planned_total_sec(steps: Iterable[StepPlan]) -> int:
     return sum(s.planned_duration_sec or 0 for s in steps)
 
 
-def judge_wake(s: MorningSession) -> bool:
-    """기상 성공 (11/01 팀 확정): 브리핑 전 확인 멘트(2~3개)에 모두 응답했고, 그때까지
-    ① 스누즈("5분 뒤 다시 울리기")를 한 번도 하지 않았고 ② 무응답으로 AI 재기상 음악이 한 번도 나오지 않았다.
-    확인 멘트를 마친 시점(wake_checked_at)에 부른다. 그 뒤의 재기상·스누즈는 판정을 바꾸지 않는다."""
-    return s.first_response_at is not None and s.snooze_count == 0 and s.rewake_count == 0
+def judge_wake(s: MorningSession, snoozes_today: int = 0) -> bool:
+    """기상 성공: 브리핑 전 확인 멘트(2~3개)에 모두 응답했고, 그때까지 무응답으로 AI 재기상 음악이 한 번도 나오지 않았고,
+    그날 한 번도 미루지 않았다(버튼·말, 어느 세션이든). 확인 멘트를 마친 시점(wake_checked_at)에 부른다.
+    11/24 결정(AI CONTRACTS B25): 미루면 언제든 그날 기상은 실패다. 확인 멘트 뒤의 미루기는 snooze에서 판정을 되돌린다.
+    확인 멘트 뒤의 재기상은 지금처럼 판정을 바꾸지 않는다(11/01)."""
+    return s.first_response_at is not None and s.snooze_count == 0 and snoozes_today == 0 and s.rewake_count == 0

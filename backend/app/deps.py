@@ -10,6 +10,7 @@ from backend.services.night_service import NightService
 from backend.services.routine_service import RoutineService
 from backend.services.user_service import UserService
 from backend.services.wake_service import WakeService
+from backend.services.wordchain_service import WordchainService
 
 
 def get_repos(request: Request) -> Repositories:
@@ -43,6 +44,10 @@ def morning_service(request: Request, repos: Repositories = Depends(get_repos), 
 
 def history_service(request: Request, repos: Repositories = Depends(get_repos)) -> HistoryService:
     return HistoryService(repos, request.app.state.clock)
+
+
+def wordchain_service(ai=Depends(get_ai)) -> WordchainService:
+    return WordchainService(ai)
 
 
 def music_service(request: Request, repos: Repositories = Depends(get_repos)) -> MusicService:

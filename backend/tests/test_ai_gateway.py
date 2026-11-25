@@ -37,6 +37,8 @@ def test_without_key_gateway_is_unavailable():
     with pytest.raises(ServiceUnavailable):
         gw.extract_night_record([])
     assert gw.strategy_blocks({"strategy_id": "gentle"}) == ("", "")      # 전략 문장이 없으면 기본 방식
+    with pytest.raises(ServiceUnavailable):
+        gw.judge_wordchain(["기차"], "차표")                                  # 끝말잇기는 503 → 앱이 자기 규칙으로 이어 감
 
 
 def test_with_key_and_ai_package_gateway_is_real():
@@ -98,3 +100,16 @@ def test_stretch_area_codes_match_ai():
     assert codes.STRETCH_AREAS == AREAS and codes.LEGACY_STRETCH_AREAS == LEGACY_AREAS
     assert codes.DEFAULT_STRETCH_DURATION_SEC == TOTAL_SEC
     assert all(codes.normalize_stretch_area(a) == normalize_area(a) for a in codes.STRETCH_AREA_INPUTS)
+
+
+def test_real_gateway_correct_wake_moves_one_success_to_failure():
+    """서버가 AI WakeLadder 칸을 직접 고친다(11/24 미루기). AI 저장 형식이 바뀌면 여기서 깨진다."""
+    from ai.personalization.wake_volume import WakeLadder
+    gw = RealAIGateway("k")
+    state = gw.learn_wake(None, "ok", 1, 3, True)
+    state = gw.learn_wake(state, "ok", 1, 3, True)
+    fixed = gw.correct_wake(state, "ok", 3)
+    ladder = WakeLadder.from_dict(fixed)
+    assert ladder.get("ok", 3) == (1, 1) and ladder.get("ok", 1) == (0, 2)   # 받은 단계만 바뀌고 앞 단계 실패는 그대로
+    assert gw.correct_wake(gw.correct_wake(fixed, "ok", 3), "ok", 3) is None  # 옮길 성공이 없으면 None
+    assert gw.correct_wake(None, "short", 2) is None

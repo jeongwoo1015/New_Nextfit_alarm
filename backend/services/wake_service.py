@@ -153,7 +153,7 @@ class WakeService:
             row = self.r.personalization.get_wake_log(user_id, s.session_date)
             if not row or row.get("start_level") is None or row.get("session_id") != s.session_id or row.get("learned_at"):
                 return False
-            ok = row.get("received_level") is not None and wake_rules.confirmed(s)
+            ok = row.get("received_level") is not None and wake_rules.confirmed(s, self._snoozes_today(user_id, s.session_date))
             if not self.r.personalization.mark_wake_learned(user_id, s.session_date):
                 return False
             self.r.personalization.save_wake_result(user_id, s.session_date, row["start_level"], row.get("received_level"), ok,
@@ -167,4 +167,26 @@ class WakeService:
             return True
         except Exception:
             log.exception("기상 볼륨 학습 실패 user=%s session=%s", user_id, s.session_id)
+            return False
+
+    def _snoozes_today(self, user_id: str, d: date) -> int:
+        return sum(x.snooze_count for x in self.r.sessions.recent_records(user_id, d, d).sessions)
+
+    def on_snooze(self, user_id: str, d: date) -> bool:
+        """미루기를 받았을 때(11/24 AI B25): 그날 기록을 이미 확인 성공으로 학습했으면 한 번만 확인 실패로 고친다.
+        기록의 confirmed를 먼저 False로 바꿔 두 번 고치지 않게 하고, 내 기록·전체 기록의 받은 단계 칸을 성공 1 → 실패 1로 옮긴다.
+        아직 학습 전이면 할 일이 없다(학습할 때 미룬 횟수를 보고 확인 실패로 넣는다). 실패해도 미루기는 그대로 된다."""
+        try:
+            row = self.r.personalization.get_wake_log(user_id, d)
+            if not row or not row.get("learned_at") or row.get("confirmed") is not True or row.get("received_level") is None:
+                return False
+            self.r.personalization.save_wake_result(user_id, d, row["start_level"], row["received_level"], False, row.get("session_id"))
+            ctx = row.get("context_key") or "unknown"
+            for key, owner in ((user_key(user_id), user_id), (GLOBAL_KEY, None)):
+                state = self.ai.correct_wake(self.r.personalization.get_bandit_state(key), ctx, row["received_level"])
+                if state is not None:
+                    self.r.personalization.save_bandit_state(key, state, owner)
+            return True
+        except Exception:
+            log.exception("기상 볼륨 학습 수정 실패 user=%s day=%s", user_id, d)
             return False

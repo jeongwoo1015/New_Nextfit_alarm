@@ -138,6 +138,40 @@ def test_rewake_before_check_is_not_confirmed(user, ai, repos, clock):
     assert repos.personalization.get_wake_log(USER_A, FRI)["confirmed"] is False
 
 
+def test_snooze_after_learning_corrects_once(user, ai, repos, clock):
+    """11/24 AI B25: 확인 성공으로 학습한 뒤 루틴·콘텐츠 통화에서 미루면, 기록과 두 사다리를 한 번만 확인 실패로 고친다."""
+    night(user, SILENT)
+    sid = morning(user, clock)
+    url = f"/morning/sessions/{sid}"
+    user.post(f"{url}/wake-volume", json={"start_level": 1, "received_level": 3}, headers=H)
+    user.post(f"{url}/response", headers=H)
+    user.post(f"{url}/wake-check", headers=H)
+    assert repos.personalization.get_wake_log(USER_A, FRI)["confirmed"] is True
+    user.post(f"{url}/snooze", json={"minutes_later": 10}, headers=H)
+    assert [c[1] for c in ai.calls if c[0] == "wake_correct"] == [("ok", 3)] * 2              # 내 기록 + 전체 기록
+    assert repos.personalization.get_wake_log(USER_A, FRI)["confirmed"] is False
+    assert repos.personalization.get_wake_log(USER_A, FRI)["learned_at"] is not None
+    assert repos.personalization.get_bandit_state(f"wake:user:{USER_A}")["days"] == [["ok", 1, 3, False]]
+    assert repos.personalization.get_bandit_state("wake:global")["days"] == [["ok", 1, 3, False]]
+    user.post(f"{url}/snooze", headers=H)                                          # 두 번째 미루기는 고칠 것이 없음
+    assert len([c for c in ai.calls if c[0] == "wake_correct"]) == 2
+    assert len([c for c in ai.calls if c[0] == "wake_learn"]) == 2                 # 다시 학습하지도 않음
+
+
+def test_snooze_before_learning_learns_as_failure(user, ai, repos, clock):
+    """확인 멘트 전에 미뤘으면 학습할 때부터 확인 실패로 넣고, 고치는 호출은 없다."""
+    sid = morning(user, clock)
+    url = f"/morning/sessions/{sid}"
+    user.post(f"{url}/wake-volume", json={"start_level": 2, "received_level": 2}, headers=H)
+    user.post(f"{url}/snooze", headers=H)
+    assert not [c for c in ai.calls if c[0] in ("wake_learn", "wake_correct")]
+    user.post(f"{url}/response", headers=H)
+    user.post(f"{url}/wake-check", headers=H)
+    assert [c[1][1:] for c in ai.calls if c[0] == "wake_learn"] == [(2, 2, False)] * 2
+    assert repos.personalization.get_wake_log(USER_A, FRI)["confirmed"] is False
+    assert not [c for c in ai.calls if c[0] == "wake_correct"]
+
+
 def test_not_received_learns_at_once_and_end_without_check(user, ai, repos, clock):
     sid = morning(user, clock)
     user.post(f"/morning/sessions/{sid}/wake-volume", json={"start_level": 2, "received_level": None}, headers=H)

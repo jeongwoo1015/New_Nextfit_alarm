@@ -536,3 +536,18 @@ class MusicOut(BaseModel):
     mood: str | None                    # SLEEP일 때
     url: str                            # 서명된 임시 URL (music 버킷, mp3)
     expires_in: int                     # 초. 재기상 음악은 밤에 미리 받아 둘 수 있게 12시간
+
+
+# ---------- 끝말잇기 글자 판정 (AI B26, 앱 RespecApi.wordChainTurn) ----------
+WordchainWord = Annotated[str, Field(min_length=1, max_length=20)]
+
+
+class WordchainTurnIn(BaseModel):
+    words: list[WordchainWord] = Field(default_factory=list, max_length=300)   # 지금까지 이어진 단어(순서대로, 시작 단어 포함)
+    word: WordchainWord                                                         # 사용자가 이번에 낸 단어
+
+
+class WordchainTurnOut(BaseModel):
+    valid: bool
+    next: str | None = None         # valid일 때 넥스티가 이을 단어. null이면 이을 단어가 없음(넥스티 패배)
+    reason: str | None = None       # 틀렸을 때 이유(짧은 존댓말 한 문장, 화면에 그대로 보여도 됨)

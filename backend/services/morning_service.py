@@ -213,7 +213,7 @@ class MorningService:
 
     def snooze(self, user_id: str, session_id: str, minutes_later: int | None = None, at_time: time | None = None) -> SnoozeResult:
         """미루기 (버튼 "5분 뒤 다시 울리기" 또는 말로 미루기 reschedule_alarm). 다시 울리면 같은 세션이 이어진다.
-        기상 판정은 지금 규칙(11/01) 그대로 한 번이라도 미루면 실패다.
+        11/24 결정(AI B25): 미루면 확인 멘트 전후와 상관없이 그날 기상은 실패다. 이미 성공으로 판정한 그날 세션도 되돌린다.
         시간이 없으면 5분 뒤. at_time은 오늘 지금보다 뒤이고 60분 안. 버튼·말 합쳐 하루 3번까지(11/22 DB 정의서)."""
         s = self._session(user_id, session_id)
         now = to_kst(self.clock()).replace(microsecond=0)
@@ -226,8 +226,16 @@ class MorningService:
         if self.snoozes_today(user_id, s.session_date) >= codes.SNOOZE_MAX_PER_DAY:
             raise Conflict(f"알람은 하루 {codes.SNOOZE_MAX_PER_DAY}번까지만 미룰 수 있어요", "SNOOZE_LIMIT")
         count = self.r.sessions.add_snooze(user_id, session_id)
-        self.r.sessions.update_session(user_id, session_id, {"snoozed_until": until})
+        self.r.sessions.update_session(user_id, session_id, {"snoozed_until": until, "wake_success": False})
+        self._fail_wake_today(user_id, s.session_date)
+        self.wake.on_snooze(user_id, s.session_date)       # 이미 확인 성공으로 학습한 기상 볼륨 기록도 한 번만 실패로 고친다
         return SnoozeResult(count, self.snoozes_today(user_id, s.session_date), until)
+
+    def _fail_wake_today(self, user_id: str, session_date) -> None:
+        """그날 미룬 적이 있으면 그날 기상은 실패: 이미 성공으로 판정한 같은 날 세션(다른 알람 포함)을 실패로 되돌린다."""
+        for x in self.r.sessions.recent_records(user_id, session_date, session_date).sessions:
+            if x.wake_success:
+                self.r.sessions.update_session(user_id, x.session_id, {"wake_success": False})
 
     def respond(self, user_id: str, session_id: str) -> MorningSession:
         """알람 후 첫 음성 응답 (처음 한 번만 기록). 기상 성공 시각 = 이 시각."""
@@ -244,7 +252,8 @@ class MorningService:
             now = to_kst(self.clock())
             if s.first_response_at is None:      # 확인 멘트에 답했다는 뜻이므로 첫 응답이 빠졌으면 지금으로 채운다
                 s = self.r.sessions.update_session(user_id, session_id, {"first_response_at": now})
-            s = self.r.sessions.update_session(user_id, session_id, {"wake_checked_at": now, "wake_success": judge_wake(s)})
+            s = self.r.sessions.update_session(user_id, session_id, {"wake_checked_at": now,
+                                                                   "wake_success": judge_wake(s, self.snoozes_today(user_id, s.session_date))})
             self.wake.learn(user_id, s)          # 기상 볼륨: 확인 질문을 마친 때 학습 (재기상이 있었으면 확인 실패)
         return self.view(user_id, session_id)
 
@@ -427,7 +436,8 @@ class MorningService:
         ctx = CoachingContext(self._persona(user_id, s), s.morning_call_type, tuple(self._coach_steps(s, pending)),
                               resumed=len(pending) < len(steps), night=night_view(night), strategy_block=coaching_block,
                               content_type=s.content_type or "", content_option=s.content_option or "",
-                              plan=self._plan(s, steps, night), stretch_routines=routines)
+                              plan=self._plan(s, steps, night), stretch_routines=routines,
+                              snoozes_today=self.snoozes_today(user_id, s.session_date))
         return self.ai.issue_coaching_token(ctx), steps
 
     def _coach_steps(self, s: MorningSession, steps: list[SessionStep]) -> list[CoachStep]:

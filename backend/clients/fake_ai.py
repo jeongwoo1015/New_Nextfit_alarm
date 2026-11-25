@@ -30,6 +30,7 @@ class FakeAIGateway:
     content_extra: tuple = ()                   # 마지막 compose_content_steps의 (english_level, context)
     fortune_plan: tuple = ()                    # 마지막 포춘 토큰의 순서표
     wake_recommended: int = 1                   # decide_wake_level이 추천하는 시작 단계
+    wordchain: dict = field(default_factory=lambda: {"valid": True, "next": "정원"})   # judge_wordchain 결과
 
     def issue_night_token(self, ctx: NightContext) -> LiveToken:
         self.calls.append(("night_token", ctx))
@@ -132,3 +133,16 @@ class FakeAIGateway:
         if start_level not in range(1, 6) or (received_level is not None and received_level not in range(start_level, 6)):
             return None
         return {"days": [*(state or {}).get("days", []), [context_key, start_level, received_level, confirmed]]}
+
+    def judge_wordchain(self, words, word):
+        self.calls.append(("wordchain", (list(words), word)))
+        return dict(self.wordchain)
+
+    def correct_wake(self, state, context_key, received_level):
+        self.calls.append(("wake_correct", (context_key, received_level)))
+        days = [list(d) for d in (state or {}).get("days", [])]
+        hit = next((d for d in reversed(days) if d[0] == context_key and d[2] == received_level and d[3] is True), None)
+        if hit is None:
+            return None
+        hit[3] = False
+        return {**(state or {}), "days": days}
