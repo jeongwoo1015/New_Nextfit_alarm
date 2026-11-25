@@ -11,6 +11,7 @@
 | 서버 | 통화 종료 후 | `tasks.night_record.extract_night_record(원문, llm)` | RS_NIGHT_RECORD 칸 (`override_skip_coaching` 포함) |
 | 서버 | 통화 종료 후 | `tasks.routine_changes.parse_routine_changes(원문, 항목, llm)` | 항목별 `{template_item_id, duration_sec, scope}` 목록 |
 | 서버 | 콘텐츠 알람 세션 생성 | `tasks.content_steps.compose_content_steps(종류, 세부, llm, today)` | 고정 5분 단계 목록과 오늘 쓴 세부(`option`). 스트레칭·퀴즈(인물·상식)·끝말잇기는 AI 없이 정해 둔 단계(`source="fixed"`), 영어는 AI가 구성하고 실패해도 기본 단계 |
+| 서버 | 콘텐츠 탭에서 끝말잇기를 글자로 이어 할 때(사용자가 단어를 낼 때마다) | `tasks.wordchain.judge_wordchain(words, word, llm).to_dict()` | `{"valid": true, "next": "정원"}` / `{"valid": true, "next": null}` / `{"valid": false, "reason": "…"}` / 실패면 `{"status": "FAILED"}` (B26) |
 | 서버 | 아침 세션 시작(포춘 단계 전) | `tasks.fortune.compose_fortune(한마디, llm, style, tone, today, diary_text)` | 읽을 포춘 문장 1개 (`text`, `style`, `source`). 실패·한마디 없음이어도 기본 문장 |
 | 서버 | 포춘 읽기 토큰 발급 | `live.config.build_setup("fortune", FortuneInput(persona, fortune_text, style))`, `start_signal("fortune")` | 문장을 그대로 읽는 짧은 Live 설정 (사용자가 끝내겠다고 할 때만 쓰는 `end_session` 외 함수 없음) |
 | 서버 | 아침 세션 시작 | `personalization.agent.decide(...)`, 세션 끝나면 `learn(...)` | 오늘의 전략 문장(브리핑·코칭용), 전략 로그 한 행 |
@@ -41,6 +42,7 @@
 |---|---|
 | `night_record.py` | 밤 대화 원문 → RS_NIGHT_RECORD 칸. 하루 한정 변경은 `override_wake_time`, `override_skip_coaching` |
 | `routine_changes.py` | 밤 대화 원문 → 루틴 항목별 빼기(0초)·시간 변경(30초 단위)·되돌리기(null)와 범위(`TOMORROW`/`ALWAYS`) |
+| `wordchain.py` | 끝말잇기 글자 판정(11/25 앱 요청). 사용자 단어가 실제 단어(사전에 있는 일반 명사)인지 보고, 맞으면 넥스티가 이을 쉬운 단어 하나를 고른다. 끝 글자·두음법칙·중복·글자 수는 코드로도 확인하고 넥스티 단어도 코드로 검사한다 |
 | `fortune.py` | 밤에 남긴 한마디 → 오늘의 포춘 문장 1개. 스타일 2종(`COOKIE` 포춘쿠키 / `HOROSCOPE` 오늘의 운세), 말투(존댓말·반말), 예언·숫자·질문 금지 검증, 위기 표현이면 담담한 문장, 실패·한마디 없음이면 기본 문장 |
 | `content_steps.py` | 콘텐츠 3종(스트레칭·퀴즈 게임·영어 따라 읽기)의 고정 5분 단계 구성. 영어는 AI가 만들고 나머지는 정해 둔 단계. 옛 명상·일본어·중국어도 그대로 동작 |
 | `stretch_sets.py` | 스트레칭 4세트(고정 목록, 날짜별로 번갈아). 한 세트 5단계·300초, 동작 이름은 앱 넥스티 시범 키워드에 맞춤 |
@@ -456,6 +458,29 @@ alter table rs_morning_session add constraint rs_morning_session_stretch_area_ch
 - **확인한 것:** 실제 모델로 4가지(영어 첫 질문에서 미루기, 영어 따라 말하기 한 번 한 뒤 미루기, 루틴 통화에서 미루기, 한도 초과)를 통과시켰다(`snooze_in_english`, `snooze_in_english_midway`, `snooze_in_routine`, `snooze_in_english_daily_limit`). 사람 목소리로 한 확인은 아직 없다. 서버 판정과 앱 처리는 AI 쪽에서 시험할 수 없어 위 요청대로 팀이 확인해야 한다.
 - **확인 순서:** ① 서버: 미루기 요청 뒤 `wake_success`가 False인지, 학습 기록이 같이 바뀌는지 시험 ② 앱: 영어 통화 중 "10분 뒤에 다시 울려 줘"로 알람이 다시 예약되는지 ③ 실제 기기에서 첫 질문 미루기 → 두 번째 알람 콘텐츠 중 미루기 → 세 번째 알람이 울리는지(11/23 시연 순서 그대로).
 
+### B26. 끝말잇기 글자 판정 (11/25 앱 요청, AI 반영 완료, 서버·앱 대기)
+- **무엇인가:** 콘텐츠 탭에서 모닝콜 때 끝나지 않은 끝말잇기를 **글자로** 이어 하는 화면용이다. 실시간 음성(Live)이 아니라 서버가 사용자가 단어를 낼 때마다 한 번씩 AI(`ai/tasks/llm.py`의 `GeminiText`)를 부른다.
+- **호출:** `from ai.tasks.wordchain import judge_wordchain` → `judge_wordchain(words, word, llm).to_dict()`
+  - `words`: 지금까지 이어진 단어(순서대로, 시작 단어 포함). 예 `["기차", "차표"]`
+  - `word`: 사용자가 이번에 낸 단어. 예 `"표정"`
+  - `llm`: 다른 서버 함수와 같은 `GeminiText` (호출 한 번에 판정과 넥스티 단어를 같이 받는다)
+- **출력(JSON):**
+
+| 상황 | 결과 |
+|---|---|
+| 맞고 이을 단어가 있음 | `{"valid": true, "next": "정원"}` |
+| 맞고 이을 단어가 없음(앱은 넥스티 패배로 처리) | `{"valid": true, "next": null}` |
+| 틀림 | `{"valid": false, "reason": "사전에 없는 말이에요"}` (`reason`은 40자 이내 짧은 존댓말 한 문장, 화면에 그대로 보여도 된다) |
+| **AI 호출 실패**(서버가 다시 시도하거나 오류로 돌려줄 때 쓰는 신호, 요청에 없던 값) | `{"status": "FAILED"}` |
+
+- **AI가 보는 것:** 사용자 단어가 **사전에 있는 두 글자 이상의 일반 명사**인지. 뜻 없는 글자 나열, 동사·형용사·부사·감탄사, 줄임말·은어, 인명·지명·상표(고유명사)는 틀린 것으로 본다. 확실히 아닐 때만 틀림으로 하고 애매하면 통과시킨다(게임이 즐거워야 해서).
+- **코드로도 확인하는 것(AI를 부르지 않고 거른다):** 한글만, 두 글자 이상, 이미 나온 단어, 앞 단어의 끝 글자로 시작(두음법칙 포함: 리→이, 라→나, 녀→여, 니→이, 로→노, 류→유 등). 어긋나면 `valid:false`와 이유(예: "'리' 또는 '이'(으)로 시작하는 단어를 말해 주세요")를 돌려준다. 앱이 먼저 확인하므로 보통 걸리지 않는다.
+- **넥스티 단어:** 사용자 단어 끝 글자로 시작(두음법칙 허용)하는 쉬운 일상 명사 하나. 코드로 한 번 더 검사하고(한글, 두 글자 이상, 이미 나온 단어 아님, 시작 글자) 어긋나면 AI에게 다시 묻는다(최대 3번). 이을 단어가 없다고 하면 한 번 더 찾아 보게 한 뒤에도 없을 때만 `null`로 한다.
+- **서버가 할 일:** ① 앱 요청 `{words, word}`를 받아 위 함수를 부르고 결과 JSON을 그대로 돌려준다. ② `{"status": "FAILED"}`가 오면 앱이 "잠시 후 다시 해 주세요"를 보여 줄 수 있게 오류(예: 503)로 바꿔 준다. 사용자 단어를 통과시키거나 넥스티 패배로 처리하지 않는다. ③ 호출은 한 번에 보통 1초 안팎이고 최악의 경우(재시도 포함) 몇 초까지 걸린다.
+- **앱이 할 일:** 앱은 AI가 준 넥스티 단어도 규칙을 한 번 더 확인하고, 틀리면 앱 단어 목록에서 대신 고른다(요청대로). `{"status": "FAILED"}`(서버 오류)일 때의 화면을 정한다.
+- **확인한 것:** 가짜 AI로 44가지(두음법칙, 규칙 위반은 AI를 안 부름, 넥스티 단어 재검사, 이을 단어 없음, 호출 실패)와 실제 모델로 약 80번의 판정을 확인했다. 정상 단어·틀린 단어(뜻 없는 말, 동사·형용사·부사·감탄사, 인명·지명)는 기대대로 갈렸고 호출은 보통 0.7~1.5초였다.
+- **한계:** AI가 사전을 대신 판단하는 것이라 틀릴 수 있다. 실제로 "구글" 같은 상표가 통과했고, 시작 글자가 드문 경우(예: "시리즈" 뒤 "즈")에는 어려운 단어("즈음")가 나올 수 있다. 사람이 눈으로 확인하는 시험과 실제 사용자 시험은 아직 없다. 사용량 한도(HTTP 429)에 걸리면 `FAILED`가 된다(시험 중 연속 호출로 한 번 겪었다).
+
 ## 5. 서버 어댑터(`backend/clients/ai_gateway.py`) 수정 목록
 
 옛 이름을 새 이름으로 바꾸면 된다. 아래 외의 부분은 그대로 동작한다.
@@ -503,3 +528,4 @@ alter table rs_morning_session add constraint rs_morning_session_stretch_area_ch
 12. **`update_setting`(대화로 설정 변경):** 밤·브리핑에서 AI가 확인을 받은 뒤 부른다. 앱은 서버 설정을 바꾸고 `{"result":"ok"}`를 돌려준다(B22).
 13. **기상 알람 시작 볼륨:** 서버가 밤마다 `wake_volume.decide_start_level`로 내일 시작 단계를 정해 알람에 전달하고, 앱이 받은 단계를 보고하면 `learn_wake`로 학습한다(B23).
 14. **스트레칭 부위 12개:** 서버·DB 허용 값과 180초, 앱 그림 11개가 필요하다(B20).
+15. **끝말잇기 글자 판정:** 서버가 `{words, word}`로 `judge_wordchain`을 불러 결과 JSON을 앱에 그대로 돌려주고, AI 호출 실패(`FAILED`)는 오류로 바꿔 준다(B26).
