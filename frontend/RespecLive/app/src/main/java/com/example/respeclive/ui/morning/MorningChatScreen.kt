@@ -608,10 +608,44 @@ fun MorningChatScreen(
             return true
         }
 
+        // 말로 미루기 (B21·B25): 연결을 닫고 서버에 미룬 뒤 그 시각에 오늘 한 번 다시 울리도록 예약.
+        // 브리핑·코칭 어느 통화에서든 같고, 미룬 뒤에는 남은 단계(한마디·콘텐츠·포춘)를 열지 않음.
+        // 회의(11/20)·AI 안내("지금 알람은 직접 종료해 주세요")대로 사용자가 통화 종료를 눌러야 끝남
+        suspend fun voiceSnooze(sid: String) {
+            client.stop()
+            val args = rescheduleArgs
+            val req = VoiceSnooze.check(
+                args?.takeIf { it.has("minutes_later") && !it.isNull("minutes_later") }?.optInt("minutes_later"),
+                args?.optString("at_time")?.takeIf { it.isNotBlank() && it != "null" }
+            )
+            val message = if (req == null) {
+                "다시 울릴 시각을 알아듣지 못했어요. 알람을 직접 맞춰 주세요"
+            } else {
+                val r = RespecApi.snoozeTo(sid, req.minutesLater, req.atTime)
+                when {
+                    r.code == "SNOOZE_LIMIT" -> {
+                        SnoozeCount.set(context, SnoozeCount.MAX_PER_DAY)
+                        "오늘은 더 미룰 수 없어요 (하루 ${SnoozeCount.MAX_PER_DAY}번까지)"
+                    }
+                    else -> {
+                        // 서버가 정한 시각, 서버에 닿지 못했으면 앱이 계산한 시각
+                        val at = r.snoozedUntilMs ?: req.triggerMillis
+                        AlarmScheduler.scheduleSnoozeAt(context, alarmId, VoiceSnooze.label(at), at)
+                        r.snoozesToday?.let { SnoozeCount.set(context, it) } ?: SnoozeCount.increment(context)
+                        "${VoiceSnooze.label(at)}에 다시 울려요"
+                    }
+                }
+            }
+            snoozedByVoice = true
+            stage = Stage.Finished
+            notice = "$message · 통화를 종료해 주세요"
+        }
+
         // 코칭(루틴·콘텐츠) 세션: 새 토큰으로 연결하고, 모든 단계를 판정하거나(routine_over) end_session이 오면
         // AI의 마무리 말을 끝까지 들려준 뒤 끝냄. 앞 단계와 이어 말하기, 다음 단계(포춘)로 넘기는 말은 AI가 함(B15)
         // tokenJob: 미리 요청해 둔 코칭 토큰(없으면 지금 요청), hasNext: 코칭 뒤에 이어지는 단계가 있음
-        suspend fun runCoaching(sid: String, tokenJob: Deferred<CoachingToken>?, hasNext: Boolean) {
+        // 돌려주는 값: 코칭 중 말로 미뤘으면 true (B25)
+        suspend fun runCoaching(sid: String, tokenJob: Deferred<CoachingToken>?, hasNext: Boolean): Boolean {
             while (toolEvents.tryReceive().isSuccess) Unit      // 앞 세션에서 남은 이벤트
             stage = Stage.Coaching
             notice = if (RoutineRepository.session?.isContent == true) "콘텐츠를 준비하는 중…" else "루틴을 준비하는 중…"
@@ -626,7 +660,7 @@ fun MorningChatScreen(
                         } else "루틴을 시작하지 못했어요."
                     )
                 }
-                return
+                return false
             }
             client.stop()
             first.steps?.let { RoutineRepository.applySteps(it) }
@@ -643,14 +677,19 @@ fun MorningChatScreen(
                     r.auth ?: RespecApi.tokenError()
                 }
             }
+            var snoozed = false
             while (true) {
                 val event = toolEvents.receive()
-                if (event == "end_session" || event == ROUTINE_OVER) break
+                if (event == "reschedule_alarm") snoozed = true
+                if (snoozed || event == "end_session" || event == ROUTINE_OVER) break
             }
-            // 마지막 판정 뒤 AI는 마무리 말을 이어서 함: 그 응답이 끝나고 음성 재생까지 마친 뒤 다음 단계로
+            // 마지막 판정 뒤 AI는 마무리 말을 이어서 함: 그 응답이 끝나고 음성 재생까지 마친 뒤 다음 단계로.
+            // 말로 미뤘으면 미루기 안내 음성이 끝날 때까지 들려줌
             client.awaitReplyEnd()
             client.pauseMic()
             reportLock.withLock { flushHeld() }      // 아직 보류 중인 판정도 AI의 판정대로 기록 (리포트에 반영)
+            if (snoozed) voiceSnooze(sid)
+            return snoozed
         }
 
         // 1) 오늘 세션 (수신 화면에서 만들었으면 그대로, 아니면 지금 만듦)
@@ -690,36 +729,8 @@ fun MorningChatScreen(
         client.awaitReplyEnd()      // AI의 마지막 말을 끝까지 들려줌
         client.pauseMic()
 
-        // 말로 미루기: 연결을 닫고 서버에 미룬 뒤 그 시각에 오늘 한 번 다시 울리도록 예약.
-        // 회의(11/20)·AI 안내("지금 알람은 직접 종료해 주세요")대로 사용자가 통화 종료를 눌러야 끝남
         if (briefingEvent == "reschedule_alarm") {
-            client.stop()
-            val args = rescheduleArgs
-            val req = VoiceSnooze.check(
-                args?.takeIf { it.has("minutes_later") && !it.isNull("minutes_later") }?.optInt("minutes_later"),
-                args?.optString("at_time")?.takeIf { it.isNotBlank() && it != "null" }
-            )
-            val message = if (req == null) {
-                "다시 울릴 시각을 알아듣지 못했어요. 알람을 직접 맞춰 주세요"
-            } else {
-                val r = RespecApi.snoozeTo(sid, req.minutesLater, req.atTime)
-                when {
-                    r.code == "SNOOZE_LIMIT" -> {
-                        SnoozeCount.set(context, SnoozeCount.MAX_PER_DAY)
-                        "오늘은 더 미룰 수 없어요 (하루 ${SnoozeCount.MAX_PER_DAY}번까지)"
-                    }
-                    else -> {
-                        // 서버가 정한 시각, 서버에 닿지 못했으면 앱이 계산한 시각
-                        val at = r.snoozedUntilMs ?: req.triggerMillis
-                        AlarmScheduler.scheduleSnoozeAt(context, alarmId, VoiceSnooze.label(at), at)
-                        r.snoozesToday?.let { SnoozeCount.set(context, it) } ?: SnoozeCount.increment(context)
-                        "${VoiceSnooze.label(at)}에 다시 울려요"
-                    }
-                }
-            }
-            snoozedByVoice = true
-            stage = Stage.Finished
-            notice = "$message · 통화를 종료해 주세요"
+            voiceSnooze(sid)
             return@LaunchedEffect
         }
         val message = messageJob.await()
@@ -757,8 +768,13 @@ fun MorningChatScreen(
                     endedOnFortune = played && next == null
                 }
                 STAGE_COACHING -> {
-                    runCoaching(sid, coachJob, hasNext = next != null)
+                    val snoozed = runCoaching(sid, coachJob, hasNext = next != null)
                     coachJob = null
+                    // 코칭 중 말로 미룸 (B25): 남은 단계(포춘 등)는 열지 않고, 사용자가 통화 종료를 누를 때까지 안내를 둠
+                    if (snoozed) {
+                        fortuneJob?.cancel()
+                        return@LaunchedEffect
+                    }
                     // 끝말잇기: 모닝콜에서 주고받은 단어 수를 게임 기록으로 저장 (이어 하기에서 다시 보내면 바뀜)
                     if (RoutineRepository.session?.contentOption == "WORDCHAIN") {
                         val app = context.applicationContext
