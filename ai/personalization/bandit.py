@@ -8,9 +8,10 @@
   - 상태는 to_dict()/from_dict()로 JSON 저장·복원한다. 여러 사용자의 상태는 merge()로 합칠 수 있다(데이터가 적을 때를 위해).
 표준 라이브러리만 쓴다. DB를 읽지 않는다. 서버가 stats(User Model), 컨디션, 말투 설정을 넘긴다.
 
-상황 칸(기본 4칸): 최근 기상 성공률(낮음/그 외) × 어젯밤 컨디션(피곤/그 외).
+상황 칸(기본 2칸, 11/25 결정): 어젯밤 컨디션(피곤/그 외). 사용자별로 학습한다(서버 저장 키 user:{id}).
+  4칸(기상 × 피곤)은 시뮬레이션에서 2칸보다 평균 단계 수행 비율이 0.010 낮아 뺐다(coach_sim.py). 기상 성공률 칸은 ("wake", "tired")로 되살릴 수 있다.
   사용자 한 명이 4주에 세션 28개를 쌓는다고 보면, 칸이 많을수록 칸마다 몇 번 못 봐서 배울 수 없다. 그래서 적게 시작한다.
-  특징을 늘리려면 CONTEXT_FEATURES에 이름만 더하면 된다(예: ("wake", "tired", "day")는 8칸, 요일 추가).
+  특징을 늘리려면 CONTEXT_FEATURES에 이름만 더하면 된다(예: ("tired", "day")는 4칸, 요일 추가).
 """
 import math
 import random
@@ -49,7 +50,7 @@ def _day(stats, condition, weekday) -> str:
 
 
 FEATURES = {"wake": _wake, "tired": _tired, "day": _day}
-CONTEXT_FEATURES = ("wake", "tired")       # 기본 4칸. ("wake", "tired", "day")로 바꾸면 8칸
+CONTEXT_FEATURES = ("tired",)             # 기본 2칸(피곤/그 외). ("wake", "tired")로 바꾸면 4칸, ("wake", "tired", "day")는 8칸
 
 
 def context_key(stats: UserStats | None, condition: str | None = None, weekday: int | None = None, features=CONTEXT_FEATURES) -> str:

@@ -50,7 +50,7 @@ def test_bandit_mode_records_context_probability_and_candidates():
     b = ContextualBandit(policy="epsilon")
     d = decide("u1", history(wake_ok=False), TODAY, condition="TIRED", mode="bandit", bandit=b, rng=random.Random(0))
     lg = d.log
-    assert lg.source == "bandit" and lg.context_key == "low|tired" and lg.allowed_arms == ["standard", "gentle"]
+    assert lg.source == "bandit" and lg.context_key == "tired" and lg.allowed_arms == ["standard", "gentle"]
     assert 0 < lg.propensity <= 1 and lg.strategy_id in ARMS and d.strategy == ARMS[lg.strategy_id] and lg.explored in (True, False)
 
 
