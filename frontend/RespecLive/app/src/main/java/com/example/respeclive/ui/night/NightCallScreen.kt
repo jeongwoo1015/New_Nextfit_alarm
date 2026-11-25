@@ -1,0 +1,131 @@
+package com.example.respeclive.ui.night
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.respeclive.ui.common.SwipeToAnswer
+import com.example.respeclive.ui.nexty.NextyCharacter
+import com.example.respeclive.ui.nexty.NextyFace
+import com.example.respeclive.ui.nexty.NextyMotion
+import com.example.respeclive.ui.nexty.NightDecor
+import com.example.respeclive.ui.theme.RespecColors
+
+@Composable
+fun NightCallScreen(
+    onAccept: () -> Unit,
+    onDecline: () -> Unit,
+    bedtimeLabel: String = "오후 10:00"
+) {
+    BackHandler(onBack = onDecline)
+
+    val infinite = rememberInfiniteTransition(label = "call")
+    val ringScale by infinite.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.4f,
+        animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Restart),
+        label = "ringScale"
+    )
+    val ringAlpha by infinite.animateFloat(
+        initialValue = 0.5f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Restart),
+        label = "ringAlpha"
+    )
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(RespecColors.Background)
+            .padding(horizontal = 28.dp, vertical = 32.dp),   // 모닝콜 수신 화면과 같은 여백
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        // 상단 안내
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.Filled.Call, null, tint = RespecColors.AccentText, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.height(12.dp))
+            Text("AI 굿나잇콜", color = RespecColors.Text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            Text("오늘 하루를 함께 마무리해요", color = RespecColors.TextSub, fontSize = 14.sp)
+        }
+
+        // 발신자: 달 수면모자를 쓴 졸린 넥스티 + 파동
+        // 세로가 짧은 폰에서는 아래 버튼이 잘리지 않도록 동그라미를 남은 공간에 맞춰 줄임
+        // (아래 이름·시각 칩 자리 약 150dp)
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            val orb = minOf(260.dp, maxHeight - 150.dp, maxWidth).coerceAtLeast(0.dp)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(orb)) {
+                    Box(
+                        Modifier
+                            .size(orb * 210 / 260)
+                            .scale(ringScale)
+                            .alpha(ringAlpha)
+                            .border(2.dp, RespecColors.Lime, CircleShape)
+                    )
+                    Box(
+                        Modifier
+                            .size(orb * 210 / 260)
+                            .clip(CircleShape)
+                            .background(RespecColors.Card)
+                            .border(1.dp, RespecColors.CardBorder, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // 원 안에 여유 있게 (캐릭터 높이가 원의 약 60%)
+                        NextyCharacter(
+                            NextyMotion.IDLE,
+                            Modifier.size(orb * 180 / 260),
+                            face = NextyFace.SLEEPY,
+                            night = true
+                        )
+                        NightDecor(RespecColors.AccentText, Modifier.fillMaxSize())
+                    }
+                }
+                Spacer(Modifier.height(20.dp))
+                Text("넥스티", color = RespecColors.Text, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(RespecColors.Card)
+                        .border(1.dp, RespecColors.CardBorder, RoundedCornerShape(50))
+                        .padding(horizontal = 18.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Filled.Bedtime, null, tint = RespecColors.AccentText, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(bedtimeLabel, color = RespecColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // 하단: 모닝콜과 같이 밀어서 받기 + 나중에 하기
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            SwipeToAnswer(onComplete = onAccept)
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = onDecline) {
+                Text("나중에 하기", color = RespecColors.TextSub, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}

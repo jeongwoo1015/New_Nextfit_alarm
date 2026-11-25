@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 일기 감정 'tired' 넥스티 (디자인 SVG에서 변환, 배경 타일은 빼고 칸 배경색 #d3cce4으로 칠함) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="72dp"
+    android:viewportWidth="64"
+    android:viewportHeight="72">
+    <path
+        android:pathData="M 43.62,6.75 L 54.12,6.75 A 1.88,1.88 0 0,1 56,8.62 L 56,13.88 A 1.88,1.88 0 0,1 54.12,15.75 L 43.62,15.75 A 1.88,1.88 0 0,1 41.75,13.88 L 41.75,8.62 A 1.88,1.88 0 0,1 43.62,6.75 Z"
+        android:fillColor="#FFFFFFFF"
+        android:strokeColor="#FF7D7590"
+        android:strokeWidth="1.5" />
+    <path
+        android:pathData="M 57.12,9.38 L 57.5,9.38 A 0.75,0.75 0 0,1 58.25,10.12 L 58.25,12.38 A 0.75,0.75 0 0,1 57.5,13.12 L 57.12,13.12 A 0.75,0.75 0 0,1 56.38,12.38 L 56.38,10.12 A 0.75,0.75 0 0,1 57.12,9.38 Z"
+        android:fillColor="#FF7D7590" />
+    <path
+        android:pathData="M 44.38,8.62 L 45.88,8.62 A 0.75,0.75 0 0,1 46.62,9.38 L 46.62,13.12 A 0.75,0.75 0 0,1 45.88,13.88 L 44.38,13.88 A 0.75,0.75 0 0,1 43.62,13.12 L 43.62,9.38 A 0.75,0.75 0 0,1 44.38,8.62 Z"
+        android:fillColor="#FFE46B5C" />
+    <path
+        android:pathData="M 24.24,27.27 A 1.38,2.53 -70 0,1 26.15,29.43 A 1.38,2.53 -70 0,1 23.3,29.86 A 1.38,2.53 -70 0,1 21.39,27.7 A 1.38,2.53 -70 0,1 24.24,27.27 Z"
+        android:fillColor="#FFFFD45C"
+        android:strokeColor="#FF3A2E2A"
+        android:strokeWidth="1.04"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M 33.65,28.77 A 1.38,2.53 58 0,1 30.77,28.94 A 1.38,2.53 58 0,1 32.19,26.43 A 1.38,2.53 58 0,1 35.07,26.26 A 1.38,2.53 58 0,1 33.65,28.77 Z"
+        android:fillColor="#FFFFD45C"
+        android:strokeColor="#FF3A2E2A"
+        android:strokeWidth="1.04"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M 31.59,27.01 A 1.61,2.76 24 0,1 29,28.88 A 1.61,2.76 24 0,1 28.65,25.7 A 1.61,2.76 24 0,1 31.24,23.83 A 1.61,2.76 24 0,1 31.59,27.01 Z"
+        android:fillColor="#FFFFD45C"
+        android:strokeColor="#FF3A2E2A"
+        android:strokeWidth="1.04"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M 17.15,49.15 Q 15.07,55.84 17.07,61.64"
+        android:strokeColor="#FF3A2E2A"
+        android:strokeWidth="3.91"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 17.15,49.15 Q 15.07,55.84 17.07,61.64"
+        android:strokeColor="#FFFFC37A"
+        android:strokeWidth="2.07"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 43.68,46.36 Q 47.1,52.47 46.35,58.57"
+        android:strokeColor="#FF3A2E2A"
+        android:strokeWidth="3.91"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 43.68,46.36 Q 47.1,52.47 46.35,58.57"
+        android:strokeColor="#FFFFC37A"
+        android:strokeWidth="2.07"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 30.35,62.56 A 3.45,2.07 -6 0,1 27.14,64.98 A 3.45,2.07 -6 0,1 23.49,63.28 A 3.45,2.07 -6 0,1 26.7,60.86 A 3.45,2.07 -6 0,1 30.35,62.56 Z"
+        android:fillColor="#FFF2A65A"
+        android:strokeColor="#FF3A2E2A"
+        android:strokeWidth="1.04"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M 40.42,61.5 A 3.45,2.07 -6 0,1 37.2,63.92 A 3.45,2.07 -6 0,1 33.55,62.22 A 3.45,2.07 -6 0,1 36.77,59.8 A 3.45,2.07 -6 0,1 40.42,61.5 Z"
+        android:fillColor="#FFF2A65A"
+        android:strokeColor="#FF3A2E2A"
+        android:strokeWidth="1.04"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M 28.3,27.62 C 38.36,26.57 44.21,33.81 45.27,43.88 C 46.33,53.94 40.6,61.02 31.9,61.94 C 23.21,62.85 16.13,57.12 15.08,47.05 C 14.02,36.99 18.23,28.68 28.3,27.62 Z"
+        android:fillColor="#FFFFC37A"
+        android:strokeColor="#FF3A2E2A"
+        android:strokeWidth="1.04"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M 39.68,52.33 A 8.74,5.98 -6 0,1 31.62,59.19 A 8.74,5.98 -6 0,1 22.3,54.16 A 8.74,5.98 -6 0,1 30.37,47.3 A 8.74,5.98 -6 0,1 39.68,52.33 Z"
+        android:fillColor="#FFFFDDB0" />
+    <path
+        android:pathData="M 24.69,48.35 A 2.53,1.61 -6 0,1 22.35,50.22 A 2.53,1.61 -6 0,1 19.66,48.88 A 2.53,1.61 -6 0,1 22.01,47.02 A 2.53,1.61 -6 0,1 24.69,48.35 Z"
+        android:fillColor="#FFFF9E8F"
+        android:fillAlpha="0.5" />
+    <path
+        android:pathData="M 41.16,46.62 A 2.53,1.61 -6 0,1 38.82,48.49 A 2.53,1.61 -6 0,1 36.13,47.15 A 2.53,1.61 -6 0,1 38.48,45.29 A 2.53,1.61 -6 0,1 41.16,46.62 Z"
+        android:fillColor="#FFFF9E8F"
+        android:fillAlpha="0.5" />
+    <path
+        android:pathData="M 22.93,42.53 A 1.84,1.84 -6 0,0 26.59,42.14 Z"
+        android:fillColor="#FF3A2E2A" />
+    <path
+        android:pathData="M 32.99,41.47 A 1.84,1.84 -6 0,0 36.65,41.08 Z"
+        android:fillColor="#FF3A2E2A" />
+    <path
+        android:pathData="M 21.99,42.39 L 27.48,41.82"
+        android:strokeColor="#FF3A2E2A"
+        android:strokeWidth="1.04"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M 32.05,41.34 L 37.54,40.76"
+        android:strokeColor="#FF3A2E2A"
+        android:strokeWidth="1.04"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M 23.49,45.71 Q 25.19,46.45 26.69,45.37 M 33.56,44.65 Q 35.25,45.39 36.76,44.31"
+        android:strokeColor="#FFD9906B"
+        android:strokeWidth="0.69"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 31.83,48.07 A 1.38,1.73 -6 0,1 30.64,49.93 A 1.38,1.73 -6 0,1 29.09,48.35 A 1.38,1.73 -6 0,1 30.28,46.5 A 1.38,1.73 -6 0,1 31.83,48.07 Z"
+        android:fillColor="#FF3A2E2A"
+        android:strokeColor="#FF3A2E2A"
+        android:strokeWidth="1.04"
+        android:strokeLineJoin="round" />
+</vector>
