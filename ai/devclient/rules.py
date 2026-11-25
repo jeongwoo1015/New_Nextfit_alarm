@@ -158,7 +158,7 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
         add("알람 미루기: 요청이 없는데 미루지 않음", HARD, not asked, str(asked))
 
     kind = scn.kind
-    if kind == "briefing" and ("snooze" in e or "settings" in e):         # 말로 알람 미루기(11/20 회의 1)·설정 변경(회의 4): 일반 브리핑 흐름(확인 질문 → 4~7문장 브리핑)과 다른 흐름이라 따로 본다
+    if (kind == "briefing" and ("snooze" in e or "settings" in e)) or (kind == "coaching" and "snooze" in e):         # 말로 알람 미루기(11/20 회의 1)·설정 변경(회의 4): 일반 브리핑 흐름(확인 질문 → 4~7문장 브리핑)과 다른 흐름이라 따로 본다
         want = e.get("snooze") or {}                           # {"minutes_later": 10} / {"at_time": "09:00"} / {}(미루지 않음, 한도 초과 등)
         calls = log.calls("reschedule_alarm")
         ti = next((i for i, t in enumerate(turns) if "reschedule_alarm" in _names(t)), None)
@@ -171,6 +171,9 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
             add("미루기: 시간 값이 기대와 같음", HARD, got == want, f"실제={got} 기대={want}")
             add("미루기: 호출한 응답에서 다시 맞췄다고 알리고 직접 종료를 안내함", HARD, "맞췄" in said and "종료" in said, said[:140])
             add("미루기: 안내 뒤 다른 종료·시작 함수를 부르지 않음", HARD, not any(n in ("end_session", "start_routine") for t in turns for n in _names(t)), "")
+            if kind == "coaching":                   # 단계 진행 중 미루기: 같은 응답에서 단계 판정·시간 조정 함수를 부르지 않는다
+                add("미루기: 같은 응답에서 단계 판정·조정 함수를 부르지 않음", HARD,
+                    ti is not None and not any(n in ("report_step_result", "adjust_step_time", "select_stretch_area") for n in _names(turns[ti])), str(_names(turns[ti])) if ti is not None else "")
             add("미루기: 연결이 reschedule_alarm으로 끝남", HARD, log.ended_by == "reschedule_alarm", f"종료 방식={log.ended_by}")
             add("미루기: 안내가 날씨·일정 브리핑으로 이어지지 않음", HARD, not re.search(r"날씨|일정|포춘|루틴", said), said[:140])
             if e.get("asks_first"):                  # 시간을 말하지 않았으면 한 번만 되묻고, 답을 들은 뒤에 호출한다

@@ -12,10 +12,20 @@ def names(kind, inp=None):
     return [d["name"] for d in tools_for(kind, inp)[0]["functionDeclarations"]]
 
 
-def test_reschedule_alarm_is_only_in_the_briefing_session():
+def test_reschedule_alarm_is_in_briefing_and_coaching_sessions():
+    """11/24 시연: 영어 콘텐츠 통화에서 미루기가 안 됐다. 브리핑뿐 아니라 루틴·콘텐츠 통화에도 둔다. 밤·포춘에는 없다."""
     assert "reschedule_alarm" in names("briefing", BriefingInput())
-    for kind, inp in (("night", None), ("fortune", None), ("coaching", CoachingInput())):
-        assert "reschedule_alarm" not in names(kind, inp)
+    for inp in (CoachingInput(), CoachingInput(morning_call_type="CONTENT")):
+        assert "reschedule_alarm" in names("coaching", inp)
+    for kind in ("night", "fortune"):
+        assert "reschedule_alarm" not in names(kind)
+
+
+def test_coaching_function_is_removed_after_the_daily_limit():
+    for call_type in ("ROUTINE", "CONTENT"):
+        assert "reschedule_alarm" in names("coaching", CoachingInput(morning_call_type=call_type, snoozes_today=SNOOZE_MAX_PER_DAY - 1))
+        left = names("coaching", CoachingInput(morning_call_type=call_type, snoozes_today=SNOOZE_MAX_PER_DAY))
+        assert "reschedule_alarm" not in left and left[-1] == "end_session"
 
 
 def test_function_is_removed_after_the_daily_limit():
@@ -40,8 +50,15 @@ def test_prompt_rules_by_tone_and_limit():
     assert "알람 미루기 불가" in over and "reschedule_alarm을 호출한다" not in over and "절대 말하지 않는다" in over
 
 
-def test_coaching_prompt_has_no_snooze_rules():
-    assert "알람 미루기" not in coaching_prompt(CoachingInput(persona=Persona("예준")))
+def test_coaching_prompt_has_snooze_rules_for_steps():
+    for call_type in ("ROUTINE", "CONTENT"):
+        p = coaching_prompt(CoachingInput(persona=Persona("예준"), morning_call_type=call_type))
+        assert "[말로 알람 미루기(오늘만)]" in p and "단계를 진행하는 중이어도" in p
+        assert "report_step_result" in p.split("단계를 진행하는 중이어도", 1)[1] and "미루는 요청이 아니다" in p
+    over = coaching_prompt(CoachingInput(persona=Persona("예준"), snoozes_today=SNOOZE_MAX_PER_DAY))
+    assert "알람 미루기 불가" in over and "reschedule_alarm을 호출한다" not in over
+    briefing = briefing_prompt(BriefingInput())
+    assert "단계를 진행하는 중이어도" not in briefing           # 브리핑에는 단계 설명이 붙지 않는다
 
 
 def _turn(heard="", said="", calls=()):

@@ -165,8 +165,9 @@ def persona_block(p: Persona) -> str:
             "\n아래 예시 문장은 존댓말로 적혀 있어도 위 어조와 말투에 맞게 바꿔 말한다. 어조 설정이 문체 규칙보다 우선하지만 안전 규칙은 언제나 가장 우선한다.")
 
 
-def snooze_block(inp) -> str:
-    """브리핑에만 붙는 '말로 알람 미루기' 규칙(11/20 회의 1). 전화를 받은 뒤 사용자가 오늘만 알람을 미루고 싶다고 하면 reschedule_alarm을 부른다."""
+def snooze_block(inp, in_steps: bool = False) -> str:
+    """'말로 알람 미루기' 규칙(11/20 회의 1). 전화를 받은 뒤 사용자가 오늘만 알람을 미루고 싶다고 하면 reschedule_alarm을 부른다.
+    브리핑과 코칭(루틴·콘텐츠) 통화에 붙는다. in_steps=True면 단계 진행 중이라는 설명이 더 붙는다(11/24 시연: 영어 통화에서 미루기가 안 됐다)."""
     from ..tools import SNOOZE_MAX_MINUTES, SNOOZE_MAX_PER_DAY
     casual = inp.persona.tone == "CASUAL"
     used = max(0, int(getattr(inp, "snoozes_today", 0) or 0))
@@ -180,6 +181,8 @@ def snooze_block(inp) -> str:
                 f"- 오늘 이미 {used}번 미뤘으므로 더 미룰 수 없다. 사용자가 알람을 미루고 싶다고 하면 알람을 다시 맞출 수 없다고 부드럽게 말하고 \"{stop}\"처럼 일어나도록 권한다(○에 {used}를 넣는다). "
                 "알람을 다시 맞췄다거나 미뤘다고는 절대 말하지 않는다. 졸리다는 말만 한 경우는 평소처럼 반응한다.")
     used_line = f"오늘 이미 {used}번 미뤘다(남은 횟수 {SNOOZE_MAX_PER_DAY - used}번)."
+    steps_note = ("\n- 단계를 진행하는 중이어도 사용자가 알람을 미루고 싶다고 분명히 말하면 같은 규칙으로 reschedule_alarm을 부른다. 이때 현재 단계의 판정(report_step_result)·단계 시간 조정·부위 선택 같은 함수는 같은 응답에서 부르지 않는다(현재 단계는 끝내지 않은 채 남는다). "
+                  "단계에서 요구한 대답(영어 문장 따라 말하기, 퀴즈 정답, 끝말잇기 단어, 따라 하는 동작)이나 \"잠깐만\", \"다시 한 번 말해 줘\"는 미루는 요청이 아니다. 알람을 다시 울려 달라는 뜻이 분명하지 않으면 먼저 한 번 묻는다." if in_steps else "")
     return ("[말로 알람 미루기(오늘만)]\n"
             f"- 사용자가 알람을 미루고 싶다고 분명히 말하면 reschedule_alarm을 호출한다. 예: \"10분 뒤에 다시 울려 줘\", \"5분만 더 잘게, 다시 깨워 줘\", \"9시에 다시 맞춰 줘\". "
             "몇 분 뒤인지 또는 몇 시인지 말했으면 되묻지 않고 바로 호출한다(\"10분 뒤\"는 minutes_later=10, \"9시\"는 at_time=\"09:00\").\n"
@@ -188,7 +191,7 @@ def snooze_block(inp) -> str:
             f"- 한 번에 최대 {SNOOZE_MAX_MINUTES}분까지, 하루 최대 {SNOOZE_MAX_PER_DAY}번까지 미룰 수 있다. {SNOOZE_MAX_MINUTES}분을 넘는 시간을 말하면 \"{over}\"처럼 알리고 답을 들은 뒤에 호출한다. "
             "[현재 시각]이 있으면 시각으로 말한 요청이 지금보다 뒤이고 60분 안인지 확인하고, 아니면 다시 묻는다. " + used_line + "\n"
             f"- 다시 맞췄다고 알리는 한 문장을 먼저 말하고, 그 응답의 맨 끝에서 reschedule_alarm을 호출한다(호출한 뒤에는 어떤 말도 하지 않는다). 분으로 말했으면 \"{done}\", 시각으로 말했으면 \"{done_at}\"처럼 말한다. "
-            "이 안내 뒤에는 브리핑·루틴·콘텐츠를 이어 하지 않고, 다음 순서로 넘기는 함수나 end_session도 부르지 않는다. 미루기는 오늘만이고 기본 알람 설정은 그대로다.")
+            "이 안내 뒤에는 브리핑·루틴·콘텐츠를 이어 하지 않고, 다음 순서로 넘기는 함수나 end_session도 부르지 않는다. 미루기는 오늘만이고 기본 알람 설정은 그대로다." + steps_note)
 
 
 SETTING_NAMES = {

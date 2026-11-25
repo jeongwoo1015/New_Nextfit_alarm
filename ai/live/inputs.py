@@ -131,6 +131,7 @@ class CoachingInput:
     content_option: str = ""           # 콘텐츠 세부(알람의 content_option 또는 compose_content_steps 결과의 option)
     plan: tuple[str, ...] = ()         # 모닝콜 순서표. 첫 연결 문장(앞 단계)과 마무리(다음이 포춘이면 포춘으로 넘김)에 쓴다. 비어 있으면 지금 앱 순서(포춘 다음 코칭, 코칭이 마지막)
     stretch_routines: tuple = ()       # 스트레칭 부위별 루틴 ((부위, (Step, ...)), ...) = ai.tasks.stretch_sets.all_area_steps() (부위 12개, 루틴마다 4단계 180초). 있으면 AI가 "오늘 어디가 불편하세요?"로 부위를 묻고 select_stretch_area를 부른다. 없으면 steps 그대로 진행
+    snoozes_today: int = 0             # 오늘 이미 미룬 횟수(버튼·말 합산). 콘텐츠·루틴 통화에서도 말로 미룰 수 있어 한도 판단에 쓴다(B21). 서버가 넘긴다
 
 
 def content_kind(inp) -> str:

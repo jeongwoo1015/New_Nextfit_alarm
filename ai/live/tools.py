@@ -68,7 +68,8 @@ ADJUST_STEP_TIME = {
     },
 }
 
-# 모닝콜 말로 미루기(11/20 회의 1): 전화를 받은 뒤 "~분 뒤에 다시 울려 줘", "9시에 다시 맞춰 줘"라고 하면 오늘만 알람을 다시 맞춘다. 브리핑(전화를 받은 직후의 세션)에만 둔다.
+# 모닝콜 말로 미루기(11/20 회의 1, 11/24 확대): 전화를 받은 뒤 "~분 뒤에 다시 울려 줘", "9시에 다시 맞춰 줘"라고 하면 오늘만 알람을 다시 맞춘다.
+# 브리핑뿐 아니라 루틴·콘텐츠(코칭) 통화에도 둔다. 미루면 언제든 그날 기상은 실패로 센다(서버 몫, B21). 포춘(읽고 멈추는 세션)은 함수를 부르지 않으므로 뺀다.
 # 앱은 end_session처럼 응답하지 않고 안내 음성이 끝나면 연결을 닫고 알람을 다시 예약한다(사용자가 지금 울리는 알람은 직접 종료한다).
 SNOOZE_MAX_MINUTES = 60
 SNOOZE_MAX_PER_DAY = 3
@@ -131,8 +132,11 @@ def tools_for(kind: str, inp=None) -> list[dict]:
         follows = COACHING in resolve_plan(inp, BRIEFING)
         can_snooze = int(getattr(inp, "snoozes_today", 0) or 0) < SNOOZE_MAX_PER_DAY      # 하루 한도를 넘은 날은 함수를 빼서 호출할 수 없게 한다
         return [{"functionDeclarations": ([START_ROUTINE] if follows else []) + ([RESCHEDULE_ALARM] if can_snooze else []) + [UPDATE_SETTING, END_SESSION]}]
-    if kind == "coaching" and getattr(inp, "morning_call_type", "ROUTINE") == "CONTENT":
-        report = REPORT_STEP_RESULT_QUIZ if content_kind(inp) == "QUIZ" else REPORT_STEP_RESULT
-        area = [SELECT_STRETCH_AREA] if content_kind(inp) == "STRETCH" and getattr(inp, "stretch_routines", ()) else []
-        return [{"functionDeclarations": area + [report, END_SESSION]}]
+    if kind == "coaching":
+        snooze = [RESCHEDULE_ALARM] if int(getattr(inp, "snoozes_today", 0) or 0) < SNOOZE_MAX_PER_DAY else []   # 코칭 통화에서도 하루 한도를 넘은 날은 함수를 뺀다
+        if getattr(inp, "morning_call_type", "ROUTINE") == "CONTENT":
+            report = REPORT_STEP_RESULT_QUIZ if content_kind(inp) == "QUIZ" else REPORT_STEP_RESULT
+            area = [SELECT_STRETCH_AREA] if content_kind(inp) == "STRETCH" and getattr(inp, "stretch_routines", ()) else []
+            return [{"functionDeclarations": area + [report] + snooze + [END_SESSION]}]
+        return [{"functionDeclarations": list(_BY_KIND[kind][:-1]) + snooze + [END_SESSION]}]
     return [{"functionDeclarations": list(_BY_KIND[kind])}]

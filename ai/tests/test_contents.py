@@ -212,9 +212,9 @@ def test_answer_correct_only_for_quiz():
     assert set(quiz["parameters"]["properties"]["verdict"]["enum"]) == {"done", "not_done", "skipped", "ambiguous", "other"}
     for other in (stretch_steps(D0), english_fallback(D0), wordchain_steps(D0)):
         decl = declared(cin(other))
-        assert "answer_correct" not in decl["report_step_result"]["parameters"]["properties"] and list(decl) == ["report_step_result", "end_session"]
+        assert "answer_correct" not in decl["report_step_result"]["parameters"]["properties"] and list(decl) == ["report_step_result", "reschedule_alarm", "end_session"]
     routine = tools_for("coaching", CoachingInput(steps=()))[0]["functionDeclarations"]
-    assert "answer_correct" not in routine[0]["parameters"]["properties"] and [d["name"] for d in routine] == ["report_step_result", "adjust_step_time", "end_session"]
+    assert "answer_correct" not in routine[0]["parameters"]["properties"] and [d["name"] for d in routine] == ["report_step_result", "adjust_step_time", "reschedule_alarm", "end_session"]
 
 
 def test_quiz_session_setup_uses_quiz_declaration():

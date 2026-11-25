@@ -33,7 +33,7 @@ def test_verdicts_match_spec():
 def test_tools_per_kind():
     names = lambda k: [d["name"] for d in tools_for(k)[0]["functionDeclarations"]]
     assert names("night") == ["update_setting", "end_session"] and names("briefing") == ["start_routine", "reschedule_alarm", "update_setting", "end_session"]
-    assert names("coaching") == ["report_step_result", "adjust_step_time", "end_session"]
+    assert names("coaching") == ["report_step_result", "adjust_step_time", "reschedule_alarm", "end_session"]
 
 
 @pytest.mark.parametrize("prompt", [
@@ -236,8 +236,8 @@ def test_tools_follow_the_session_plan():
     assert names("briefing", BriefingInput(content_name="퀴즈")) == ["start_routine", "reschedule_alarm", "update_setting", "end_session"]        # 콘텐츠 세션이 이어짐
     assert names("briefing", BriefingInput(coaching_skipped=True, content_name="퀴즈")) == ["reschedule_alarm", "update_setting", "end_session"]  # 코칭 안 하는 날
     assert names("briefing", BriefingInput(coaching_skipped=True)) == ["reschedule_alarm", "update_setting", "end_session"]
-    assert names("coaching", CoachingInput(steps=q)) == ["report_step_result", "adjust_step_time", "end_session"]   # 루틴 세션: 오늘 시간 변경 가능
-    assert names("coaching", CoachingInput(morning_call_type="CONTENT", steps=q)) == ["report_step_result", "end_session"]   # 콘텐츠는 고정 시간
+    assert names("coaching", CoachingInput(steps=q)) == ["report_step_result", "adjust_step_time", "reschedule_alarm", "end_session"]   # 루틴 세션: 오늘 시간 변경 가능
+    assert names("coaching", CoachingInput(morning_call_type="CONTENT", steps=q)) == ["report_step_result", "reschedule_alarm", "end_session"]   # 콘텐츠는 고정 시간
     assert [d["name"] for d in build_setup("briefing", BriefingInput(content_name="퀴즈"))["tools"][0]["functionDeclarations"]] == ["start_routine", "reschedule_alarm", "update_setting", "end_session"]
 
 
