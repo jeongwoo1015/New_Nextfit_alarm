@@ -163,7 +163,8 @@ private fun MorningIncomingScreen(
     val view = LocalView.current
     val alarm = remember { AlarmSoundPlayer(context) }
     val vibration = remember { AlarmVibrator(context) }
-    // 시작 단계: 넥스티에게 말로 정한 값(다음 한 번·상한)이 있으면 그 값, 없으면 서버 추천(아직 API가 없어 1단계)
+    // 시작 단계: 서버가 정해 준 오늘의 시작 단계(GET /wake-volume/next, 미리 받아 둠). 오늘 값을 못 받았으면
+    // 넥스티에게 말로 정한 값(다음 한 번 > 상한), 그것도 없으면 1단계
     val startLevel = remember { WakeLevelPrefs.takeStartLevel() }
     var level by remember { mutableIntStateOf(startLevel) }
     var countdown by remember { mutableIntStateOf(VOLUME_UP_SECONDS) }
@@ -172,7 +173,7 @@ private fun MorningIncomingScreen(
     DisposableEffect(Unit) {
         view.keepScreenOn = true
         alarm.start(level = startLevel)
-        // 진동: 볼륨 단계를 따라 세지고, 최근 아침 기록으로 나눈 유형에 따라 시작 세기가 다름
+        // 진동: 볼륨 단계를 따라 세지고, 서버 기상 성공률로 나눈 유형(WakeHistory)에 따라 시작 세기가 다름
         vibration.start(startLevel, WakeHistory.profile(context))
         onDispose {
             view.keepScreenOn = false

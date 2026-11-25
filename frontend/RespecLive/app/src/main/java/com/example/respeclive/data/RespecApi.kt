@@ -271,8 +271,9 @@ object RespecApi {
     }
 
     /**
-     * 아침 기상 볼륨 결과 보고 (AI CONTRACTS B23 학습 입력): 알람이 울리기 시작한 단계와 전화를 받은 순간의 단계(1~5, 못 받았으면 null).
-     * 서버는 그날 처음 보고한 세션만 기록
+     * 아침 기상 볼륨 결과 보고 (AI CONTRACTS B23 학습 입력): 알람이 울리기 시작한 단계와 반응한 순간의 단계(1~5).
+     * 반응한 단계 = 전화를 받거나 미루기 버튼을 누른 순간의 단계(11/25). 받지 않고 껐으면 null.
+     * 서버는 그날 첫 보고만 남기고, 다시 울린 알람의 보고는 무시함 (미룬 날은 서버가 볼륨 학습에서 실패로 봄)
      */
     suspend fun reportWakeResult(sessionId: String, startLevel: Int, receivedLevel: Int?): Boolean {
         val body = JSONObject().put("start_level", startLevel).put("received_level", receivedLevel ?: JSONObject.NULL)
