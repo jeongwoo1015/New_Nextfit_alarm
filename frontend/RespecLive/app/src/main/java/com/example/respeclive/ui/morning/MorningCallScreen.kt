@@ -119,7 +119,7 @@ fun MorningCallScreen(
                 onFinish()
             },
             snoozeLeft = SnoozeCount.left(snoozesToday),
-            onSnooze = {
+            onSnooze = { pressedLevel ->
                 if (snoozing || snoozesToday >= SnoozeCount.MAX_PER_DAY) return@MorningIncomingScreen
                 snoozing = true
                 scope.launch {
@@ -142,7 +142,7 @@ fun MorningCallScreen(
                         "${AlarmScheduler.SNOOZE_MINUTES}분 뒤에 다시 울려요 · " + if (left > 0) "오늘 ${left}번 더 미룰 수 있어요" else "오늘은 마지막 미루기예요",
                         Toast.LENGTH_SHORT
                     ).show()
-                    reportWake(null)    // 받지 않고 미룸 (다시 울려 받으면 그 결과로 덮어씀)
+                    reportWake(pressedLevel)    // 미루기 버튼을 누른 순간의 단계
                     onSnooze()
                 }
             },
@@ -155,7 +155,7 @@ fun MorningCallScreen(
 private fun MorningIncomingScreen(
     onAnswer: (receivedLevel: Int) -> Unit,
     onDismiss: () -> Unit,
-    onSnooze: () -> Unit,
+    onSnooze: (pressedLevel: Int) -> Unit,
     alarmLabel: String = "오전 6:00",
     snoozeLeft: Int = SnoozeCount.MAX_PER_DAY,
 ) {
@@ -286,7 +286,7 @@ private fun MorningIncomingScreen(
             })
             Spacer(Modifier.height(8.dp))
             // 하루 3번(버튼·말 합산)을 다 쓰면 누를 수 없음
-            TextButton(onClick = onSnooze, enabled = snoozeLeft > 0) {
+            TextButton(onClick = { onSnooze(level) }, enabled = snoozeLeft > 0) {
                 Text(
                     if (snoozeLeft > 0) "${AlarmScheduler.SNOOZE_MINUTES}분 뒤 다시 울리기 · ${snoozeLeft}번 남음"
                     else "오늘은 더 미룰 수 없어요",
