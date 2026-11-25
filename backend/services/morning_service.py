@@ -60,8 +60,13 @@ def fortune_based_on(source: str | None, night) -> str:
     if (night.voice_text or "").strip():
         return "ONE_LINER"
     return "DIARY" if (night.diary_text or "").strip() else ""
+def bandit_key(user_id: str) -> str:
+    """코칭 강도 학습 상태 키 (AI B27, 11/25): 사용자별로 학습한다. 예전 합산 키 'global'은 읽지 않는다.
+    기상 볼륨은 'wake:user:{id}'로 따로 저장한다(wake_service)."""
+    return f"user:{user_id}"
+
+
 STRATEGY_CATCH_UP_DAYS = 7      # 지난 며칠의 보상을 다음 알람 때 매기는지
-BANDIT_KEY = "global"           # AI CONTRACTS 6-4: 여러 사용자를 합쳐야 경향이 보여 전체 합산 상태를 쓴다
 RECENT_DAYS = 7
 INTENSITY_DAYS = 14             # 자동 강도: 지난 알람 결과를 이만큼 본다 (AI 규칙은 최근 3번 단위, 그날 쓴 강도를 따라감)
 
@@ -277,13 +282,13 @@ class MorningService:
             s = self.r.sessions.get_session(user_id, lg.session_id)
             if not s:
                 return False
-            res = self.ai.learn_strategy(self.r.personalization.get_bandit_state(BANDIT_KEY), lg, s,
+            res = self.ai.learn_strategy(self.r.personalization.get_bandit_state(bandit_key(user_id)), lg, s,
                                          self.r.sessions.list_steps(user_id, s.session_id))
             if res.reward is None:
                 return False
             self.r.personalization.set_reward(lg.log_id, res.reward)
             if res.state is not None:
-                self.r.personalization.save_bandit_state(BANDIT_KEY, res.state)
+                self.r.personalization.save_bandit_state(bandit_key(user_id), res.state, user_id)
             return True
         except Exception:
             log.exception("코칭 강도 학습 실패 user=%s day=%s", user_id, day)
@@ -339,7 +344,7 @@ class MorningService:
             setting = self.r.users.get_setting(user_id)
             d = self.ai.decide_strategy(user_id, records, s.session_date, night.condition_label if night else None,
                                         setting.personality if setting else None, self.mode,   # AI B17: 성격 값을 넘겨도 된다
-                                        self.r.personalization.get_bandit_state(BANDIT_KEY))
+                                        self.r.personalization.get_bandit_state(bandit_key(user_id)))
             self.r.personalization.save_strategy_log(user_id, s.session_id, d.log_row)
             return d.briefing_block, d.coaching_block
         except AppError as e:

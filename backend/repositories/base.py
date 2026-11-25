@@ -113,7 +113,7 @@ class PersonalizationRepository(Protocol):
     def save_strategy_log(self, user_id: str, session_id: str | None, row: dict) -> str: ...  # DecisionLog.to_row(). JSON 문자열 칸은 JSON으로. log_id
     def get_strategy_log(self, user_id: str, session_date: date) -> StrategyLog | None: ...   # 그날 가장 먼저 만든 로그
     def set_reward(self, log_id: str, reward: float) -> None: ...
-    def get_bandit_state(self, state_key: str) -> dict | None: ...                   # 코칭 'global'·'user:{user_id}', 기상 볼륨 'wake:global'·'wake:user:{user_id}'
+    def get_bandit_state(self, state_key: str) -> dict | None: ...                   # 코칭 'user:{user_id}'(B27, 'global'은 안 씀), 기상 볼륨 'wake:global'·'wake:user:{user_id}'
     def save_bandit_state(self, state_key: str, state: dict, user_id: str | None = None) -> None: ...  # 사용자 키는 user_id와 맞아야 함(아니면 DB CHECK 오류)
 
     # 기상 볼륨 기록 — rs_wake_log, 하루 1행 (11/22). 행은 DB 칸 그대로의 dict(session_date는 ISO 문자열)

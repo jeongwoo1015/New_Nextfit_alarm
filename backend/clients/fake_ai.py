@@ -27,6 +27,7 @@ class FakeAIGateway:
     fortune_error: Exception | None = None      # 정하면 compose_fortune이 이 오류를 던진다 (AI 사용 불가 흉내)
     intensity: int | None = None                # 정하면 자동 강도가 켜진 사용자에게 today_intensity가 이 값을 준다
     calls: list = field(default_factory=list)
+    decide_states: dict = field(default_factory=dict)       # 사용자별 decide_strategy가 받은 학습 상태
     content_extra: tuple = ()                   # 마지막 compose_content_steps의 (english_level, context)
     fortune_plan: tuple = ()                    # 마지막 포춘 토큰의 순서표
     wake_recommended: int = 1                   # decide_wake_level이 추천하는 시작 단계
@@ -61,6 +62,7 @@ class FakeAIGateway:
 
     def decide_strategy(self, user_id, records, today, condition, speech_style, mode, bandit_state):
         self.calls.append(("decide", (user_id, today, condition, speech_style, mode, len(records.sessions))))
+        self.decide_states[user_id] = bandit_state                    # 사용자마다 받은 학습 상태 (B27)
         b, c = self.strategy_blocks(self.strategy)
         row = {"user_id": user_id, "session_date": today.isoformat(), "source": "rule", "mode": mode,
                "strategy_id": self.strategy["strategy_id"], "strategy": self.strategy}
