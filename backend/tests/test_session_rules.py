@@ -91,5 +91,6 @@ def test_judge_wake():
                           first_response_at=datetime(2026, 11, 2, 7, 3, tzinfo=KST))
     assert judge_wake(base) is True
     assert judge_wake(replace(base, snooze_count=1)) is False                  # 스누즈 한 번이라도
+    assert judge_wake(base, snoozes_today=1) is False                          # 그날 다른 세션에서 미뤘어도 실패 (11/24)
     assert judge_wake(replace(base, rewake_count=1)) is False                  # 무응답으로 재기상 음악
     assert judge_wake(replace(base, first_response_at=None)) is False

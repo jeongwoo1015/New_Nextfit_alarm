@@ -37,7 +37,7 @@
 | `PATCH /night/records/{id}/voice-text` | 굿나잇콜 | 목소리 업로드 뒤 기기에서 받아쓴 '내일의 한마디' `{text}`(500자 이하, 빈 글 = 비우기). 목소리를 다시 올리면 비워지므로 다시 보낸다. 목소리가 없으면 409 `VOICE_NOT_UPLOADED` |
 | `POST /morning/sessions` | 알람 울림 | `{alarm_id}` → 오늘 세션 만들기(하루 한정 변경 반영) 또는 기존 세션(재연결). 응답 뒤 백그라운드에서 오늘의 포춘 문장을 만들어 세션에 저장. 이 응답에만 `morning_plan`(아침 순서표, AI B15)과 스트레칭 알람이면 `stretch_routines`(부위 12개 루틴, 루틴마다 4단계 180초, 부위를 아직 고를 수 있을 때만, AI B17)이 들어 있다. 처음 만들 때 그날 강도(`applied_intensity`, 자동 강도 반영)를 정해 저장. 굿나잇콜 알람이면 409 `NOT_WAKE_ALARM` |
 | `POST /morning/sessions/{id}/rewake` · `/response` | 모닝콜 | 8초 무응답 재기상(AI 음악) 횟수 +1 / 첫 음성 응답 시각(= 기상 성공 시각) |
-| `POST /morning/sessions/{id}/snooze` | 모닝콜 | 미루기. 버튼은 본문 없이(5분), 말로 미루기(AI `reschedule_alarm`)는 `{"minutes_later": 1~60}` 또는 `{"at_time": "HH:MM"}`(오늘, 60분 안). 응답 `snooze_count`·`snoozes_today`·`snoozed_until` → 앱이 그 시각에 한 번 다시 예약. 버튼·말 합쳐 하루 3번(넘으면 409 `SNOOZE_LIMIT`). 다시 울리면 `POST /morning/sessions`로 같은 세션 |
+| `POST /morning/sessions/{id}/snooze` | 모닝콜 | 미루기. 버튼은 본문 없이(5분), 말로 미루기(AI `reschedule_alarm`)는 `{"minutes_later": 1~60}` 또는 `{"at_time": "HH:MM"}`(오늘, 60분 안). 응답 `snooze_count`·`snoozes_today`·`snoozed_until` → 앱이 그 시각에 한 번 다시 예약. 버튼·말 합쳐 하루 3번(넘으면 409 `SNOOZE_LIMIT`). 다시 울리면 `POST /morning/sessions`로 같은 세션. 미루면 확인 멘트 전후·통화 종류와 상관없이 그날 기상은 실패(이미 성공인 그날 세션도 되돌림, 11/24 AI B25) |
 | `POST /morning/sessions/{id}/wake-check` | 브리핑 | 확인 멘트(2~3개)를 모두 마침 — 브리핑 Live의 `wake_check_done`을 앱이 전달. 이때 기상 성공 판정 |
 | `POST /morning/sessions/{id}/wake-volume` | 모닝콜 | 기상 볼륨 결과 `{"start_level": 1~5, "received_level": 1~5 \| null}` (전화를 받은 직후, 받지 않고 껐으면 null). 그날 처음 보고한 세션만 기록. 확인 질문을 마치거나 세션이 끝나면 서버가 한 번 학습 |
 | `PUT /morning/sessions/{id}/steps/{n}/score` | 게임 | 게임 기록 `{"score": 주고받은 횟수}`(앱이 셈, 이어 하기로 다시 보내면 바뀜). 게임(QUIZ) 세션만, 아니면 422 `NOT_GAME_SESSION`. 응답 `best_score`(같은 게임 최고 기록)·`is_best`. 말한 단어는 서버에 저장하지 않음(기기에만, 11/23) |
@@ -142,10 +142,12 @@ AI 쪽 브리핑 입력의 `coaching_min`은 0(코칭 안 함)/10(진행)으로�
 4. 알람이 울리면(세션 시작) `wake_next_level`을 비운다. 앱 보고 → 확인 질문을 마친 때(재기상 없음 = 확인 성공), 확인 없이 끝난 때, 받지 않은 때 한 번만 학습(`wake:user:{id}`, `wake:global`). 미루기는 볼륨 학습에 넣지 않는다.
 AI를 쓸 수 없으면 사용자 값 → 직전 단계 → 1단계로 울리고 학습은 하지 않는다.
 
-## 기상 성공 기준 (11/01 팀 확정)
+## 기상 성공 기준 (11/01 팀 확정, 11/24 미루기 규칙 변경)
 브리핑 전 확인 멘트 2~3개(예: "잘 주무셨어요?")에 모두 응답했고, 그때까지 ① 스누즈("5분 뒤 다시 울리기")를 한 번도 하지 않았고
 ② 8초 무응답으로 AI 재기상 음악이 한 번도 나오지 않았으면 성공. 기상 성공 시각은 첫 응답(`first_response_at`).
-판정은 확인 멘트를 마친 순간(`POST .../wake-check`, `wake_checked_at`) 한 번만 하고, 그 뒤의 재기상·스누즈는 판정을 바꾸지 않는다.
+판정은 확인 멘트를 마친 순간(`POST .../wake-check`, `wake_checked_at`) 한 번만 하고, 그 뒤의 재기상은 판정을 바꾸지 않는다.
+**미루기는 예외(11/24 결정, AI CONTRACTS B25):** 버튼·말, 어느 통화에서든(확인 멘트를 마친 뒤 루틴·콘텐츠 통화 중이어도) 미루면 그날 기상은 실패다.
+`POST .../snooze`를 받으면 그날 모든 세션의 `wake_success`를 False로 되돌리고, 그 뒤에 확인 멘트를 마친 그날 세션도 실패로 판정한다.
 실패해도 브리핑·루틴은 그대로 진행한다. 확인 멘트를 끝내지 못한 채 세션이 끝나면 실패(기본값 FALSE)로 남는다.
 DB에 `rs_morning_session.snooze_count`, `wake_checked_at` 컬럼이 필요하다(backend-db에 요청).
 

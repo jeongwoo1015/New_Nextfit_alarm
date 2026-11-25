@@ -104,9 +104,11 @@ def test_coaching_token_has_no_following_session():
     gw.issue_coaching_token(CoachingContext(PERSONA, "ROUTINE", steps, resumed=True, night=NIGHT))
     body = tokens[-1][1]
     assert "물 한 잔" in system_text(body) and "1. 기지개" in system_text(body)
-    assert tool_names(body) == ["report_step_result", "adjust_step_time", "end_session"]   # 11/01: 이어지는 세션 없음
+    assert tool_names(body) == ["report_step_result", "adjust_step_time", "reschedule_alarm", "end_session"]   # 11/01: 이어지는 세션 없음, 11/24 말로 미루기
     gw.issue_coaching_token(CoachingContext(PERSONA, "CONTENT", steps))
-    assert tool_names(tokens[-1][1]) == ["report_step_result", "end_session"]   # 콘텐츠는 고정 시간이라 시간 변경 없음
+    assert tool_names(tokens[-1][1]) == ["report_step_result", "reschedule_alarm", "end_session"]   # 콘텐츠는 고정 시간이라 시간 변경 없음
+    gw.issue_coaching_token(CoachingContext(PERSONA, "CONTENT", steps, snoozes_today=3))
+    assert tool_names(tokens[-1][1]) == ["report_step_result", "end_session"]   # 하루 3번 미뤘으면 코칭에서도 미루기 함수 없음 (AI B25)
 
 
 def test_token_http_failure_is_503():

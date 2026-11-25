@@ -230,9 +230,46 @@ def test_snooze_fails_and_reuses_session(client, morning, clock):
 def test_wake_check_is_judged_once(client, morning):
     v = start(client, morning).json()
     client.post(url(v, "/response"), headers=auth(USER_A))
+    first = client.post(url(v, "/wake-check"), headers=auth(USER_A)).json()["session"]
+    assert first["wake_success"] is True
+    client.post(url(v, "/rewake"), headers=auth(USER_A))                         # 확인 멘트 뒤의 재기상은 판정을 바꾸지 않음
+    again = client.post(url(v, "/wake-check"), headers=auth(USER_A)).json()["session"]
+    assert again["wake_success"] is True and again["wake_checked_at"] == first["wake_checked_at"]
+
+
+def test_snooze_after_wake_check_reverts_success(client, morning, clock):
+    """11/24 결정(AI B25): 확인 멘트를 마친 뒤 루틴·콘텐츠 통화 중에 미뤄도 그날 기상은 실패."""
+    v = start(client, morning).json()
+    client.post(url(v, "/response"), headers=auth(USER_A))
     assert client.post(url(v, "/wake-check"), headers=auth(USER_A)).json()["session"]["wake_success"] is True
-    client.post(url(v, "/snooze"), headers=auth(USER_A))
-    assert client.post(url(v, "/wake-check"), headers=auth(USER_A)).json()["session"]["wake_success"] is True
+    assert client.post(url(v, "/snooze"), json={"minutes_later": 10}, headers=auth(USER_A)).status_code == 200
+    assert client.get(url(v), headers=auth(USER_A)).json()["session"]["wake_success"] is False
+    clock.now = datetime(2026, 11, 6, 7, 10, tzinfo=KST)                         # 다시 울려 같은 세션을 이어 받아도 실패 그대로
+    start(client, morning)
+    assert client.post(url(v, "/wake-check"), headers=auth(USER_A)).json()["session"]["wake_success"] is False
+
+
+def test_snooze_fails_whole_day(client, morning, clock):
+    """그날 한 번이라도 미뤘으면 다른 알람 세션도 실패: 이미 성공인 세션은 되돌리고, 나중 세션은 성공으로 판정하지 않는다."""
+    v = start(client, morning).json()
+    client.post(url(v, "/response"), headers=auth(USER_A))
+    client.post(url(v, "/wake-check"), headers=auth(USER_A))
+    other = client.post("/alarms", json={"alarm_time": "07:30", "morning_call_type": "CONTENT", "content_type": "QUIZ",
+                                         "content_option": "WORDCHAIN"}, headers=auth(USER_A)).json()
+    later = client.post("/alarms", json={"alarm_time": "08:00", "morning_call_type": "CONTENT", "content_type": "QUIZ",
+                                         "content_option": "WORDCHAIN"}, headers=auth(USER_A)).json()
+    clock.now = datetime(2026, 11, 6, 7, 30, tzinfo=KST)
+    w = start(client, other).json()
+    client.post(url(w, "/snooze"), headers=auth(USER_A))
+    assert client.get(url(v), headers=auth(USER_A)).json()["session"]["wake_success"] is False   # 앞 세션의 성공을 되돌림
+    clock.now = datetime(2026, 11, 6, 8, 0, tzinfo=KST)
+    x = start(client, later).json()
+    client.post(url(x, "/response"), headers=auth(USER_A))
+    assert client.post(url(x, "/wake-check"), headers=auth(USER_A)).json()["session"]["wake_success"] is False
+    clock.now = datetime(2026, 11, 7, 7, 0, tzinfo=KST)                           # 다음 날은 영향 없음
+    y = start(client, morning).json()
+    client.post(url(y, "/response"), headers=auth(USER_A))
+    assert client.post(url(y, "/wake-check"), headers=auth(USER_A)).json()["session"]["wake_success"] is True
 
 
 def test_wake_check_fills_missing_first_response(client, morning):
@@ -325,5 +362,7 @@ def test_snooze_limit_three_per_day_across_alarms(client, morning, clock, ai):
     assert res.status_code == 409 and res.json()["error"]["code"] == "SNOOZE_LIMIT"
     client.post(url(v, "/briefing-token"), json={}, headers=auth(USER_A))
     assert [c for c in ai.calls if c[0] == "briefing_token"][-1][1].snoozes_today == 3
+    client.post(url(v, "/coaching-token"), headers=auth(USER_A))                 # 루틴·콘텐츠 통화에도 같은 값 (AI B25)
+    assert [c for c in ai.calls if c[0] == "coaching_token"][-1][1].snoozes_today == 3
     clock.now = datetime(2026, 11, 7, 7, 0, tzinfo=KST)                           # 다음 날은 다시 3번
     assert client.post(url(start(client, morning).json(), "/snooze"), headers=auth(USER_A)).json()["snoozes_today"] == 1

@@ -142,6 +142,7 @@ class CoachingContext:
     content_option: str = ""
     plan: tuple[str, ...] = ()
     stretch_routines: tuple = ()            # ((부위, (CoachStep, ...)), ...) 있으면 AI가 부위를 묻고 select_stretch_area (AI B17)
+    snoozes_today: int = 0                  # 오늘 미룬 횟수 (버튼·말 합산). 루틴·콘텐츠 통화에서도 말로 미룰 수 있어 한도 판단에 쓴다 (AI B25)
 
 
 @dataclass(frozen=True)
@@ -412,7 +413,8 @@ class RealAIGateway:
             steps=tuple(step(s) for s in ctx.steps),
             resumed=ctx.resumed, night=self._night(ai, ctx.night), strategy_block=ctx.strategy_block,
             content_type=ctx.content_type, content_option=ctx.content_option, plan=ctx.plan,
-            stretch_routines=tuple((area, tuple(step(s) for s in steps)) for area, steps in ctx.stretch_routines))
+            stretch_routines=tuple((area, tuple(step(s) for s in steps)) for area, steps in ctx.stretch_routines),
+            snoozes_today=ctx.snoozes_today)
         return self._issue("coaching", build_setup("coaching", inp))
 
     def compose_content_steps(self, content_type: str, content_option: str | None, duration_sec: int, today: date,
