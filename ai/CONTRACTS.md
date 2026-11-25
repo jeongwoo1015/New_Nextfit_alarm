@@ -436,10 +436,10 @@ alter table rs_morning_session add constraint rs_morning_session_stretch_area_ch
   1. 밤 대화 시작 전: `d = decide_start_level(personal, global_, sleep_minutes, prefs, previous_level, notified, important_day)`로 내일 시작 단계를 정한다. `personal`은 사용자별 사다리(`rs_bandit_state` 같은 저장 위치의 `WakeLadder.to_dict()`), `global_`은 전체 합산(`WakeLadder.merge`). 사용자가 대화로 정한 값은 `UserWakePrefs(max_start_level, next_alarm_level)`로 넘긴다. `notified`는 "AI가 올린다고 실제로 말했는가"다. 밤 대화 글에서 `raise_announced(AI 발화 글, d.applied)`로 확인한다(AI가 알림을 빠뜨리는 날이 실제 모델 시험에서 5번 중 1~2번 있었다). False면 같은 날 다시 `decide_start_level(..., notified=False)`를 불러 이전 단계를 유지한다. 올린다고 알린 뒤 사용자가 반대하면 AI가 `update_setting(wake_volume, 이전 단계, TODAY)`(지속이면 ALWAYS)를 부른다(B22). `d.raise_pending`이 True면 밤 입력의 `SettingsView(wake_start_level=d.applied, wake_raise_from=previous_level, wake_state=d.state)`를 채운다.
   2. 알람 예약: `d.applied`를 내일 기상 알람의 시작 단계로 앱에 전달한다. 재기상 알람은 `rewake_level(d.applied)`.
   3. 아침 뒤: 앱이 알려 준 값으로 `learn_wake(ladder, d.context_key, 시작 단계, 받은 단계 또는 None, confirmed)`를 부르고 저장한다. 전략 로그는 `make_log(d, user_id, 날짜, prefs, previous_level).to_row()`를 저장한다(추천값·적용값·source·탐색 여부·선택 확률).
-  4. 코칭 강도 Bandit: `ContextualBandit`의 기본 정책이 Thompson Sampling으로 바뀌었다(공개 API와 저장 형식 호환, 옛 상태는 그대로 읽는다). 보상은 `reward.coaching_reward(session)`(단계 수행 비율, 코칭 안 한 날은 None)로 바꾸고 기상 성공은 넣지 않는다.
+  4. 코칭 강도 Bandit: `ContextualBandit`의 기본 정책이 Thompson Sampling으로 바뀌었다(공개 API와 저장 형식 호환, 옛 상태는 그대로 읽는다). 보상은 `reward.coaching_reward(session)`(단계 수행 비율, 코칭 안 한 날은 None)로 바꾸고 기상 성공은 넣지 않는다. **11/25: 이 Bandit은 사용자별(`user:{id}`)로 학습하고 상황은 2칸(B27).**
 - **앱이 할 일:** 서버가 준 시작 단계(1~5)로 알람 볼륨을 시작한다(지금은 1 고정). 사용자가 **전화를 받은 순간의 볼륨 단계**와 알람이 울리기 시작한 **시작 단계**, 재기상 여부를 서버에 보고한다(학습 입력이다).
 - **DB가 할 일:** ① 사용자별·전체 사다리 저장(기존 Bandit 상태 테이블에 키 하나 추가하거나 JSON 칸) ② 세션에 `wake_start_level`, `wake_received_level`(없으면 NULL), 시작 단계의 결정 로그(`recommended_level`, `applied_level`, `source`, `explored`, `propensity`, `previous_level`) ③ 중요한 날 판단용 값이 필요하면 서버 쪽 기준(캘린더 일정 등)을 정한다.
-- **효과 검증의 한계(중요):** `python -m ai.personalization.wake_sim`은 가상 사용자(설정용 4종과 검증용 4종을 나눔)로 알고리즘이 사용자별 단계를 찾아가는지만 본다. 가상 사용자의 반응은 우리가 정한 값이라 **효과의 증거가 아니다.** 실제 사용자로 기상률 20%p 차이를 확인하려면 한 쪽에 약 82일(양쪽 164일)이 필요해서 소수 실사용자로는 증명할 수 없다. 실사용자는 "실제 서버에서 학습과 선택이 작동한다"를 보이는 용도로만 쓴다.
+- **효과 검증의 한계(중요):** `python -m ai.personalization.wake_sim`은 가상 사용자(설정용 4종과 검증용 5종(깊게 자는 극단·습관 변화·효과 없음·새 사용자·미루는 사람)을 나눔)로 알고리즘이 사용자별 단계를 찾아가는지만 본다. 가상 사용자의 반응은 우리가 정한 값이라 **효과의 증거가 아니다.** 실제 사용자로 기상률 20%p 차이를 확인하려면 한 쪽에 약 82일(양쪽 164일)이 필요해서 소수 실사용자로는 증명할 수 없다. 실사용자는 "실제 서버에서 학습과 선택이 작동한다"를 보이는 용도로만 쓴다.
 
 ### B24. 말투 유지·날씨 표기·영어 따라 말하기 (11/21, AI만 변경)
 - **AI가 바꾼 것(서버·앱이 할 일 없음):** ① 사용자가 반말로 말하든 "못 들었어, 다시 설명해 줘"처럼 되묻든 설정 어조를 대화 끝까지 유지한다. ② 날씨 용어를 알아듣기 쉬운 말로 바꿔 읽는다(튼구름 → 구름 많음, 구름많음 → 구름 많음, 구름조금 → 구름 조금, 온흐림 → 흐림). ③ 영어 콘텐츠에서 사용자가 따라 말하면 "짧은 반응 → 방금 따라 한 문장을 한 번 더 → 다음 단계 안내" 순서로 말한다. ④ 일정 제목이 이상해도 일반 규칙으로만 다루고 제목을 지어내지 않는다.
@@ -480,6 +480,16 @@ alter table rs_morning_session add constraint rs_morning_session_stretch_area_ch
 - **앱이 할 일:** 앱은 AI가 준 넥스티 단어도 규칙을 한 번 더 확인하고, 틀리면 앱 단어 목록에서 대신 고른다(요청대로). `{"status": "FAILED"}`(서버 오류)일 때의 화면을 정한다.
 - **확인한 것:** 가짜 AI로 44가지(두음법칙, 규칙 위반은 AI를 안 부름, 넥스티 단어 재검사, 이을 단어 없음, 호출 실패)와 실제 모델로 약 80번의 판정을 확인했다. 정상 단어·틀린 단어(뜻 없는 말, 동사·형용사·부사·감탄사, 인명·지명)는 기대대로 갈렸고 호출은 보통 0.7~1.5초였다.
 - **한계:** AI가 사전을 대신 판단하는 것이라 틀릴 수 있다. 실제로 "구글" 같은 상표가 통과했고, 시작 글자가 드문 경우(예: "시리즈" 뒤 "즈")에는 어려운 단어("즈음")가 나올 수 있다. 사람이 눈으로 확인하는 시험과 실제 사용자 시험은 아직 없다. 사용량 한도(HTTP 429)에 걸리면 `FAILED`가 된다(시험 중 연속 호출로 한 번 겪었다).
+
+### B27. 코칭 강도를 사용자별로 학습 + 상황 2칸 (11/25 결정, AI 반영 완료, 서버 대기)
+- **결정:** 개인화 두 개(기상 볼륨, 코칭 강도)는 결과·학습 데이터가 모두 따로이고, 코칭 강도도 **사용자별로** 학습한다. 지금 서버는 모든 사용자를 합친 `global` 상태 하나로 학습한다(`morning_service.BANDIT_KEY`). 성향이 섞인 가상 사용자 20명으로 보면 합산 학습은 표준만 쓸 때와 같았고(단계 수행 비율 0.661 대 0.661), 사용자별 학습은 0.753이었다(각자에게 맞는 전략을 아는 이론상 최고 0.808). 가상 사용자의 반응은 우리가 정한 가정이라 효과의 근거는 아니다.
+- **AI가 바꾼 것:** 상황 칸 기본을 4칸(최근 기상 성공률 × 피곤)에서 **2칸(어젯밤 피곤 여부)**으로 줄였다(`bandit.CONTEXT_FEATURES = ("tired",)`, 칸 이름 `tired`/`ok`). 시뮬레이션(`ai/personalization/coach_sim.py`)에서 2칸이 4칸보다 평균 수행 비율이 0.010 높았고 기상 성공률 칸은 이득이 작았다. 저장된 Bandit 상태는 칸 구성(`features`)을 함께 담고 있어 옛 상태도 그대로 읽힌다.
+- **서버가 할 일:**
+  1. 코칭 강도 상태의 저장 키를 `global`에서 **`user:{user_id}`**로 바꾼다. `decide_strategy`에 넘기는 상태와 `learn_strategy` 뒤 저장(`save_bandit_state(key, state, user_id)`) 모두 같은 키를 쓴다. DB 정의서의 `rs_bandit_state` 키 규칙(`user:{id}`)과 서버 저장소가 이미 이 키를 받는다.
+  2. 이미 쌓인 `global` 상태는 읽지 않는다(지우지 않아도 된다). 사용자마다 빈 상태에서 시작한다.
+  3. 기상 볼륨 상태(`wake:user:{id}`, `wake:global`)와 섞지 않는다(키가 다르므로 그대로 두면 된다).
+- **앱이 할 일:** 없음.
+- **주의:** 사용자별 기록은 적어서 학습이 느리다(시뮬레이션에서 60일에 설정용 유형의 이론상 개선 폭 중 65%). 소수 실사용(7~14일)으로는 코칭 강도의 효과를 볼 수 없고 "사용자별 기록이 쌓이고 전략이 기록된다"만 확인한다.
 
 ## 5. 서버 어댑터(`backend/clients/ai_gateway.py`) 수정 목록
 
@@ -529,3 +539,4 @@ alter table rs_morning_session add constraint rs_morning_session_stretch_area_ch
 13. **기상 알람 시작 볼륨:** 서버가 밤마다 `wake_volume.decide_start_level`로 내일 시작 단계를 정해 알람에 전달하고, 앱이 받은 단계를 보고하면 `learn_wake`로 학습한다(B23).
 14. **스트레칭 부위 12개:** 서버·DB 허용 값과 180초, 앱 그림 11개가 필요하다(B20).
 15. **끝말잇기 글자 판정:** 서버가 `{words, word}`로 `judge_wordchain`을 불러 결과 JSON을 앱에 그대로 돌려주고, AI 호출 실패(`FAILED`)는 오류로 바꿔 준다(B26).
+16. **코칭 강도 사용자별 학습:** 서버가 코칭 강도 Bandit 상태를 `global` 대신 `user:{id}`로 읽고 저장한다. 상황은 2칸(B27).
