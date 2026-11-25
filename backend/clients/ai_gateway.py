@@ -5,6 +5,7 @@
 루틴 항목 "사용 중" = 알람 항목 시간이 0보다 큼.
 """
 import importlib.util
+import logging
 import random
 from dataclasses import asdict, dataclass, field
 from datetime import date, time
@@ -17,6 +18,7 @@ from backend.core.errors import ServiceUnavailable
 from backend.domain.models import (AlarmRoutineItem, MorningSession, NightRecord, RecentRecords, SessionStep, StrategyLog,
                                    UserSetting)
 
+log = logging.getLogger(__name__)
 
 AUTH_TOKEN_URL = "https://generativelanguage.googleapis.com/v1alpha/auth_tokens"
 LIVE_WS_URL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained"
@@ -297,6 +299,8 @@ class AIGateway(Protocol):
     def learn_wake(self, state: dict | None, context_key: str, start_level: int, received_level: int | None,
                    confirmed: bool) -> dict | None: ...                     # 반영한 새 학습 상태, 값이 잘못됐으면 None
     def correct_wake(self, state: dict | None, context_key: str, received_level: int) -> dict | None: ...
+    def judge_wordchain(self, words: list[str], word: str) -> dict: ...
+    # 끝말잇기 글자 판정 (AI B26): {"valid": true, "next": "정원"|None} / {"valid": false, "reason": "…"} / {"status": "FAILED"}
     # 이미 확인 성공으로 학습한 날을 실패로 고침(11/24 미루기): 받은 단계 칸의 성공 1 → 실패 1. 옮길 성공이 없으면 None
 
 
@@ -514,6 +518,16 @@ class RealAIGateway:
         ladder.add(context_key, received_level, False)
         return ladder.to_dict()
 
+    def judge_wordchain(self, words: list[str], word: str) -> dict:
+        """AI는 규칙 위반이면 AI를 부르지 않고 거르고, 호출 실패(LLMError·응답 형식)는 FAILED로 준다.
+        그 밖의 예외(네트워크 등)도 판정하지 못한 것이므로 FAILED로 맞춘다."""
+        from ai.tasks.wordchain import judge_wordchain
+        try:
+            return judge_wordchain(list(words), word, self.llm).to_dict()
+        except Exception:
+            log.exception("끝말잇기 판정 실패")
+            return {"status": "FAILED"}
+
 
 class UnavailableAIGateway:
     """GEMINI_API_KEY가 없거나 `ai` 패키지가 없을 때 (예: feat/backend-service 단독 실행)."""
@@ -552,6 +566,8 @@ class UnavailableAIGateway:
 
     def correct_wake(self, state, context_key, received_level):
         return None
+
+    judge_wordchain = _fail     # 앱은 오류면 자기 규칙·단어 목록으로 이어 간다
 
     def learn_strategy(self, bandit_state, log, session, steps):
         return StrategyLearning(None, None)

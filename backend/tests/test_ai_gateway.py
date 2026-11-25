@@ -37,6 +37,8 @@ def test_without_key_gateway_is_unavailable():
     with pytest.raises(ServiceUnavailable):
         gw.extract_night_record([])
     assert gw.strategy_blocks({"strategy_id": "gentle"}) == ("", "")      # 전략 문장이 없으면 기본 방식
+    with pytest.raises(ServiceUnavailable):
+        gw.judge_wordchain(["기차"], "차표")                                  # 끝말잇기는 503 → 앱이 자기 규칙으로 이어 감
 
 
 def test_with_key_and_ai_package_gateway_is_real():
