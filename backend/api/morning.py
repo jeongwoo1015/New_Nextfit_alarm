@@ -69,8 +69,9 @@ def snooze(session_id: str, body: SnoozeIn | None = None, user_id: str = Depends
 @router.post("/sessions/{session_id}/wake-volume", response_model=WakeLogOut)
 def report_wake_volume(session_id: str, body: WakeVolumeIn, user_id: str = Depends(current_user_id),
                        svc: MorningService = Depends(morning_service)):
-    """기상 볼륨 결과: 전화를 받은 직후(또는 받지 않고 껐을 때) 한 번. 그날 처음 보고한 세션만 기록하고(다시 울림·다른 알람은 무시),
-    확인 질문을 마치거나 세션이 끝나면 서버가 학습한다. 받지 않고 껐으면 바로 학습."""
+    """기상 볼륨 결과: 전화를 받은 직후 또는 미루기 버튼을 누른 직후 한 번. received_level은 그 순간의 단계(미루기도 null 아님).
+    그날 처음 보고한 세션만 기록하고(다시 울림·다른 알람은 무시), 확인 질문을 마치거나 세션이 끝나면 서버가 학습한다.
+    미룬 날은 받은 단계도 실패로 보고 바로 학습하고, 반응 없이 꺼졌으면(null) 바로 학습."""
     return wake_log_out(svc.report_wake_volume(user_id, session_id, body.start_level, body.received_level))
 
 

@@ -159,17 +159,36 @@ def test_snooze_after_learning_corrects_once(user, ai, repos, clock):
 
 
 def test_snooze_before_learning_learns_as_failure(user, ai, repos, clock):
-    """확인 멘트 전에 미뤘으면 학습할 때부터 확인 실패로 넣고, 고치는 호출은 없다."""
+    """받은 뒤 확인 멘트 전에 말로 미뤘으면 미루는 순간 확인 실패로 학습하고, 고치는 호출은 없다. 다시 울려 확인해도 다시 학습하지 않는다."""
     sid = morning(user, clock)
     url = f"/morning/sessions/{sid}"
     user.post(f"{url}/wake-volume", json={"start_level": 2, "received_level": 2}, headers=H)
     user.post(f"{url}/snooze", headers=H)
-    assert not [c for c in ai.calls if c[0] in ("wake_learn", "wake_correct")]
-    user.post(f"{url}/response", headers=H)
-    user.post(f"{url}/wake-check", headers=H)
     assert [c[1][1:] for c in ai.calls if c[0] == "wake_learn"] == [(2, 2, False)] * 2
     assert repos.personalization.get_wake_log(USER_A, FRI)["confirmed"] is False
+    user.post(f"{url}/response", headers=H)
+    user.post(f"{url}/wake-check", headers=H)
+    assert len([c for c in ai.calls if c[0] == "wake_learn"]) == 2
     assert not [c for c in ai.calls if c[0] == "wake_correct"]
+
+
+def test_snooze_button_reports_reacted_level(user, ai, repos, clock):
+    """앱 미루기 버튼(11/25): 미루기를 먼저 보내고 미룬 순간의 단계를 보고한다. 1~2단계 실패 + 3단계 확인 실패로 바로 학습하고(5단계까지 실패로 넣지 않는다),
+    다시 울린 알람의 보고·확인·종료는 학습을 바꾸지 않는다."""
+    sid = morning(user, clock)
+    url = f"/morning/sessions/{sid}"
+    user.post(f"{url}/snooze", headers=H)
+    r = user.post(f"{url}/wake-volume", json={"start_level": 1, "received_level": 3}, headers=H).json()
+    assert (r["start_level"], r["received_level"], r["confirmed"]) == (1, 3, False)
+    assert [c[1][1:] for c in ai.calls if c[0] == "wake_learn"] == [(1, 3, False)] * 2
+    assert repos.personalization.get_bandit_state("wake:global")["days"] == [["unknown", 1, 3, False]]   # 밤 대화 없음 → 상황 모름
+    user.post(f"{url}/wake-volume", json={"start_level": 1, "received_level": 1}, headers=H)   # 다시 울려 받음 → 무시
+    user.post(f"{url}/response", headers=H)
+    user.post(f"{url}/wake-check", headers=H)
+    user.post(f"{url}/end", headers=H)
+    assert len([c for c in ai.calls if c[0] == "wake_learn"]) == 2
+    assert not [c for c in ai.calls if c[0] == "wake_correct"]
+    assert repos.personalization.get_wake_log(USER_A, FRI)["received_level"] == 3
 
 
 def test_not_received_learns_at_once_and_end_without_check(user, ai, repos, clock):
