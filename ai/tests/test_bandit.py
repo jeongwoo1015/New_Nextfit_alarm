@@ -22,8 +22,17 @@ def test_arms_are_the_planned_three_and_default_comes_first():
 
 
 # ---------------- 상황 칸 ----------------
-def test_default_context_has_four_cells():
+WT = ("wake", "tired")        # 기상 성공률 칸을 되살린 4칸 (11/25 이전의 기본)
+
+
+def test_default_context_has_two_cells():
+    """11/25 결정: 기본은 어젯밤 피곤 여부만(2칸). 기상 성공률은 칸을 나누지 않는다."""
     keys = {context_key(stats(w), c) for w, c in itertools.product((0.1, 0.9), ("TIRED", "GOOD"))}
+    assert keys == {"tired", "ok"}
+
+
+def test_four_cells_are_one_config_line():
+    keys = {context_key(stats(w), c, None, WT) for w, c in itertools.product((0.1, 0.9), ("TIRED", "GOOD"))}
     assert keys == {"low|tired", "low|ok", "ok|tired", "ok|ok"}
 
 
@@ -36,12 +45,12 @@ def test_eight_cell_plan_is_one_config_line():
 
 @pytest.mark.parametrize("rate,cell", [(0.49, "low"), (0.4999, "low"), (0.5, "ok"), (0.51, "ok")])
 def test_wake_boundary(rate, cell):
-    assert context_key(stats(rate), None).split("|")[0] == cell
+    assert context_key(stats(rate), None, None, WT).split("|")[0] == cell
 
 
 def test_not_enough_data_is_treated_as_ok_not_low():
-    assert context_key(stats(0.0, n=MIN_SESSIONS - 1), None) == "ok|ok"
-    assert context_key(None, None) == "ok|ok" and context_key(UserStats(n_sessions=5), None) == "ok|ok"
+    assert context_key(stats(0.0, n=MIN_SESSIONS - 1), None, None, WT) == "ok|ok"
+    assert context_key(None, None, None, WT) == "ok|ok" and context_key(UserStats(n_sessions=5), None, None, WT) == "ok|ok"
 
 
 @pytest.mark.parametrize("cond,tired", [("TIRED", True), ("STRESSED", True), ("tired", True), (" stressed ", True), ("GOOD", False), ("NORMAL", False), (None, False), ("", False), ("???", False)])
@@ -51,7 +60,7 @@ def test_tired_cell(cond, tired):
 
 def test_old_session_condition_is_not_used_as_today():
     st = UserStats(n_sessions=5, wake_success_rate=0.9, last_condition="TIRED")       # 며칠 전 세션의 컨디션
-    assert context_key(st, None) == "ok|ok"
+    assert context_key(st, None, None, WT) == "ok|ok" and context_key(st, None) == "ok"
 
 
 def test_unknown_feature_is_rejected():
@@ -185,12 +194,12 @@ def test_tired_days_never_learn_to_push_even_if_push_scores_best():
 def test_save_and_restore_gives_identical_choices():
     b = ContextualBandit(policy="epsilon", epsilon=0.2)
     for arm, r in (("gentle", 1.0), ("push", 0.2), ("gentle", 0.8)):
-        b.update("low|ok", arm, r)
+        b.update("tired", arm, r)
     data = json.loads(json.dumps(b.to_dict()))                                # JSON으로 저장했다 읽어도 같다
     c = ContextualBandit.from_dict(data)
-    assert c.to_dict() == b.to_dict() and c.epsilon == 0.2 and c.features == ("wake", "tired")
+    assert c.to_dict() == b.to_dict() and c.epsilon == 0.2 and c.features == ("tired",)
     for s in range(20):
-        assert c.select("low|ok", rng=random.Random(s)) == b.select("low|ok", rng=random.Random(s))
+        assert c.select("tired", rng=random.Random(s)) == b.select("tired", rng=random.Random(s))
 
 
 @pytest.mark.parametrize("bad", [None, {}, "text", 5, [], {"features": ["nope"]}, {"counts": "x", "sums": 3}, {"epsilon": "x"}])

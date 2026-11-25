@@ -18,20 +18,21 @@ LADDERS = {
     "no_effect": (0.60, 0.60, 0.60, 0.60, 0.60),            # 단계와 상관없이 같다(억지로 차이를 만들면 안 된다)
 }
 SET_TYPES = ("easy", "normal", "deep", "short_hard")                      # 설정값을 고를 때 쓰는 가상 사용자
-VAL_TYPES = ("very_deep", "habit_change", "no_effect", "new_user")        # 고른 설정값을 마지막에 검증하는 가상 사용자(설정에 쓰지 않는다)
+VAL_TYPES = ("very_deep", "habit_change", "no_effect", "new_user", "snoozer")   # 고른 설정값을 마지막에 검증하는 가상 사용자(설정에 쓰지 않는다)
 POLICIES = ("fixed1", "fixed3", "random", "rule", "bandit", "bandit_global")
 SHORT_RATE = 0.4                  # 수면이 짧은 날의 비율
 CHANGE_DAY = 30                   # habit_change가 바뀌는 날
+SNOOZE_RATE = 0.2                 # snoozer가 소리와 상관없이 그날 알람을 미루는 비율(11/24 결정: 미루면 그날 기상은 실패)
 EVAL_FROM = 21                    # 이 날부터를 평가한다(앞은 학습 기간)
 
 
 def ladder_of(user_type: str, day: int, short: bool) -> tuple:
     if user_type == "short_hard":
-        return LADDERS["deep"] if short else LADDERS["normal"]       # 수면이 짧은 날만 깊이 잔다
+        return LADDERS["deep"] if short else LADDERS["easy"]         # 수면이 짧은 날만 깊게 잔다(긴 날 정답 1단계, 짧은 날 정답 3단계)
     if user_type == "habit_change":
         return LADDERS["normal"] if day < CHANGE_DAY else LADDERS["deep"]
-    if user_type == "new_user":
-        return LADDERS["normal"]
+    if user_type in ("new_user", "snoozer"):
+        return LADDERS["normal"]          # new_user는 normal과 반응이 같고 기록 없이 시작한다는 점만 다르다 / snoozer는 반응은 normal, 미루기만 더한다
     return LADDERS[user_type]
 
 
@@ -48,14 +49,15 @@ def correct_start(probs: tuple, candidates=CANDIDATES, cap: int = START_CAP, thr
 def run_policy(policy: str, user_type: str, days: int = 60, seed: int = 0, global_ladder: WakeLadder | None = None, threshold: float = THRESHOLD,
                prior_strength: float = 2.0) -> dict:
     """한 정책으로 days일을 돌린다. 모든 정책이 같은 환경 난수(수면 길이·받을 운)를 겪는다."""
-    if policy not in POLICIES or (user_type not in LADDERS and user_type not in ("short_hard", "habit_change", "new_user")):
+    if policy not in POLICIES or (user_type not in LADDERS and user_type not in ("short_hard", "habit_change", "new_user", "snoozer")):
         raise ValueError(f"policy는 {POLICIES}, user_type은 {SET_TYPES + VAL_TYPES} 중 하나예요")
-    env, pick = random.Random(seed), random.Random(seed + 1)
+    env, pick, snooze_rng = random.Random(seed), random.Random(seed + 1), random.Random(seed + 2)
     ladder = WakeLadder()
-    starts, correct, received, immediate = [], [], [], []
+    starts, correct, received, immediate, shorts = [], [], [], [], []
     for day in range(days):
         short = env.random() < SHORT_RATE
         luck = [env.random() for _ in LEVELS]
+        snoozed = user_type == "snoozer" and snooze_rng.random() < SNOOZE_RATE       # 미루기는 따로 뽑아 normal과 같은 아침(수면 길이·받을 운)을 겪게 한다
         probs = ladder_of(user_type, day, short)
         minutes = 300 if short else 450
         ctx = sleep_bucket(minutes)
@@ -72,8 +74,9 @@ def run_policy(policy: str, user_type: str, days: int = 60, seed: int = 0, globa
             k = decide_start_level(ladder, use_global, minutes, rng=pick, threshold=threshold, prior_strength=prior_strength, mc_samples=0).applied
         got = next((lv for lv in range(k, max(LEVELS) + 1) if luck[lv - 1] < probs[lv - 1]), None)
         if policy in ("bandit", "bandit_global"):
-            learn_wake(ladder, ctx, k, got, True)
+            learn_wake(ladder, ctx, k, got, not snoozed)             # 미룬 날은 받았어도 확인 실패로 센다(서버 B25와 같다)
         starts.append(k)
+        shorts.append(short)
         correct.append(k == correct_start(probs, threshold=threshold))
         received.append(got if got is not None else max(LEVELS))
         immediate.append(got == k)
@@ -82,7 +85,7 @@ def run_policy(policy: str, user_type: str, days: int = 60, seed: int = 0, globa
 
     def conv() -> int | None:
         return next((i for i in range(0, days - 9) if sum(correct[i:i + 10]) >= 8), None)
-    return {"policy": policy, "user_type": user_type, "days": days, "starts": starts, "ladder": ladder,
+    return {"policy": policy, "user_type": user_type, "days": days, "starts": starts, "shorts": shorts, "ladder": ladder,
             "correct_rate": sum(correct[ev]) / n, "avg_start": sum(starts[ev]) / n, "immediate_rate": sum(immediate[ev]) / n,
             "avg_received": sum(received[ev]) / n, "converge_day": conv()}
 

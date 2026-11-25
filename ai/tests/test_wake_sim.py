@@ -27,3 +27,37 @@ def test_no_effect_user_is_not_pushed_louder_than_needed_and_habit_change_is_fol
     res = run_all(types=("no_effect", "habit_change"), policies=("fixed3", "bandit"), days=60, reps=6)
     assert res["no_effect"]["bandit"]["avg_start"] < res["no_effect"]["fixed3"]["avg_start"] - 0.8
     assert res["habit_change"]["bandit"]["correct_rate"] > 0.7
+
+
+def test_short_hard_has_different_correct_start_by_sleep_length():
+    from ai.personalization.wake_sim import ladder_of
+    assert correct_start(ladder_of("short_hard", 0, True)) == 3 and correct_start(ladder_of("short_hard", 0, False)) == 1
+
+
+def test_bandit_learns_the_sleep_length_context_for_short_hard():
+    """11/25: 수면이 짧은 날은 크게, 긴 날은 부드럽게 시작하는지(상황 학습)."""
+    gaps = []
+    for seed in range(8):
+        r = run_policy("bandit", "short_hard", 60, 2000 + seed)
+        ev = range(21, 60)
+        short = [r["starts"][i] for i in ev if r["shorts"][i]]
+        long_ = [r["starts"][i] for i in ev if not r["shorts"][i]]
+        gaps.append(sum(short) / len(short) - sum(long_) / len(long_))
+    assert sum(gaps) / len(gaps) > 1.0
+
+
+def test_snoozer_days_are_learned_as_failures_and_other_types_keep_their_random_stream():
+    from ai.personalization.wake_sim import SNOOZE_RATE
+    assert 0 < SNOOZE_RATE < 0.5
+    a = run_policy("bandit", "snoozer", 60, 7)
+    b = run_policy("bandit", "normal", 60, 7)
+    assert a["shorts"] == b["shorts"]                              # 수면 길이는 같은 환경 난수를 쓴다
+    ok_a = sum(v[0] for v in a["ladder"].counts.values())
+    ok_b = sum(v[0] for v in b["ladder"].counts.values())
+    assert ok_a < ok_b                                             # 미룬 날은 성공으로 세지 않아 성공 기록이 더 적다
+
+
+def test_snoozer_is_still_started_at_the_level_it_needs():
+    res = run_all(types=("snoozer",), policies=("fixed1", "fixed3", "bandit"), days=60, reps=6)
+    assert res["snoozer"]["bandit"]["correct_rate"] > 0.6
+    assert res["snoozer"]["bandit"]["avg_start"] > 2.0
