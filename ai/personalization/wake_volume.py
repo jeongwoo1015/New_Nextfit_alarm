@@ -14,7 +14,7 @@
   Bandit은 추천값(recommended)을 계산하고, 실제 적용값(applied)은 사용자 설정을 반영해 따로 정한다. 사용자가 바꾼 값으로 울린 날도 결과를 학습한다(탐색 확률은 source로 구분해 기록).
 - 안전: 시작 단계는 START_CAP을 넘기지 않는다(사용자가 직접 정한 값은 예외). 밤 대화로 알리지 못한 날은 올리지 않고 이전 단계를 유지한다(상승 보류). 중요한 날은 탐색하지 않는다.
 
-이 모듈은 DB를 읽지 않는다. 서버가 사용자별 사다리(`rs_bandit_state` 'user:{id}')와 전체 합산(`global`)을 넘기고, 결과를 learn_wake로 반영해 다시 저장한다.
+이 모듈은 DB를 읽지 않는다. 서버가 사용자별 사다리(`rs_bandit_state`의 'wake:user:{id}')와 전체 합산('wake:global')을 넘기고(코칭 강도 Bandit의 'user:{id}'·'global'과는 키가 분리돼 있다), 결과를 learn_wake로 반영해 다시 저장한다.
 """
 import random
 import re

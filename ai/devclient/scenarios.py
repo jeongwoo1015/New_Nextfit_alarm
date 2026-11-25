@@ -295,6 +295,21 @@ SCENARIOS.update({s.name: s for s in [
 ]})
 
 
+# ----- 11/24: 브리핑이 끝난 뒤 콘텐츠·루틴 통화에서도 말로 미루기(시연에서 영어 통화는 안 됐다) -----
+def _english_call(used=0):
+    return CoachingInput(persona=Persona("예준"), morning_call_type="CONTENT", content_type="LANGUAGE", content_option="ENGLISH", steps=tuple(ENGLISH), snoozes_today=used)
+
+
+SCENARIOS.update({s.name: s for s in [
+    Scenario("snooze_in_english", "coaching", _english_call(), ("아직 좀 졸려요. 10분 뒤에 다시 울려 주세요", "네"), expect={"snooze": {"minutes_later": 10}}),
+    Scenario("snooze_in_english_midway", "coaching", _english_call(),
+             (ENGLISH[0].script.split(" / ")[0], "잠깐만요, 1분 뒤에 다시 깨워 주세요", "네"), expect={"snooze": {"minutes_later": 1}}),
+    Scenario("snooze_in_routine", "coaching", CoachingInput(persona=Persona("예준"), steps=COACH_STEPS, night=NIGHT_REC),
+             ("물 한 잔 마셨어요", "아 너무 졸려요. 5분 뒤에 다시 울려 주세요", "네"), expect={"snooze": {"minutes_later": 5}}),
+    Scenario("snooze_in_english_daily_limit", "coaching", _english_call(used=3), ("10분만 더 잘게요. 다시 울려 주세요", "네"), expect={"snooze": {}}),
+]})
+
+
 # ----- 대화로 설정 바꾸기(11/20 회의 4): 굿나잇콜·모닝콜에서 AI 음악·성격·강도·기상 볼륨 — 로컬 전용 -----
 from ai.live.inputs import SettingsView                                    # noqa: E402
 
