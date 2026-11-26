@@ -29,21 +29,9 @@ def test_no_effect_user_is_not_pushed_louder_than_needed_and_habit_change_is_fol
     assert res["habit_change"]["bandit"]["correct_rate"] > 0.7
 
 
-def test_short_hard_has_different_correct_start_by_sleep_length():
-    from ai.personalization.wake_sim import ladder_of
-    assert correct_start(ladder_of("short_hard", 0, True)) == 3 and correct_start(ladder_of("short_hard", 0, False)) == 1
-
-
-def test_bandit_learns_the_sleep_length_context_for_short_hard():
-    """11/25: 수면이 짧은 날은 크게, 긴 날은 부드럽게 시작하는지(상황 학습)."""
-    gaps = []
-    for seed in range(8):
-        r = run_policy("bandit", "short_hard", 60, 2000 + seed)
-        ev = range(21, 60)
-        short = [r["starts"][i] for i in ev if r["shorts"][i]]
-        long_ = [r["starts"][i] for i in ev if not r["shorts"][i]]
-        gaps.append(sum(short) / len(short) - sum(long_) / len(long_))
-    assert sum(gaps) / len(gaps) > 1.0
+def test_mid_user_has_answer_two_only_when_two_is_a_candidate():
+    """2단계가 정답인 사용자: 후보가 1·3뿐이면 3이 정답이고, 후보에 2를 넣으면 2가 정답이다(4-4 확장 비교용)."""
+    assert correct_start(LADDERS["mid"]) == 3 and correct_start(LADDERS["mid"], candidates=(1, 2, 3)) == 2
 
 
 def test_snoozing_does_not_change_volume_learning():
@@ -52,7 +40,7 @@ def test_snoozing_does_not_change_volume_learning():
     assert 0 < SNOOZE_RATE < 0.5
     a = run_policy("bandit", "snoozer", 60, 7)
     b = run_policy("bandit", "normal", 60, 7)
-    assert a["shorts"] == b["shorts"] and a["starts"] == b["starts"]      # 같은 환경, 같은 선택
+    assert a["starts"] == b["starts"]                                     # 같은 환경, 같은 선택
     assert a["ladder"].counts == b["ladder"].counts                       # 미룬 날이 학습 기록을 바꾸지 않는다
     assert 0 < sum(a["snoozes"]) < 60 and not any(b["snoozes"])           # snoozer만 실제로 미룬다
 

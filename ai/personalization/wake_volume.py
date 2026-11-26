@@ -11,7 +11,7 @@
   끝까지 반응하지 않았으면 시작~마지막 단계가 모두 실패다. 3번 미룬 뒤 자동 연결은 자발적 반응이 아니므로 서버가 이 함수를 부르지 않는다(학습 제외).
 - 선택(Thompson Sampling): 후보 단계마다 Beta(성공, 실패)에서 성공 확률을 하나 뽑아, THRESHOLD 이상이 나온 가장 낮은 후보로 시작한다(없으면 가장 높아 보이는 값과 비슷한 후보 중 가장 낮은 단계).
   기록이 적으면 값이 크게 흔들려 가끔 낮은 단계를 시험하고(탐색), 쌓이면 확실한 단계로 굳는다. 전체 사용자 기록(global)은 약한 prior로만 쓴다.
-- 상황(Context): 추정 수면 가능 시간 한 가지(짧음 6시간 미만 / 보통 / 모름). 방향(짧게 자면 크게)은 가정하지 않고 칸별 기록이 정한다.
+- 상황(Context): 나누지 않는다(11/26 회의). 사용자별 사다리 하나만 쓴다(CONTEXT). 수면 시간은 학습에 쓰지 않고 서버가 사후 분석용으로만 기록한다.
 - 사용자 우선(11/20 회의 3): 일시 변경(다음 알람만, update_setting scope=TODAY) > 지속 상한(max_start_level, scope=ALWAYS) > Bandit 추천.
   Bandit은 추천값(recommended)을 계산하고, 실제 적용값(applied)은 사용자 설정을 반영해 따로 정한다. 사용자가 바꾼 값으로 울린 날도 결과를 학습한다(탐색 확률은 source로 구분해 기록).
 - 안전: 시작 단계는 START_CAP을 넘기지 않는다(사용자가 직접 정한 값은 예외). 밤 대화로 알리지 못한 날은 올리지 않고 이전 단계를 유지한다(상승 보류). 중요한 날은 탐색하지 않는다.
@@ -29,8 +29,8 @@ CANDIDATES = (1, 3)                # 시작 단계 후보(회의에서 2개로 �
 START_CAP = 3                      # Bandit이 고르는 시작 단계의 상한
 THRESHOLD = 0.7                    # 그 단계에서 받을 확률이 이 값 이상이면 충분히 확실하다고 본다(가정값, 시뮬레이션으로 정한다)
 TIE_MARGIN = 0.1                   # 확실한 후보가 없을 때, 가장 좋아 보이는 값과 이만큼 이내로 비슷하면 낮은 단계를 고른다(가정값)
-SHORT_SLEEP_MIN = 360              # 추정 수면 가능 시간이 6시간 미만이면 '짧음'(가정값)
 PRIOR_STRENGTH = 2.0               # 전체 사용자 평균을 몇 번의 관측만큼으로 볼지(약하게)
+CONTEXT = "all"                    # 학습 칸 이름. 상황을 나누지 않아(11/26) 사용자마다 사다리 하나
 MIN_OBSERVATIONS = 6               # 후보 단계들의 관측이 이보다 적으면 '아직 찾는 중'
 
 STATE_RECOMMENDED, STATE_EXPLORING, STATE_USER = "RECOMMENDED", "EXPLORING", "USER"       # inputs.SettingsView.wake_state와 같은 값
@@ -39,15 +39,6 @@ STATE_RECOMMENDED, STATE_EXPLORING, STATE_USER = "RECOMMENDED", "EXPLORING", "US
 def rewake_level(level: int) -> int:
     """재기상 알람 단계: 기상 알람보다 한 단계 크게(최대 6)."""
     return min(int(level) + REWAKE_OFFSET, max(LEVELS) + REWAKE_OFFSET)
-
-
-def sleep_bucket(sleep_minutes) -> str:
-    """추정 수면 가능 시간(밤 대화 종료 ~ 알람 받은 시각)을 상황 칸으로. 모르면 'unknown'."""
-    try:
-        m = float(sleep_minutes)
-    except (TypeError, ValueError):
-        return "unknown"
-    return "unknown" if m < 0 or m != m else ("short" if m < SHORT_SLEEP_MIN else "ok")
 
 
 # ---------------- 사다리 기록 ----------------
@@ -148,10 +139,11 @@ def decide_start_level(personal: WakeLadder | None, global_: WakeLadder | None, 
                        previous_level: int | None = None, notified: bool = True, important_day: bool = False, rng=None,
                        candidates=CANDIDATES, cap: int = START_CAP, threshold: float = THRESHOLD, prior_strength: float = PRIOR_STRENGTH,
                        mc_samples: int = 200) -> WakeDecision:
-    """내일 아침 알람의 시작 단계. previous_level은 직전 알람의 적용 단계(모르면 None), notified는 밤 대화로 이 변경을 알렸는지."""
+    """내일 아침 알람의 시작 단계. previous_level은 직전 알람의 적용 단계(모르면 None), notified는 밤 대화로 이 변경을 알렸는지.
+    sleep_minutes는 11/26 이전 호출과 맞추려고 받기만 하고 쓰지 않는다(수면 시간은 학습 상황이 아니다)."""
     rng = rng or random
     personal = personal or WakeLadder()
-    ctx = sleep_bucket(sleep_minutes)
+    ctx = CONTEXT
     cands = sorted(c for c in candidates if c in LEVELS and c <= cap) or [min(candidates)]
     params = {c: beta_for(personal, global_, ctx, c, prior_strength) for c in cands}
     means = {c: params[c][0] / (params[c][0] + params[c][1]) for c in cands}

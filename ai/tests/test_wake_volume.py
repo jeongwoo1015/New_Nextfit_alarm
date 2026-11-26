@@ -3,13 +3,12 @@ import random
 
 import pytest
 
-from ai.personalization.wake_volume import (CANDIDATES, raise_announced, START_CAP, UserWakePrefs, WakeLadder, decide_start_level, learn_wake, make_log, rewake_level,
-                                            sleep_bucket)
+from ai.personalization.wake_volume import (CANDIDATES, CONTEXT, raise_announced, START_CAP, UserWakePrefs, WakeLadder, decide_start_level, learn_wake, make_log,
+                                            rewake_level)
 
 
-def test_sleep_bucket_and_rewake_level():
-    assert sleep_bucket(300) == "short" and sleep_bucket(360) == "ok" and sleep_bucket(480) == "ok"
-    assert sleep_bucket(None) == "unknown" and sleep_bucket("x") == "unknown" and sleep_bucket(-5) == "unknown"
+def test_rewake_level_and_single_context():
+    assert CONTEXT == "all"                                             # 11/26: 상황을 나누지 않는다(사용자마다 사다리 하나)
     assert [rewake_level(k) for k in (1, 3, 5)] == [2, 4, 6] and rewake_level(9) == 6
 
 
@@ -49,18 +48,18 @@ def test_ladder_rejects_bad_records_and_round_trips():
 def test_decision_is_valid_and_capped_for_a_new_user():
     d = decide_start_level(None, None, 480, rng=random.Random(1))
     assert d.recommended in CANDIDATES and d.applied == d.recommended <= START_CAP and d.source == "bandit"
-    assert d.state == "EXPLORING" and d.context_key == "ok" and 0 < d.propensity <= 1 and d.raise_pending is False
+    assert d.state == "EXPLORING" and d.context_key == CONTEXT and 0 < d.propensity <= 1 and d.raise_pending is False
 
 
 def test_it_settles_on_the_level_that_works():
     lad = WakeLadder()
     for _ in range(25):
-        lad.learn("short", 1, 3)                                         # 1단계로는 못 받고 3단계에서 받는 사람
+        lad.learn(CONTEXT, 1, 3)                                         # 1단계로는 못 받고 3단계에서 받는 사람
     picks = {decide_start_level(lad, None, 300, rng=random.Random(s), mc_samples=0).applied for s in range(30)}
     assert picks == {3}
     easy = WakeLadder()
     for _ in range(25):
-        easy.learn("ok", 1, 1)
+        easy.learn(CONTEXT, 1, 1)
     assert {decide_start_level(easy, None, 480, rng=random.Random(s), mc_samples=0).applied for s in range(30)} == {1}
     assert decide_start_level(lad, None, 300, rng=random.Random(0)).state == "RECOMMENDED"
 
@@ -68,10 +67,10 @@ def test_it_settles_on_the_level_that_works():
 def test_no_difference_prefers_the_gentle_level():
     lad = WakeLadder()
     for _ in range(40):
-        lad.add("ok", 1, False)
-        lad.add("ok", 3, False)
-        lad.add("ok", 1, True)
-        lad.add("ok", 3, True)                                           # 어느 단계든 50% — 억지로 차이를 만들지 않는다
+        lad.add(CONTEXT, 1, False)
+        lad.add(CONTEXT, 3, False)
+        lad.add(CONTEXT, 1, True)
+        lad.add(CONTEXT, 3, True)                                           # 어느 단계든 50% — 억지로 차이를 만들지 않는다
     picks = [decide_start_level(lad, None, 480, rng=random.Random(s), mc_samples=0).applied for s in range(40)]
     assert picks.count(1) > picks.count(3)
 
@@ -79,7 +78,7 @@ def test_no_difference_prefers_the_gentle_level():
 def test_user_priority_today_beats_max_beats_bandit_and_cap_is_overridable_by_user():
     lad = WakeLadder()
     for _ in range(25):
-        lad.learn("ok", 1, 3)
+        lad.learn(CONTEXT, 1, 3)
     base = dict(sleep_minutes=480, rng=random.Random(0))
     d = decide_start_level(lad, None, prefs=UserWakePrefs(max_start_level=2), **base)
     assert d.recommended == 3 and d.applied == 2 and d.source == "user_max" and d.state == "USER" and d.propensity is None
@@ -92,7 +91,7 @@ def test_user_priority_today_beats_max_beats_bandit_and_cap_is_overridable_by_us
 def test_raise_needs_notice_otherwise_previous_level_is_kept():
     lad = WakeLadder()
     for _ in range(25):
-        lad.learn("ok", 1, 3)
+        lad.learn(CONTEXT, 1, 3)
     base = dict(sleep_minutes=480, previous_level=1, rng=random.Random(0), mc_samples=0)
     told = decide_start_level(lad, None, notified=True, **base)
     assert told.applied == 3 and told.raise_pending is True and told.source == "bandit"
@@ -106,7 +105,7 @@ def test_raise_needs_notice_otherwise_previous_level_is_kept():
 
 def test_important_day_never_explores():
     lad = WakeLadder()
-    lad.learn("ok", 3, 3)
+    lad.learn(CONTEXT, 3, 3)
     outs = {decide_start_level(lad, None, 480, important_day=True, rng=random.Random(s)).explored for s in range(30)}
     assert outs == {False}
     assert decide_start_level(lad, None, 480, important_day=True, rng=random.Random(1)).source == "important_day"
@@ -115,17 +114,17 @@ def test_important_day_never_explores():
 def test_global_prior_is_weak():
     glob = WakeLadder()
     for _ in range(200):
-        glob.learn("ok", 1, 1)                                           # 전체 사용자는 1단계로 충분
+        glob.learn(CONTEXT, 1, 1)                                           # 전체 사용자는 1단계로 충분
     mine = WakeLadder()
     for _ in range(30):
-        mine.learn("ok", 1, 3)                                           # 그런데 나는 3단계가 필요
+        mine.learn(CONTEXT, 1, 3)                                           # 그런데 나는 3단계가 필요
     assert {decide_start_level(mine, glob, 480, rng=random.Random(s), mc_samples=0).applied for s in range(30)} == {3}
 
 
 def test_learning_from_user_chosen_days_and_log_row():
     lad = WakeLadder()
     d = decide_start_level(lad, None, 300, prefs=UserWakePrefs(next_alarm_level=4), rng=random.Random(0))
-    assert learn_wake(lad, d.context_key, d.applied, 4) and lad.get("short", 4) == (1, 0)
+    assert learn_wake(lad, d.context_key, d.applied, 4) and lad.get(CONTEXT, 4) == (1, 0)
     row = make_log(d, 7, "2026-11-21", UserWakePrefs(next_alarm_level=4), previous_level=1).to_row()
     assert row["recommended_level"] == d.recommended and row["applied_level"] == 4 and row["source"] == "user_today"
     assert row["prefs"] == {"max_start_level": None, "next_alarm_level": 4} and row["user_id"] == "7" and row["previous_level"] == 1
@@ -136,3 +135,12 @@ def test_raise_announced_reads_the_transcript():
     assert raise_announced(said, 3) and not raise_announced(said, 2) and not raise_announced("오늘도 수고하셨어요", 3) and not raise_announced(None, 3)
     assert not raise_announced("알람은 13단계 소리", 3)          # 숫자의 일부는 세지 않는다
     assert not raise_announced("3단계 운동을 해요", 3)           # 알람·소리·볼륨 말이 없으면 아니다
+
+
+def test_sleep_minutes_is_ignored_and_not_a_learning_context():
+    """11/26: 수면 시간은 학습 상황이 아니다. 값을 넘겨도(옛 호출) 같은 사다리·같은 추천이 나온다."""
+    lad = WakeLadder()
+    for _ in range(25):
+        lad.learn(CONTEXT, 1, 3)
+    outs = [decide_start_level(lad, None, m, rng=random.Random(4), mc_samples=0) for m in (None, 200, 300, 480, 900)]
+    assert {(o.context_key, o.recommended, o.applied) for o in outs} == {(CONTEXT, 3, 3)}
