@@ -282,8 +282,17 @@ def weather_block(w: Weather | None) -> str:
     return "[오늘 날씨]\n- " + ", ".join(parts) if parts else ""
 
 
-def night_record_block(n) -> str:
-    """아침 대화용. n은 NightRecordView 또는 None."""
+def reminders_block(n) -> str:
+    """아침 브리핑용 [오늘 챙길 일]: 어젯밤 "내일 미리 챙겨야 할 일정이나 걱정되는 일" 질문에 사용자가 답한 내용(tomorrow_notes).
+    캘린더에 없더라도 브리핑에서 빠뜨리지 않고 리마인드하게 하려고 [어젯밤 대화 기록]에서 떼어 따로 보여 준다(11/26). 없으면 빈 문자열."""
+    notes = [clean(x, 60) for x in (getattr(n, "tomorrow_notes", None) or ()) if clean(x, 60)] if n is not None else []
+    if not notes:
+        return ""
+    return "[오늘 챙길 일 (어젯밤 사용자가 직접 말함, 캘린더와 별개)]\n" + "\n".join(f"- {x}" for x in notes)
+
+
+def night_record_block(n, with_notes: bool = True) -> str:
+    """아침 대화용. n은 NightRecordView 또는 None. with_notes=False면 특이사항 줄을 빼고([오늘 챙길 일]로 따로 보여 줄 때), 대신 그 블록을 가리킨다."""
     if n is None:
         return "[어젯밤 대화 기록]\n없음 (밤 대화를 하지 않았다)"
     label = CONDITION_WORDS.get(n.condition_label, "")
@@ -291,7 +300,7 @@ def night_record_block(n) -> str:
     notes = ", ".join(clean(x, 60) for x in n.tomorrow_notes) or "없음"
     return ("[어젯밤 대화 기록]\n"
             f"- 어제 하루: {clean(n.ai_summary, 120) or '기록 없음'}\n"
-            f"- 오늘 특이사항: {notes}\n"
+            + (f"- 오늘 특이사항: {notes}\n" if with_notes else ("- 오늘 특이사항: 아래 [오늘 챙길 일] 참고\n" if n.tomorrow_notes else "- 오늘 특이사항: 없음\n")) +
             f"- 오늘의 핵심 목표: {clean(n.tomorrow_goal, 120) or '없음'}\n"
             f"- 어젯밤 컨디션: {cond}\n"
             f"- 어젯밤 인사이트: {clean(n.insight, 120) or '없음'}\n"

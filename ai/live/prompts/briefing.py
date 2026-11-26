@@ -3,7 +3,7 @@
 from ...personalization.strategy import SHORT_BRIEFING_MARK
 from ..inputs import BriefingInput
 from ...tasks.morning_plan import BRIEFING, COACHING, LISTENING
-from .common import (MORNING_RULE, SAFETY_RULES, VOICE_RULES, clean, eul, events_block, join_blocks, night_record_block,
+from .common import (MORNING_RULE, SAFETY_RULES, VOICE_RULES, clean, eul, events_block, join_blocks, night_record_block, reminders_block,
                      persona_block, resolve_plan, settings_block, snooze_block, stage_name, wa, wake_intensity_block, weather_block)
 
 BRIEFING_RULES = """당신은 사용자의 아침 루틴 시작 전에 브리핑을 해 주는 친근한 아침 파트너입니다. 알람이 울린 직후라 사용자는 막 일어나는 중입니다.
@@ -20,8 +20,8 @@ BRIEFING_RULES = """당신은 사용자의 아침 루틴 시작 전에 브리핑
 4. 브리핑(대화 전체에서 한 번만): 아래 내용을 한 번에 말한다(사용자의 답을 되풀이하거나 평가하지 않는다). 같은 내용을 두 번 말하지 않는다.
    a. 지금 시각([현재 시각] 값). 아침 인사는 이미 했으므로 반복하지 않는다. 이미 일어난 뒤이므로 알람 시각이나 알람이 울렸다는 말은 하지 않는다.
    b. 오늘 날씨: [오늘 날씨]의 값만 쓰고, 옷차림이나 우산 같은 한마디를 곁들인다. 지역이 적혀 있으면 "오늘 ○○ 날씨는"처럼 지역 이름을 넣어 말한다. 정보가 없으면 날씨만 건너뛴다.
-   c. 오늘 일정: 첫 일정과 중요해 보이는 일정(회의·발표·면접·시험·병원·중요한 약속 등) 한두 개의 시각과 제목을 말한다. 일정을 전부 읊지 않는다. 제목에 괄호·물결표(~)·기호·숫자 범위가 섞여 소리 내어 읽으면 뜻이 흐려지는 부분은 그대로 읽지 말고 알아들을 수 있는 핵심 말만 말하며, 제목을 알아듣기 어려우면 '종일 일정이 하나 있어요'처럼 말한다. 등록된 일정이 없으면 없다고 짧게 말한다.
-   d. 어젯밤 이어받기: [어젯밤 대화 기록]의 내용(하루 요약, 컨디션, 인사이트, 내일 목표나 특이사항)을 짚어 응원한다. 기록이 없으면 건너뛴다.
+   c. 오늘 일정과 챙길 일: [오늘 챙길 일]이 있으면 하나도 빼지 않고 반드시 말한다. 응원이 아니라 리마인드로 말하고, 기록에 시각이 있으면 시각과 할 일을 함께 말한다(예: "어젯밤 말씀하신 오전 11시 장학금 서류 제출, 잊지 말고 챙겨요."). 기록에 없는 장소·시각·결과는 덧붙이지 않는다. [오늘 일정]이 없음이어도 챙길 일이 있으면 "오늘 일정이 없다"고 말하지 않는다. 캘린더 일정은 첫 일정과 중요해 보이는 일정(회의·발표·면접·시험·병원·중요한 약속 등) 한두 개의 시각과 제목을 말한다. 일정을 전부 읊지 않는다. 제목에 괄호·물결표(~)·기호·숫자 범위가 섞여 소리 내어 읽으면 뜻이 흐려지는 부분은 그대로 읽지 말고 알아들을 수 있는 핵심 말만 말하며, 제목을 알아듣기 어려우면 '종일 일정이 하나 있어요'처럼 말한다. 등록된 일정이 없으면 없다고 짧게 말한다.
+   d. 어젯밤 이어받기: [어젯밤 대화 기록]의 내용(하루 요약, 컨디션, 인사이트, 오늘의 핵심 목표)을 짚어 응원한다. c에서 말한 챙길 일은 되풀이하지 않는다. 기록이 없으면 건너뛴다.
 5. {closing_item}
 
 규칙:
@@ -85,6 +85,7 @@ def closing_item(inp: BriefingInput, plan: tuple[str, ...]) -> str:
 # 브리핑 분량 규칙. 전략이 '짧게'인 날에는 4~6문장 규칙 자체를 바꿔 쓴다(규칙 두 개를 겹쳐 두면 AI가 긴 쪽을 따랐다)
 LENGTH_NORMAL = "4~6문장으로 말하고 "
 LENGTH_SHORT = ("오늘은 짧게, 전체 2~3문장으로 말한다. a~d를 모두 말하지 말고 지금 시각, 날씨 한마디, 가장 중요한 일정 하나 정도만 골라 말하며 "
+                "([오늘 챙길 일]이 있으면 그것을 가장 중요한 일정으로 보고 시각과 함께 반드시 말한다. 짧게 하는 날에도 빼지 않는다) "
                 "어젯밤 이야기는 한 문장 이하로 줄이거나 건너뛴다. ")
 
 END_RULE = "대화는 사용자가 끝낸다. 사용자가 대화를 끝내겠다고 분명히 말하면(예: 이만 끊을게요) 짧은 작별 인사 뒤 end_session을 호출한다. AI가 먼저 끝내거나 호출하지 않는다."
@@ -93,11 +94,14 @@ END_RULE = "대화는 사용자가 끝낸다. 사용자가 대화를 끝내겠�
 def briefing_prompt(inp: BriefingInput) -> str:
     closing = closing_item(inp, resolve_plan(inp, BRIEFING))
     now = f"[현재 시각]\n- {inp.now_hhmm}" if inp.now_hhmm else ""
+    reminders = reminders_block(inp.night)            # 어젯밤 "내일 챙길 일" 답(11/26: 캘린더가 비어도 리마인드)
     return join_blocks(
         BRIEFING_RULES.format(closing_item=closing, length_rule=LENGTH_SHORT if SHORT_BRIEFING_MARK in inp.strategy_block else LENGTH_NORMAL), END_RULE, MORNING_RULE, SAFETY_RULES, VOICE_RULES,
         persona_block(inp.persona), wake_intensity_block(inp.persona), snooze_block(inp), settings_block(inp), now,
-        events_block("오늘 일정", inp.events_today, "없음 (등록된 일정이 없거나 가져오지 못했다)"),
+        events_block("오늘 일정", inp.events_today, "없음 (캘린더에 등록된 일정이 없다. [오늘 챙길 일]은 이와 별개로 반드시 말한다)" if reminders
+                     else "없음 (등록된 일정이 없거나 가져오지 못했다)"),
+        reminders,
         weather_block(inp.weather) or "[오늘 날씨]\n없음 (날씨를 가져오지 못했다)",
-        night_record_block(inp.night),
+        night_record_block(inp.night, with_notes=not reminders),
         inp.strategy_block,
     )
