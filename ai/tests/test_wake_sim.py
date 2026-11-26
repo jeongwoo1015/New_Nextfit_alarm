@@ -49,3 +49,15 @@ def test_snoozer_is_still_started_at_the_level_it_needs():
     res = run_all(types=("snoozer",), policies=("fixed1", "fixed3", "bandit"), days=60, reps=6)
     assert res["snoozer"]["bandit"]["correct_rate"] > 0.6
     assert res["snoozer"]["bandit"]["avg_start"] > 2.0
+
+
+def test_candidates_option_and_over_under_start_metrics():
+    """4-4 후보 확장 비교용: 후보를 바꿔 돌릴 수 있고, 필요 이상·미달 시작 비율은 후보와 상관없이 1~3단계 기준으로 센다."""
+    a = run_policy("bandit", "mid", 60, 3, candidates=(1, 3))
+    b = run_policy("bandit", "mid", 60, 3, candidates=(1, 2, 3))
+    assert set(a["starts"]) <= {1, 3} and set(b["starts"]) <= {1, 2, 3} and 2 in b["starts"]
+    for r in (a, b):
+        assert 0 <= r["over_rate"] <= 1 and 0 <= r["under_rate"] <= 1
+    easy3 = run_policy("fixed3", "easy", 60, 1)
+    assert easy3["over_rate"] == 1.0 and easy3["under_rate"] == 0.0         # 1단계로 충분한 사람에게 늘 3단계 = 늘 필요 이상
+    assert run_policy("fixed1", "deep", 60, 1)["under_rate"] == 1.0         # 3단계가 필요한 사람에게 늘 1단계 = 늘 미달

@@ -23,6 +23,7 @@ VAL_TYPES = ("very_deep", "habit_change", "no_effect", "new_user", "snoozer")   
 POLICIES = ("fixed1", "fixed3", "random", "bandit", "bandit_global")
 CHANGE_DAY = 30                   # habit_change가 바뀌는 날
 SNOOZE_RATE = 0.2                 # snoozer가 소리와 상관없이 알람에 반응한 뒤 미루는 비율(11/26 결정: 미루기는 볼륨 학습에 영향이 없다 — 반응한 단계가 성공으로 센다)
+NEED_LEVELS = (1, 2, 3)           # 필요 이상 시작을 셀 때 쓰는 기준 단계들(후보와 상관없이 1~3단계 중 충분한 가장 낮은 단계)
 EVAL_FROM = 21                    # 이 날부터를 평가한다(앞은 학습 기간)
 
 
@@ -45,13 +46,14 @@ def correct_start(probs: tuple, candidates=CANDIDATES, cap: int = START_CAP, thr
 
 
 def run_policy(policy: str, user_type: str, days: int = 60, seed: int = 0, global_ladder: WakeLadder | None = None, threshold: float = THRESHOLD,
-               prior_strength: float = 2.0) -> dict:
-    """한 정책으로 days일을 돌린다. 모든 정책이 같은 환경 난수(받을 운)를 겪는다."""
+               prior_strength: float = 2.0, candidates=CANDIDATES) -> dict:
+    """한 정책으로 days일을 돌린다. 모든 정책이 같은 환경 난수(받을 운)를 겪는다.
+    candidates: 시작 단계 후보. over_rate/under_rate는 후보와 상관없이 1~3단계 중 '충분한 가장 낮은 단계'(NEED_LEVELS)를 기준으로 센다."""
     if policy not in POLICIES or (user_type not in LADDERS and user_type not in ("habit_change", "new_user", "snoozer")):
         raise ValueError(f"policy는 {POLICIES}, user_type은 {SET_TYPES + VAL_TYPES} 중 하나예요")
     env, pick, snooze_rng = random.Random(seed), random.Random(seed + 1), random.Random(seed + 2)
     ladder = WakeLadder()
-    starts, correct, received, immediate, snoozes = [], [], [], [], []
+    starts, correct, received, immediate, snoozes, over, under = [], [], [], [], [], [], []
     for day in range(days):
         luck = [env.random() for _ in LEVELS]
         snoozed = user_type == "snoozer" and snooze_rng.random() < SNOOZE_RATE       # 미루기는 따로 뽑아 normal과 같은 아침(받을 운)을 겪게 한다
@@ -62,16 +64,19 @@ def run_policy(policy: str, user_type: str, days: int = 60, seed: int = 0, globa
         elif policy == "fixed3":
             k = 3
         elif policy == "random":
-            k = pick.choice(CANDIDATES)
+            k = pick.choice(candidates)
         else:
             use_global = global_ladder if policy == "bandit_global" else None
-            k = decide_start_level(ladder, use_global, rng=pick, threshold=threshold, prior_strength=prior_strength, mc_samples=0).applied
+            k = decide_start_level(ladder, use_global, rng=pick, threshold=threshold, prior_strength=prior_strength, mc_samples=0, candidates=candidates).applied
         got = next((lv for lv in range(k, max(LEVELS) + 1) if luck[lv - 1] < probs[lv - 1]), None)
         if policy in ("bandit", "bandit_global"):
             learn_wake(ladder, ctx, k, got)                          # 반응한 단계만 학습한다. 미룬 날도 같다(11/26 보상 분리)
         starts.append(k)
         snoozes.append(snoozed)
-        correct.append(k == correct_start(probs, threshold=threshold))
+        correct.append(k == correct_start(probs, candidates=candidates, threshold=threshold))
+        need = correct_start(probs, candidates=NEED_LEVELS, threshold=threshold)       # 후보에 상관없이 1~3단계 중 충분한 가장 낮은 단계
+        over.append(k > need)
+        under.append(k < need)
         received.append(got if got is not None else max(LEVELS))
         immediate.append(got == k)
     ev = slice(EVAL_FROM, days)
@@ -81,23 +86,24 @@ def run_policy(policy: str, user_type: str, days: int = 60, seed: int = 0, globa
         return next((i for i in range(0, days - 9) if sum(correct[i:i + 10]) >= 8), None)
     return {"policy": policy, "user_type": user_type, "days": days, "starts": starts, "snoozes": snoozes, "ladder": ladder,
             "correct_rate": sum(correct[ev]) / n, "avg_start": sum(starts[ev]) / n, "immediate_rate": sum(immediate[ev]) / n,
-            "avg_received": sum(received[ev]) / n, "converge_day": conv()}
+            "avg_received": sum(received[ev]) / n, "over_rate": sum(over[ev]) / n, "under_rate": sum(under[ev]) / n, "converge_day": conv()}
 
 
-def build_global(days: int = 60, seeds=(100, 101, 102), threshold: float = THRESHOLD) -> WakeLadder:
+def build_global(days: int = 60, seeds=(100, 101, 102), threshold: float = THRESHOLD, candidates=CANDIDATES) -> WakeLadder:
     """설정용 가상 사용자(SET_TYPES)들이 학습한 기록을 합쳐 전체 사용자 prior를 만든다(검증용 가상 사용자는 쓰지 않는다)."""
-    return WakeLadder.merge(*[run_policy("bandit", t, days, s, None, threshold)["ladder"] for t in SET_TYPES for s in seeds])
+    return WakeLadder.merge(*[run_policy("bandit", t, days, s, None, threshold, candidates=candidates)["ladder"] for t in SET_TYPES for s in seeds])
 
 
-def run_all(types=SET_TYPES + VAL_TYPES, policies=POLICIES, days: int = 60, reps: int = 20, threshold: float = THRESHOLD, prior_strength: float = 2.0) -> dict:
+def run_all(types=SET_TYPES + VAL_TYPES, policies=POLICIES, days: int = 60, reps: int = 20, threshold: float = THRESHOLD, prior_strength: float = 2.0,
+            candidates=CANDIDATES) -> dict:
     """{user_type: {policy: {지표: 반복 평균}}}. 지표: correct_rate(정답 시작 단계 선택 비율), avg_start(낮을수록 부드러움), immediate_rate(시작 단계에서 바로 받음), avg_received."""
-    glob = build_global(days, threshold=threshold)
+    glob = build_global(days, threshold=threshold, candidates=candidates)
     out = {}
     for t in types:
         out[t] = {}
         for p in policies:
-            runs = [run_policy(p, t, days, 1000 + r, glob, threshold, prior_strength) for r in range(reps)]
-            out[t][p] = {m: sum(r[m] for r in runs) / reps for m in ("correct_rate", "avg_start", "immediate_rate", "avg_received")}
+            runs = [run_policy(p, t, days, 1000 + r, glob, threshold, prior_strength, candidates) for r in range(reps)]
+            out[t][p] = {m: sum(r[m] for r in runs) / reps for m in ("correct_rate", "avg_start", "immediate_rate", "avg_received", "over_rate", "under_rate")}
             conv = [r["converge_day"] for r in runs if r["converge_day"] is not None]
             out[t][p]["converge_day"] = sum(conv) / len(conv) if conv else None
     return out
