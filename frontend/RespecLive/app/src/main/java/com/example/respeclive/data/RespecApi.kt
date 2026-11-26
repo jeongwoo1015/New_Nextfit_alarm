@@ -12,7 +12,8 @@ import java.io.File
 /** 끝말잇기 한 턴 AI 판단: valid면 next(넥스티 단어, 없으면 넥스티 패배), 아니면 reason(보여 줄 이유) */
 class WordChainTurn(val valid: Boolean, val next: String?, val reason: String?)
 
-class SnoozeResult(val snoozedUntilMs: Long?, val code: String?, val snoozesToday: Int? = null)
+/** snoozeCount: 이 세션(알람)의 미룬 횟수, snoozesToday: 오늘 모든 알람의 합계 */
+class SnoozeResult(val snoozedUntilMs: Long?, val code: String?, val snoozesToday: Int? = null, val snoozeCount: Int? = null)
 
 class CoachingToken(val auth: LiveAuth?, val steps: JSONArray?, val code: String?)
 
@@ -28,7 +29,7 @@ object RespecApi {
     private const val WORDCHAIN_TURN_TIMEOUT_MS = 6_000L
 
     /** Live 토큰을 못 받았을 때 LiveClient가 화면에 이유를 보여 주도록 예외로 바꿈 */
-    fun tokenError(): Nothing = throw IllegalStateException(ApiClient.lastError ?: "서버에서 통화 토큰을 받지 못했어요")
+    fun tokenError(): Nothing = throw IllegalStateException(ApiClient.lastError ?: "서버에서 통화 토큰을 받지 못했어요.")
 
     private fun liveAuth(json: JSONObject?): LiveAuth? {
         json ?: return null
@@ -257,7 +258,7 @@ object RespecApi {
     /**
      * 미루기. 버튼은 둘 다 null(서버가 5분), 말로 미루기(AI reschedule_alarm, CONTRACTS B21)는 minutesLater(1~60) 또는
      * atTime("HH:MM", 오늘 60분 안) 중 하나.
-     * 성공하면 다시 울릴 시각(snoozed_until), 실패하면 code (하루 3번을 넘으면 SNOOZE_LIMIT, 연결 실패면 null)
+     * 성공하면 다시 울릴 시각(snoozed_until), 실패하면 code (한도를 넘으면 SNOOZE_LIMIT, 연결 실패면 null)
      */
     suspend fun snoozeTo(sessionId: String, minutesLater: Int?, atTime: String?): SnoozeResult {
         val body = JSONObject()
@@ -267,7 +268,7 @@ object RespecApi {
         if (!r.ok) return SnoozeResult(null, r.errorCode ?: "HTTP_${r.code}")
         val json = r.json()
         val until = json?.optString("snoozed_until")?.takeIf { it.isNotBlank() }?.let { parseServerTime(it) }
-        return SnoozeResult(until, null, json?.optInt("snoozes_today", -1)?.takeIf { it >= 0 })
+        return SnoozeResult(until, null, json?.optInt("snoozes_today", -1)?.takeIf { it >= 0 }, json?.optInt("snooze_count", -1)?.takeIf { it >= 0 })
     }
 
     /**

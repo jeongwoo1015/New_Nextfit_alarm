@@ -150,6 +150,8 @@ private fun morningPlan(view: JSONObject): List<String>? {
 
 /** 재기상 음악을 틀 때 AI에게 보내는 알림: 이름을 불러 깨우고 깨우는 말을 한 단계 강하게 함 (AI CONTRACTS B17) */
 private const val REWAKE_NOTICE = "(앱 알림: 재기상 음악 재생)"
+/** 말로 미룬 뒤 결과 안내("7시 10분에 다시 울려요.")를 보여 주고 통화를 저절로 끝내기까지 */
+private const val SNOOZE_CLOSE_MS = 2_000L
 
 /** 판정 보고가 사용자 말 받아쓰기보다 먼저 올 때, 받아쓰기를 기다리는 시간 (B19) */
 private const val REPORT_SPEECH_WAIT_MS = 1_500L
@@ -235,9 +237,42 @@ fun MorningChatScreen(
     val heldReports = remember { mutableStateMapOf<Int, String>() }
     var heldShown by remember { mutableIntStateOf(0) }     // 보류한 보고로 화면을 넘긴 마지막 단계 번호 (화면은 그다음 단계)
     var rescheduleArgs by remember { mutableStateOf<JSONObject?>(null) }
-    var snoozedByVoice by remember { mutableStateOf(false) }   // 말로 미룸: 사용자가 통화 종료를 누르면 리포트 없이 홈으로
+    // 말로 미룸: AI가 reschedule_alarm을 부른 순간부터 true. 이후 통화가 끝나면(저절로든 종료 버튼이든) 리포트 없이 홈으로
+    var snoozedByVoice by remember { mutableStateOf(false) }
+    var snoozeJob by remember { mutableStateOf<Deferred<String>?>(null) }
+
+    /**
+     * 말로 미루기 요청을 서버에 보내고 다시 울릴 알람을 예약 (한 번만). 화면을 벗어나도 끝까지 하도록 앱 전체 범위에서 실행.
+     * 안내 음성이 끝나기 전에 사용자가 통화 종료를 눌러도 미루기는 그대로 됨. 돌려주는 값: 화면에 보일 결과 문구
+     */
+    fun startVoiceSnooze(sid: String): Deferred<String> = snoozeJob ?: run {
+        val app = context.applicationContext
+        val args = rescheduleArgs
+        val alarm = alarmId
+        ApiClient.scope.async {
+            val req = VoiceSnooze.check(
+                args?.takeIf { it.has("minutes_later") && !it.isNull("minutes_later") }?.optInt("minutes_later"),
+                args?.optString("at_time")?.takeIf { it.isNotBlank() && it != "null" }
+            )
+            if (req == null) return@async "다시 울릴 시각을 알아듣지 못했어요. 알람을 직접 맞춰 주세요."
+            val r = RespecApi.snoozeTo(sid, req.minutesLater, req.atTime)
+            if (r.code == "SNOOZE_LIMIT") {
+                SnoozeCount.set(app, alarm, SnoozeCount.MAX_PER_ALARM)
+                return@async "이 알람은 더 미룰 수 없어요(알람마다 ${SnoozeCount.MAX_PER_ALARM}번까지)."
+            }
+            // 서버가 정한 시각, 서버에 닿지 못했으면 앱이 계산한 시각
+            val at = r.snoozedUntilMs ?: req.triggerMillis
+            AlarmScheduler.scheduleSnoozeAt(app, alarm, VoiceSnooze.label(at), at)
+            r.snoozeCount?.let { SnoozeCount.set(app, alarm, it) } ?: SnoozeCount.increment(app, alarm)
+            "${VoiceSnooze.label(at)}에 다시 울려요."
+        }.also { snoozeJob = it }
+    }
+
     fun finish() {
         if (snoozedByVoice) {
+            // 안내 음성 도중에 종료를 눌렀으면 아직 보내지 않은 미루기를 지금 보냄 (이미 보냈으면 그대로)
+            (sessionId ?: initialSession?.optJSONObject("session")?.optString("session_id")?.takeIf { it.isNotBlank() })
+                ?.let { startVoiceSnooze(it) }
             onSnoozed()
             return
         }
@@ -507,6 +542,7 @@ fun MorningChatScreen(
                 // 말로 미루기 (B21): end_session처럼 응답을 보내지 않고, 안내 음성이 끝나면 연결을 닫은 뒤 미루기
                 "reschedule_alarm" -> {
                     rescheduleArgs = call.args
+                    snoozedByVoice = true      // 이 뒤로 통화가 끝나면 리포트가 아니라 홈으로
                     toolEvents.trySend(call.name)
                     null
                 }
@@ -599,35 +635,14 @@ fun MorningChatScreen(
 
         // 말로 미루기 (B21·B25): 연결을 닫고 서버에 미룬 뒤 그 시각에 오늘 한 번 다시 울리도록 예약.
         // 브리핑·코칭 어느 통화에서든 같고, 미룬 뒤에는 남은 단계(한마디·콘텐츠·포춘)를 열지 않음.
-        // 회의(11/20)·AI 안내("지금 알람은 직접 종료해 주세요")대로 사용자가 통화 종료를 눌러야 끝남
+        // 결과 안내를 잠깐 보여 준 뒤 통화를 저절로 끝내고 리포트 없이 홈으로 (11/27: 사용자가 종료를 누르지 않아도 됨)
         suspend fun voiceSnooze(sid: String) {
             client.stop()
-            val args = rescheduleArgs
-            val req = VoiceSnooze.check(
-                args?.takeIf { it.has("minutes_later") && !it.isNull("minutes_later") }?.optInt("minutes_later"),
-                args?.optString("at_time")?.takeIf { it.isNotBlank() && it != "null" }
-            )
-            val message = if (req == null) {
-                "다시 울릴 시각을 알아듣지 못했어요. 알람을 직접 맞춰 주세요"
-            } else {
-                val r = RespecApi.snoozeTo(sid, req.minutesLater, req.atTime)
-                when {
-                    r.code == "SNOOZE_LIMIT" -> {
-                        SnoozeCount.set(context, SnoozeCount.MAX_PER_DAY)
-                        "오늘은 더 미룰 수 없어요 (하루 ${SnoozeCount.MAX_PER_DAY}번까지)"
-                    }
-                    else -> {
-                        // 서버가 정한 시각, 서버에 닿지 못했으면 앱이 계산한 시각
-                        val at = r.snoozedUntilMs ?: req.triggerMillis
-                        AlarmScheduler.scheduleSnoozeAt(context, alarmId, VoiceSnooze.label(at), at)
-                        r.snoozesToday?.let { SnoozeCount.set(context, it) } ?: SnoozeCount.increment(context)
-                        "${VoiceSnooze.label(at)}에 다시 울려요"
-                    }
-                }
-            }
-            snoozedByVoice = true
+            val message = startVoiceSnooze(sid).await()
             stage = Stage.Finished
-            notice = "$message · 통화를 종료해 주세요"
+            notice = message
+            delay(SNOOZE_CLOSE_MS)
+            finish()
         }
 
         // 코칭(루틴·콘텐츠) 세션: 새 토큰으로 연결하고, 모든 단계를 판정하거나(routine_over) end_session이 오면
@@ -758,7 +773,7 @@ fun MorningChatScreen(
                 STAGE_COACHING -> {
                     val snoozed = runCoaching(sid, coachJob, hasNext = next != null)
                     coachJob = null
-                    // 코칭 중 말로 미룸 (B25): 남은 단계(포춘 등)는 열지 않고, 사용자가 통화 종료를 누를 때까지 안내를 둠
+                    // 코칭 중 말로 미룸 (B25): 남은 단계(포춘 등)는 열지 않음. 통화는 voiceSnooze가 안내 뒤 저절로 끝냄
                     if (snoozed) {
                         fortuneJob?.cancel()
                         return@LaunchedEffect
