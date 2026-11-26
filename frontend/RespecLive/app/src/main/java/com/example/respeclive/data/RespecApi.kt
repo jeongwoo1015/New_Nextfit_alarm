@@ -419,6 +419,17 @@ object RespecApi {
         return if (r.ok) r.json()?.optString("url")?.takeIf { it.isNotBlank() } else null
     }
 
+    /**
+     * 장르를 고를 때 미리 듣는 재기상 음악 (GET /music/rewake?genre=). 응답의 genre가 고른 장르와 같을 때만 URL.
+     * 서버가 genre 파라미터를 아직 모르면 설정 장르 곡을 주거나(다르면 버림) 온보딩 전이라 404 → null
+     */
+    suspend fun rewakeSample(genre: String): String? {
+        val r = ApiClient.get("/music/rewake?genre=$genre") ?: return null
+        val j = if (r.ok) r.json() else null
+        if (j?.optString("genre") != genre) return null
+        return j.optString("url").takeIf { it.isNotBlank() }
+    }
+
     /** 수면 음악 한 곡 (music_id로 곡이 바뀌었는지 비교) */
     data class SleepTrack(val musicId: String, val url: String)
 

@@ -1,8 +1,11 @@
 package com.example.respeclive.ui.onboarding
 
 import android.Manifest
+import android.media.AudioAttributes
+import android.media.MediaPlayer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,6 +36,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.*
@@ -48,12 +52,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.respeclive.audio.ttsText
 import com.example.respeclive.data.ApiClient
 import com.example.respeclive.data.DeviceLocation
 import com.example.respeclive.data.RespecApi
 import com.example.respeclive.data.fixedContentOption
 import com.example.respeclive.ui.common.FitText
 import com.example.respeclive.ui.theme.RespecColors
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -219,7 +225,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
             .padding(horizontal = 20.dp)
     ) {
         Spacer(Modifier.height(16.dp))
-        Text("Re:Spec", color = RespecColors.AccentText, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
+        Text("넥스티", color = RespecColors.AccentText, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
         Spacer(Modifier.height(18.dp))
         StepIndicator(step)
         Spacer(Modifier.height(22.dp))
@@ -521,16 +527,18 @@ private fun PersonaStep(
     val line = previewLine(tone, personality, intensity)
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        StepTitle("페르소나를 설정해 주세요")
-        FormCard {
-            FieldLabel("호칭")
-            InputField(callName, onCallName, "AI가 나를 부를 이름", 30)
-            FieldLabel("어조")
-            ChipRow(TONES, tone, onTone)
-            FieldLabel("성격")
-            ChipRow(PERSONALITIES, personality, onPersonality)
-            FieldLabel("강도")
-            ChipRow(INTENSITIES, intensity, onIntensity)
+        // 11/26 실사용 피드백: "페르소나"만으로는 무엇을 고르는지 몰라서 부제로 짧게 풀어 씀
+        StepTitle("페르소나를 설정해 주세요", "넥스티가 어떻게 깨워 줄지 골라 주세요.")
+        SectionCard("나를 부르는 법") {
+            Field("호칭") {
+                InputField(callName, onCallName, "예: 민지, 대표님", 30)
+            }
+            Field("어조") { ChipRow(TONES, tone, onTone) }
+        }
+        Spacer(Modifier.height(16.dp))
+        SectionCard("깨우는 스타일") {
+            Field("성격") { ChipRow(PERSONALITIES, personality, onPersonality) }
+            Field("강도", "깨울 때 얼마나 단호하게 말할지 정해요.") { ChipRow(INTENSITIES, intensity, onIntensity) }
             ToggleRow("자동 강도 올리기", AUTO_INTENSITY_DESC, autoIntensity, onAutoIntensity)
 
             val shape = RoundedCornerShape(18.dp)
@@ -540,7 +548,7 @@ private fun PersonaStep(
                     .clip(shape)
                     .background(RespecColors.Background)
                     .border(1.dp, RespecColors.CardBorder, shape)
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .padding(horizontal = 14.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
@@ -551,19 +559,57 @@ private fun PersonaStep(
                 }
                 Spacer(Modifier.width(12.dp))
                 Column {
-                    Text("미리보기", color = RespecColors.TextSub, fontSize = 12.sp)
-                    Text("“$line”", color = RespecColors.Text, fontSize = 15.sp)
+                    Text("이렇게 깨워요", color = RespecColors.TextSub, fontSize = 13.sp)
+                    Spacer(Modifier.height(2.dp))
+                    Text("“$line”", color = RespecColors.Text, fontSize = 16.sp, lineHeight = 22.sp)
                 }
             }
-
-            FieldLabel("목소리")
-            ChipRow(VOICES, voice, onVoice)
-            VoicePreview(voice, line)
-
-            FieldLabel("음악 장르")
-            ChipRow(GENRES, genre, onGenre)
+        }
+        Spacer(Modifier.height(16.dp))
+        SectionCard("소리") {
+            Field("목소리") {
+                ChipRow(VOICES, voice, onVoice)
+                VoicePreview(voice, line)
+            }
+            Field("음악 장르", GENRE_HELP) {
+                ChipRow(GENRES, genre, onGenre)
+                GenrePreview(genre)
+            }
         }
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+/** 제목이 있는 묶음 카드 (페르소나 단계: 항목이 많아 한 카드에 모으면 읽기 어려웠음) */
+@Composable
+private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
+    val shape = RoundedCornerShape(24.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(RespecColors.Card)
+            .border(1.dp, RespecColors.CardBorder, shape)
+            .padding(horizontal = 20.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        Text(title, color = RespecColors.AccentText, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+        content()
+    }
+}
+
+/** 항목 하나: 이름(+ 한 줄 설명) 아래에 고르는 칸 */
+@Composable
+private fun Field(label: String, hint: String? = null, content: @Composable ColumnScope.() -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column {
+            Text(label, color = RespecColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            if (hint != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(hint, color = RespecColors.TextSub, fontSize = 13.sp, lineHeight = 18.sp)
+            }
+        }
+        content()
     }
 }
 
@@ -604,7 +650,7 @@ internal fun VoicePreview(voice: String, line: String) {
                 else -> 1.25f
             }
         )
-        tts.speak(line, TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
+        tts.speak(ttsText(line), TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
     }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -626,6 +672,88 @@ internal fun VoicePreview(voice: String, line: String) {
         Waveform(speaking)
     }
 }
+
+/** 음악 장르를 어디에 쓰는지 (온보딩·내 정보 공통) */
+internal const val GENRE_HELP = "대답이 없을 때 깨우는 음악이에요."
+
+/** 재기상 음악 미리 듣기: 고른 장르의 곡을 앞부분만 틂. 다시 누르거나 장르를 바꾸면 멈춤 */
+@Composable
+internal fun GenrePreview(genre: String) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var player by remember { mutableStateOf<MediaPlayer?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    val current by rememberUpdatedState(genre)
+
+    fun stop() {
+        player?.runCatching { stop(); release() }
+        player = null
+    }
+    DisposableEffect(genre) { onDispose { stop(); loading = false } }
+    // 앞부분만 들려줌
+    LaunchedEffect(player) {
+        if (player == null) return@LaunchedEffect
+        delay(GENRE_PREVIEW_MS)
+        stop()
+    }
+
+    fun play() {
+        if (loading) return
+        if (player != null) { stop(); return }
+        loading = true
+        val asked = genre
+        scope.launch {
+            val url = RespecApi.rewakeSample(asked)
+            if (asked != current) return@launch    // 기다리는 동안 장르를 바꿈
+            if (url == null) {
+                loading = false
+                Toast.makeText(context, "이 장르는 아직 미리 들을 수 없어요.", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val mp = MediaPlayer()
+            runCatching {
+                mp.setAudioAttributes(
+                    AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()
+                )
+                mp.setDataSource(url)
+                mp.setOnPreparedListener {
+                    loading = false
+                    if (asked != current) { it.release(); return@setOnPreparedListener }
+                    it.start()
+                    player = it
+                }
+                mp.setOnCompletionListener { stop() }
+                mp.setOnErrorListener { p, _, _ -> p.release(); loading = false; player = null; true }
+                mp.prepareAsync()
+            }.onFailure {
+                mp.release()
+                loading = false
+            }
+        }
+    }
+
+    // 목소리 미리 듣기와 같은 모양: [▶ 미리 듣기] + 재생 중에 움직이는 파장 바
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        val shape = RoundedCornerShape(50)
+        Row(
+            Modifier
+                .clip(shape)
+                .background(RespecColors.MintDark)
+                .border(1.dp, RespecColors.Mint.copy(alpha = 0.4f), shape)
+                .clickable { play() }
+                .padding(horizontal = 22.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(if (player != null) Icons.Filled.Stop else Icons.Filled.PlayArrow, null, tint = RespecColors.Mint)
+            Spacer(Modifier.width(8.dp))
+            Text("미리 듣기", color = RespecColors.Mint, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.width(16.dp))
+        Waveform(player != null)
+    }
+}
+
+private const val GENRE_PREVIEW_MS = 15_000L
 
 @Composable
 private fun Waveform(active: Boolean) {

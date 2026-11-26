@@ -33,6 +33,8 @@ import com.example.respeclive.ui.onboarding.ChipRow
 import com.example.respeclive.ui.onboarding.Choice
 import com.example.respeclive.ui.onboarding.GENDERS
 import com.example.respeclive.ui.onboarding.GENRES
+import com.example.respeclive.ui.onboarding.GENRE_HELP
+import com.example.respeclive.ui.onboarding.GenrePreview
 import com.example.respeclive.ui.onboarding.InputField
 import com.example.respeclive.ui.onboarding.AUTO_INTENSITY_DESC
 import com.example.respeclive.ui.onboarding.DEFAULT_ENGLISH_LEVEL
@@ -93,7 +95,7 @@ fun ProfileScreen() {
         error = null
         val profile = RespecApi.profile()
         if (profile == null) {
-            error = ApiClient.lastError ?: "내 정보를 불러오지 못했어요"
+            error = ApiClient.lastError ?: "내 정보를 불러오지 못했어요."
         } else {
             user = profile.optJSONObject("user")
             setting = profile.optJSONObject("setting")
@@ -155,7 +157,7 @@ fun ProfileScreen() {
                         ToggleRow("자동 강도 올리기", AUTO_INTENSITY_DESC, autoIntensity) { on ->
                             scope.launch {
                                 if (!save(FIELD_AUTO_INTENSITY, on.toString())) {
-                                    Toast.makeText(context, ApiClient.lastError ?: "저장하지 못했어요", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, ApiClient.lastError ?: "저장하지 못했어요.", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         }
@@ -177,7 +179,7 @@ fun ProfileScreen() {
                     AppTheme.select(context, ThemeMode.valueOf(code))
                     scope.launch {
                         if (!save(FIELD_THEME, code)) {
-                            Toast.makeText(context, ApiClient.lastError ?: "테마를 서버에 저장하지 못했어요", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, ApiClient.lastError ?: "테마를 서버에 저장하지 못했어요.", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -186,7 +188,7 @@ fun ProfileScreen() {
                     Spacer(Modifier.height(8.dp))
                     Text(
                         if (sun != null) "해 뜨면 라이트, 해 지면 다크로 바뀌어요 (오늘 ${clockText(sun.riseMinute)} · ${clockText(sun.setMinute)})"
-                        else "해가 뜨고 지지 않는 날이라 계절에 맞춰 보여 줘요",
+                        else "해가 뜨고 지지 않는 날이라 계절에 맞춰 보여 줘요.",
                         color = RespecColors.TextSub,
                         fontSize = 13.sp
                     )
@@ -203,7 +205,7 @@ fun ProfileScreen() {
                     onPick = { picked ->
                         scope.launch {
                             if (!save(FIELD_BIRTH, picked)) {
-                                Toast.makeText(context, ApiClient.lastError ?: "저장하지 못했어요", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, ApiClient.lastError ?: "저장하지 못했어요.", Toast.LENGTH_SHORT).show()
                             }
                         }
                     },
@@ -264,6 +266,10 @@ private fun EditDialog(
                     }
                 }
                 if (field.key == FIELD_VOICE) VoicePreview(value, line)
+                if (field.key == "music_genre") {
+                    Text(GENRE_HELP, color = RespecColors.TextSub, fontSize = 13.sp)
+                    GenrePreview(value)
+                }
                 error?.let { Text(it, color = RespecColors.Danger, fontSize = 13.sp) }
             }
         },
@@ -281,7 +287,7 @@ private fun EditDialog(
                     scope.launch {
                         val ok = save(text)
                         saving = false
-                        if (ok) onDismiss() else error = ApiClient.lastError ?: "저장하지 못했어요. 다시 시도해 주세요"
+                        if (ok) onDismiss() else error = ApiClient.lastError ?: "저장하지 못했어요. 다시 시도해 주세요."
                     }
                 }
             ) {
