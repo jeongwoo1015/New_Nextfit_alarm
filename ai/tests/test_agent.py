@@ -1,4 +1,4 @@
-"""Agent·로그·시뮬레이션 테스트. 모드별 동작, 안전 규칙, 오류 복귀, 로그, 학습, 전체 파이프라인. Gemini 호출 없음."""
+"""Agent·로그 테스트. 모드별 동작, 안전 규칙, 오류 복귀, 로그, 학습. Gemini 호출 없음. (옛 코칭 시뮬레이션 sim.py는 11/26 삭제, coach_sim.py로 대체)"""
 import json
 import random
 import re
@@ -7,7 +7,7 @@ from datetime import date, timedelta
 import pytest
 
 from ai.live.version import PROMPT_VERSION
-from ai.personalization import rules, sim
+from ai.personalization import rules
 from ai.personalization.agent import MODES, ab_group, decide, learn
 from ai.personalization.bandit import ARMS, ContextualBandit
 from ai.personalization.logs import DecisionLog
@@ -162,38 +162,3 @@ def test_learn_rejects_bad_scores_and_unknown_strategy():
     assert learn(b, d.log, float("nan")) is False and learn(b, d.log, None) is False and b.counts == {}
     d.log.strategy_id = "ghost"
     assert learn(b, d.log, 1.0) is False
-
-
-# ---------------- 전체 파이프라인(가상 사용자) ----------------
-def test_simulation_is_reproducible_and_error_free():
-    a, b = sim.run_policy("bandit", "soft", days=60, seed=3), sim.run_policy("bandit", "soft", days=60, seed=3)
-    assert a["rewards"] == b["rewards"] and a["arms"] == b["arms"]
-    assert a["fallbacks"] == 0 and a["errors"] == 0 and len(a["rewards"]) == 60 and all(0 <= r <= 1 for r in a["rewards"])
-    assert sim.run_policy("bandit", "soft", days=60, seed=4)["rewards"] != a["rewards"]
-
-
-@pytest.mark.parametrize("policy", sim.POLICIES)
-@pytest.mark.parametrize("user_type", list(sim.USER_TYPES))
-def test_simulation_never_pushes_on_tired_days(policy, user_type):
-    r = sim.run_policy(policy, user_type, days=80, seed=1)
-    assert r["push_on_tired"] == 0 and r["fallbacks"] == 0
-
-
-def test_simulation_respects_kind_setting():
-    for policy in ("random", "rule", "bandit"):
-        assert "push" not in sim.run_policy(policy, "firm", days=80, seed=2, speech_style="KIND")["arms"]
-
-
-def test_simulation_pipeline_sanity_with_fixed_seeds():
-    res = sim.run_all(days=100, seeds=(0, 1, 2))
-    assert res["soft"]["bandit"] > res["soft"]["standard"] and res["firm"]["bandit"] > res["firm"]["standard"]   # 동작 확인용: 학습이 전략 선택을 바꿈
-    assert abs(res["flat"]["bandit"] - res["flat"]["standard"]) < 0.05                                          # 차이 없는 사용자는 차이가 없다
-    assert set(res) == {"soft", "firm", "flat"} and all(set(r) == set(sim.POLICIES) for r in res.values())
-    assert "soft" in sim.format_table(res)
-
-
-def test_simulation_rejects_bad_arguments():
-    with pytest.raises(ValueError):
-        sim.run_policy("magic", "soft")
-    with pytest.raises(ValueError):
-        sim.run_policy("rule", "alien")

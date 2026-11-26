@@ -29,35 +29,35 @@ def test_no_effect_user_is_not_pushed_louder_than_needed_and_habit_change_is_fol
     assert res["habit_change"]["bandit"]["correct_rate"] > 0.7
 
 
-def test_short_hard_has_different_correct_start_by_sleep_length():
-    from ai.personalization.wake_sim import ladder_of
-    assert correct_start(ladder_of("short_hard", 0, True)) == 3 and correct_start(ladder_of("short_hard", 0, False)) == 1
+def test_mid_user_has_answer_two_only_when_two_is_a_candidate():
+    """2단계가 정답인 사용자: 후보가 1·3뿐이면 3이 정답이고, 후보에 2를 넣으면 2가 정답이다(4-4 확장 비교용)."""
+    assert correct_start(LADDERS["mid"]) == 3 and correct_start(LADDERS["mid"], candidates=(1, 2, 3)) == 2
 
 
-def test_bandit_learns_the_sleep_length_context_for_short_hard():
-    """11/25: 수면이 짧은 날은 크게, 긴 날은 부드럽게 시작하는지(상황 학습)."""
-    gaps = []
-    for seed in range(8):
-        r = run_policy("bandit", "short_hard", 60, 2000 + seed)
-        ev = range(21, 60)
-        short = [r["starts"][i] for i in ev if r["shorts"][i]]
-        long_ = [r["starts"][i] for i in ev if not r["shorts"][i]]
-        gaps.append(sum(short) / len(short) - sum(long_) / len(long_))
-    assert sum(gaps) / len(gaps) > 1.0
-
-
-def test_snoozer_days_are_learned_as_failures_and_other_types_keep_their_random_stream():
+def test_snoozing_does_not_change_volume_learning():
+    """11/26 보상 분리: 미루기는 볼륨 학습에 영향이 없다. 같은 아침을 겪은 snoozer와 normal의 학습 기록이 같아야 한다."""
     from ai.personalization.wake_sim import SNOOZE_RATE
     assert 0 < SNOOZE_RATE < 0.5
     a = run_policy("bandit", "snoozer", 60, 7)
     b = run_policy("bandit", "normal", 60, 7)
-    assert a["shorts"] == b["shorts"]                              # 수면 길이는 같은 환경 난수를 쓴다
-    ok_a = sum(v[0] for v in a["ladder"].counts.values())
-    ok_b = sum(v[0] for v in b["ladder"].counts.values())
-    assert ok_a < ok_b                                             # 미룬 날은 성공으로 세지 않아 성공 기록이 더 적다
+    assert a["starts"] == b["starts"]                                     # 같은 환경, 같은 선택
+    assert a["ladder"].counts == b["ladder"].counts                       # 미룬 날이 학습 기록을 바꾸지 않는다
+    assert 0 < sum(a["snoozes"]) < 60 and not any(b["snoozes"])           # snoozer만 실제로 미룬다
 
 
 def test_snoozer_is_still_started_at_the_level_it_needs():
     res = run_all(types=("snoozer",), policies=("fixed1", "fixed3", "bandit"), days=60, reps=6)
     assert res["snoozer"]["bandit"]["correct_rate"] > 0.6
     assert res["snoozer"]["bandit"]["avg_start"] > 2.0
+
+
+def test_candidates_option_and_over_under_start_metrics():
+    """4-4 후보 확장 비교용: 후보를 바꿔 돌릴 수 있고, 필요 이상·미달 시작 비율은 후보와 상관없이 1~3단계 기준으로 센다."""
+    a = run_policy("bandit", "mid", 60, 3, candidates=(1, 3))
+    b = run_policy("bandit", "mid", 60, 3, candidates=(1, 2, 3))
+    assert set(a["starts"]) <= {1, 3} and set(b["starts"]) <= {1, 2, 3} and 2 in b["starts"]
+    for r in (a, b):
+        assert 0 <= r["over_rate"] <= 1 and 0 <= r["under_rate"] <= 1
+    easy3 = run_policy("fixed3", "easy", 60, 1)
+    assert easy3["over_rate"] == 1.0 and easy3["under_rate"] == 0.0         # 1단계로 충분한 사람에게 늘 3단계 = 늘 필요 이상
+    assert run_policy("fixed1", "deep", 60, 1)["under_rate"] == 1.0         # 3단계가 필요한 사람에게 늘 1단계 = 늘 미달

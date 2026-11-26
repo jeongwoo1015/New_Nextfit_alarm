@@ -60,12 +60,8 @@ def wake_intensity_block(p: Persona) -> str:
     """브리핑(깨우는 단계)에만 붙는 강도 규칙. 기상 확인 뒤와 다른 세션은 성격 말투만 쓴다."""
     kind, n = personality_of(p), intensity_of(p)
     ex = SLEEPY_EXAMPLES[kind]
-    up_n = min(3, n + 1)
-    if getattr(p, "auto_intensity", True):
-        up = (f"- 앱이 '{REWAKE_NOTICE}'을 보내면 사용자가 대답하지 않은 것이다. 그 알림에는 이름을 부르며 깨우는 한 문장으로만 답한다. "
-              f"그 뒤로 이 통화의 깨우는 말은 강도 {up_n}({INTENSITY_NAMES[up_n]})로 말한다: {INTENSITY_RULES[up_n]} 기준 문장도 {up_n}번의 결을 따른다.")
-    else:
-        up = f"- 앱이 '{REWAKE_NOTICE}'을 보내면 사용자가 대답하지 않은 것이다. 그 알림에는 이름을 부르며 깨우는 한 문장으로만 답한다(강도는 그대로)."
+    up = (f"- 앱이 '{REWAKE_NOTICE}'을 보내면 사용자가 대답하지 않은 것이다. 그 알림에는 이름을 부르며 깨우는 한 문장으로만 답한다. "
+          "강도는 이 통화가 끝날 때까지 지금 강도 그대로 유지한다.")
     return (f"[깨우는 말의 강도]\n- 지금 강도: {n} ({INTENSITY_NAMES[n]}). {INTENSITY_RULES[n]}\n"
             "- 적용 범위: 컨디션 질문의 대답에 대한 반응, 잠든 시각 질문, 수면 시간 안내와 기상 유도, 대답이 없을 때. 브리핑(날씨·일정)부터는 성격 말투만 유지한다.\n"
             f"- \"아직 졸려요\"에 대한 기준 문장(이 성격): 강도 1 \"{ex[1]}\" / 강도 2 \"{ex[2]}\" / 강도 3 \"{ex[3]}\".\n"
@@ -286,8 +282,17 @@ def weather_block(w: Weather | None) -> str:
     return "[오늘 날씨]\n- " + ", ".join(parts) if parts else ""
 
 
-def night_record_block(n) -> str:
-    """아침 대화용. n은 NightRecordView 또는 None."""
+def reminders_block(n) -> str:
+    """아침 브리핑용 [오늘 챙길 일]: 어젯밤 "내일 미리 챙겨야 할 일정이나 걱정되는 일" 질문에 사용자가 답한 내용(tomorrow_notes).
+    캘린더에 없더라도 브리핑에서 빠뜨리지 않고 리마인드하게 하려고 [어젯밤 대화 기록]에서 떼어 따로 보여 준다(11/26). 없으면 빈 문자열."""
+    notes = [clean(x, 60) for x in (getattr(n, "tomorrow_notes", None) or ()) if clean(x, 60)] if n is not None else []
+    if not notes:
+        return ""
+    return "[오늘 챙길 일 (어젯밤 사용자가 직접 말함, 캘린더와 별개)]\n" + "\n".join(f"- {x}" for x in notes)
+
+
+def night_record_block(n, with_notes: bool = True) -> str:
+    """아침 대화용. n은 NightRecordView 또는 None. with_notes=False면 특이사항 줄을 빼고([오늘 챙길 일]로 따로 보여 줄 때), 대신 그 블록을 가리킨다."""
     if n is None:
         return "[어젯밤 대화 기록]\n없음 (밤 대화를 하지 않았다)"
     label = CONDITION_WORDS.get(n.condition_label, "")
@@ -295,7 +300,7 @@ def night_record_block(n) -> str:
     notes = ", ".join(clean(x, 60) for x in n.tomorrow_notes) or "없음"
     return ("[어젯밤 대화 기록]\n"
             f"- 어제 하루: {clean(n.ai_summary, 120) or '기록 없음'}\n"
-            f"- 오늘 특이사항: {notes}\n"
+            + (f"- 오늘 특이사항: {notes}\n" if with_notes else ("- 오늘 특이사항: 아래 [오늘 챙길 일] 참고\n" if n.tomorrow_notes else "- 오늘 특이사항: 없음\n")) +
             f"- 오늘의 핵심 목표: {clean(n.tomorrow_goal, 120) or '없음'}\n"
             f"- 어젯밤 컨디션: {cond}\n"
             f"- 어젯밤 인사이트: {clean(n.insight, 120) or '없음'}\n"
