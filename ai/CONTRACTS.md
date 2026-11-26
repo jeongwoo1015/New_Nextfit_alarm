@@ -63,7 +63,7 @@
 | `strategy.py` | 전략 값(코칭 강도·브리핑 길이·응원 정도)과 프롬프트에 붙일 문장 |
 | `agent.py` | `decide`(오늘의 전략 결정, 실패해도 기본 전략으로 폴백)와 `learn`(결과 학습). 모드 off/rule/bandit/ab |
 | `logs.py` | 전략 결정 로그(`DecisionLog`) → RS_STRATEGY_LOG 한 행 |
-| `sim.py` | 가상 사용자로 전체 흐름이 끝까지 도는지 확인 (효과의 근거는 아님) |
+| `wake_sim.py`, `coach_sim.py` | 기상 볼륨·코칭 강도 가상 사용자 시뮬레이션 (효과의 근거는 아님). 옛 `sim.py`는 11/26 삭제 |
 
 **`ai/devclient/` : 앱 없이 AI를 시험하는 PC 도구 (실제 Gemini 호출, 맥 전용)**
 
@@ -289,7 +289,7 @@ AI 쪽 코드 + 단위 테스트 + (프롬프트가 바뀐 곳은) 실제 Gemini
 ### B18. 자막 숫자 표기 (앱)
 - **무엇이 문제인가:** AI는 "5초"를 "오 초"로 바르게 읽는데, Gemini 받아쓰기(`outputTranscription`)가 글자를 "오 초", "다섯 번", "열두 시"로 적어 자막이 어색하다. 같은 대화 안에서도 어떤 때는 "20초", 어떤 때는 "이십 초"로 적힌다. 음성은 고칠 것이 없다.
 - **앱이 할 일:** 받아쓰기 조각을 이어 붙인 한 줄을 화면에 그리기 직전(`splitSubtitlePages` 전)에 변환을 한 번 적용한다. 조각마다 바꾸면 "열"과 "두 시"가 나뉘어 틀린다. 서버 저장용 원문(`transcriptJson`)은 그대로 둔다.
-- **기준 구현:** `ai/tasks/subtitle_numbers.py`의 `subtitle_numbers(text)`(테스트 포함). 오 초 → 5초, 다섯 번 → 5번, 열두 시 → 12시, 여섯 시간 → 6시간, 십일 도 → 11도로 바꾸고, "한 번 더", "이 분들", "초록", "시작", "번호"처럼 수가 아닌 말은 그대로 둔다. 같은 규칙의 Kotlin 초안(컴파일은 해 보지 못했다):
+- **기준 구현:** 앱의 `SubtitleNumbers.kt`(아래 코드, 앱 시험 포함)가 기준이다. AI 쪽 파이썬 원본 `ai/tasks/subtitle_numbers.py`는 앱으로 옮긴 뒤 쓰이지 않아 11/26 삭제했다. 오 초 → 5초, 다섯 번 → 5번, 열두 시 → 12시, 여섯 시간 → 6시간처럼 바꾼다.
 
 ```kotlin
 object SubtitleNumbers {
@@ -427,7 +427,7 @@ alter table rs_morning_session add constraint rs_morning_session_stretch_area_ch
 - **방향(11/20 회의 결론):** 기상 성공은 AI 대화가 아니라 **알람 소리**가 좌우한다(알람 → 전화 받기 → AI 첫 대답). 그래서 개인화를 둘로 나눈다. ① 기상 알람 **시작 볼륨 단계**(기상 성공으로 학습) ② 코칭 강도(단계 수행 비율로 학습). 둘은 서로 다른 Bandit이고 보상도 분리한다. 지금 앱은 알람이 1단계에서 시작해 10초마다 한 단계씩 5단계까지 오르므로, **시작 단계만** 사용자별로 정한다.
 - **AI가 만든 것(`ai/personalization/wake_volume.py`, DB를 읽지 않는 순수 함수):**
   - 시작 단계 후보는 1단계·3단계(상한 3). 재기상 알람은 기상 알람보다 한 단계 큰 2~6단계(`rewake_level()`).
-  - 상황 칸은 추정 수면 가능 시간 하나(짧음 6시간 미만 / 보통 / 모름, `sleep_bucket()`).
+  - ~~상황 칸은 추정 수면 가능 시간 하나(짧음 6시간 미만 / 보통 / 모름, `sleep_bucket()`).~~ **11/26 정정: 상황을 나누지 않는다(`CONTEXT = "all"`). 사용자별 사다리 하나이며, 수면 시간은 학습에 쓰지 않고 서버가 사후 분석용으로만 기록한다(B28). `decide_start_level`의 `sleep_minutes`는 받기만 하고 무시한다.**
   - 학습(사다리): 시작 단계 k에서 w단계에 받았으면 k~w-1단계는 실패, w단계는 성공으로 센다(`WakeLadder.learn`). 받고도 AI 확인에 답하지 않았거나 재기상이 있었으면 w단계도 실패, 끝까지 받지 않았으면 시작~마지막이 모두 실패.
   - 선택: Thompson Sampling. 단계마다 성공 확률을 뽑아 0.7 이상인 가장 낮은 후보로 시작하고, 확실한 후보가 없으면 가장 좋아 보이는 값과 비슷한 후보 중 낮은 단계를 고른다. 전체 사용자 기록은 약한 prior로만 쓴다.
   - 사용자 우선: 일시 변경(`next_alarm_level`) > 지속 상한(`max_start_level`) > 추천. 추천값(`recommended`)과 적용값(`applied`)을 따로 기록하고 사용자가 바꾼 날도 학습한다.
@@ -435,7 +435,7 @@ alter table rs_morning_session add constraint rs_morning_session_stretch_area_ch
 - **서버가 할 일(밤 대화 전 → 아침 → 아침 뒤):**
   1. 밤 대화 시작 전: `d = decide_start_level(personal, global_, sleep_minutes, prefs, previous_level, notified, important_day)`로 내일 시작 단계를 정한다. `personal`은 사용자별 사다리(`rs_bandit_state` 같은 저장 위치의 `WakeLadder.to_dict()`), `global_`은 전체 합산(`WakeLadder.merge`). 사용자가 대화로 정한 값은 `UserWakePrefs(max_start_level, next_alarm_level)`로 넘긴다. `notified`는 "AI가 올린다고 실제로 말했는가"다. 밤 대화 글에서 `raise_announced(AI 발화 글, d.applied)`로 확인한다(AI가 알림을 빠뜨리는 날이 실제 모델 시험에서 5번 중 1~2번 있었다). False면 같은 날 다시 `decide_start_level(..., notified=False)`를 불러 이전 단계를 유지한다. 올린다고 알린 뒤 사용자가 반대하면 AI가 `update_setting(wake_volume, 이전 단계, TODAY)`(지속이면 ALWAYS)를 부른다(B22). `d.raise_pending`이 True면 밤 입력의 `SettingsView(wake_start_level=d.applied, wake_raise_from=previous_level, wake_state=d.state)`를 채운다.
   2. 알람 예약: `d.applied`를 내일 기상 알람의 시작 단계로 앱에 전달한다. 재기상 알람은 `rewake_level(d.applied)`.
-  3. 아침 뒤: 앱이 알려 준 값으로 `learn_wake(ladder, d.context_key, 시작 단계, 받은 단계 또는 None, confirmed)`를 부르고 저장한다. 전략 로그는 `make_log(d, user_id, 날짜, prefs, previous_level).to_row()`를 저장한다(추천값·적용값·source·탐색 여부·선택 확률).
+  3. 아침 뒤: 앱이 알려 준 값으로 `learn_wake(ladder, d.context_key, 시작 단계, 첫 반응 단계 또는 None)`를 부르고 저장한다(11/26: `confirmed`는 받지만 쓰지 않는다. 받은 단계 = 첫 알람에서 자발적으로 처음 반응한 단계이고 받기·미루기·끄기 모두 반응이다. 3번 미룬 뒤 자동 연결로 시작한 날은 부르지 않는다). 전략 로그는 `make_log(d, user_id, 날짜, prefs, previous_level).to_row()`를 저장한다(추천값·적용값·source·탐색 여부·선택 확률).
   4. 코칭 강도 Bandit: `ContextualBandit`의 기본 정책이 Thompson Sampling으로 바뀌었다(공개 API와 저장 형식 호환, 옛 상태는 그대로 읽는다). 보상은 `reward.coaching_reward(session)`(단계 수행 비율, 코칭 안 한 날은 None)로 바꾸고 기상 성공은 넣지 않는다. **11/25: 이 Bandit은 사용자별(`user:{id}`)로 학습하고 상황은 2칸(B27).**
 - **앱이 할 일:** 서버가 준 시작 단계(1~5)로 알람 볼륨을 시작한다(지금은 1 고정). 사용자가 **전화를 받은 순간의 볼륨 단계**와 알람이 울리기 시작한 **시작 단계**, 재기상 여부를 서버에 보고한다(학습 입력이다).
 - **DB가 할 일:** ① 사용자별·전체 사다리 저장(기존 Bandit 상태 테이블에 키 하나 추가하거나 JSON 칸) ② 세션에 `wake_start_level`, `wake_received_level`(없으면 NULL), 시작 단계의 결정 로그(`recommended_level`, `applied_level`, `source`, `explored`, `propensity`, `previous_level`) ③ 중요한 날 판단용 값이 필요하면 서버 쪽 기준(캘린더 일정 등)을 정한다.
@@ -452,7 +452,7 @@ alter table rs_morning_session add constraint rs_morning_session_stretch_area_ch
 - **서버가 할 일(가장 중요):**
   1. 판정 규칙을 바꾼다. 지금 `session_rules.judge_wake`는 `wake_checked_at` 시점에 한 번만 부르고 그 뒤를 반영하지 않는다. **미루기(`POST /morning/sessions/{id}/snooze`, 버튼·말 모두)를 받으면 `wake_checked_at` 전후와 상관없이 그 세션의 `wake_success`를 False로 바꾼다.** 이미 성공으로 저장됐으면 되돌린다(같은 날 여러 세션이면 그날 첫 세션의 판정도 포함).
   2. 같은 날 다시 울린 알람의 세션이 기상 성공이 되는지도 정한다. 권장: 그날 미룬 적이 한 번이라도 있으면 그날 기상은 실패로 센다(`snoozes_today > 0`).
-  3. 기상 볼륨 학습 기록(`save_wake_result`의 `confirmed`)도 같이 False로 고친다. 이미 학습 입력으로 들어간 뒤라면 한 번만 수정되도록 한다(`WakeService`의 이미 확정된 기록 처리 참고). 실패를 성공으로 학습하면 볼륨 사다리가 잘못 올라간다.
+  3. ~~기상 볼륨 학습 기록(`save_wake_result`의 `confirmed`)도 같이 False로 고친다.~~ **(11/26 정정: 이 항목은 취소됐다. 미루기는 볼륨 학습에 영향을 주지 않는다. 아래 B28)** 옛 설명: 이미 학습 입력으로 들어간 뒤라면 한 번만 수정되도록 한다(`WakeService`의 이미 확정된 기록 처리 참고). 실패를 성공으로 학습하면 볼륨 사다리가 잘못 올라간다.
   4. 코칭 입력을 만들 때 `snoozes_today`(오늘 버튼·말 합산)를 `CoachingInput.snoozes_today`로 넘긴다(브리핑 입력과 같은 값, 어댑터 5장).
 - **앱이 할 일:** 지금 `reschedule_alarm` 처리는 브리핑 단계에서만 있다(`MorningChatScreen`의 `briefingEvent`). **루틴·콘텐츠 통화 단계에서도 같은 처리**를 한다: 함수를 받으면 `toolResponse` 없이 안내 음성이 끝날 때까지 기다렸다가 연결을 닫고 `POST /morning/sessions/{id}/snooze`를 보낸 뒤 응답의 `snoozed_until`에 알람을 한 번 다시 예약한다. 이때 이어서 열려던 다음 단계(한마디·콘텐츠·포춘)는 열지 않는다. 사용자가 다시 울린 알람을 받으면 `POST /morning/sessions`로 같은 세션을 이어 받는다(B21과 같음).
 - **확인한 것:** 실제 모델로 4가지(영어 첫 질문에서 미루기, 영어 따라 말하기 한 번 한 뒤 미루기, 루틴 통화에서 미루기, 한도 초과)를 통과시켰다(`snooze_in_english`, `snooze_in_english_midway`, `snooze_in_routine`, `snooze_in_english_daily_limit`). 사람 목소리로 한 확인은 아직 없다. 서버 판정과 앱 처리는 AI 쪽에서 시험할 수 없어 위 요청대로 팀이 확인해야 한다.
@@ -490,6 +490,28 @@ alter table rs_morning_session add constraint rs_morning_session_stretch_area_ch
   3. 기상 볼륨 상태(`wake:user:{id}`, `wake:global`)와 섞지 않는다(키가 다르므로 그대로 두면 된다).
 - **앱이 할 일:** 없음.
 - **주의:** 사용자별 기록은 적어서 학습이 느리다(시뮬레이션에서 60일에 설정용 유형의 이론상 개선 폭 중 65%). 소수 실사용(7~14일)으로는 코칭 강도의 효과를 볼 수 없고 "사용자별 기록이 쌓이고 전략이 기록된다"만 확인한다.
+
+### B28. 볼륨과 AI 강도의 보상 분리 (11/26 회의, AI 반영 완료, 서버 대기)
+- **결정:** 볼륨은 "그날 첫 알람에서 사용자가 자발적으로 처음 반응한 단계"만 학습한다. 반응 뒤의 미루기·재기상·AI 확인 질문 답변은 볼륨 학습에 넣지 않는다(그것은 AI 깨우는 말 강도의 몫). 사용자가 3단계에서 미루기를 눌렀다면 볼륨에서는 3단계 반응 성공이다. B25의 "미루면 볼륨 학습도 실패" 부분은 이 결정으로 바뀐다(미루면 그날 기상 실패, 즉 지표 쪽 결정은 그대로).
+- **AI가 바꾼 것:** `WakeLadder.learn`/`learn_wake`가 `confirmed`를 더 쓰지 않고 첫 반응 단계만 본다(받은 단계 w = 성공, 시작~w-1 = 실패, 끝까지 반응 없음 = 시작~마지막 모두 실패). 인자는 옛 호출이 깨지지 않도록 받기만 한다. 시뮬레이션의 snoozer 유형은 같은 아침을 겪은 normal과 학습 기록이 같아야 한다는 시험으로 바꿨다.
+- **서버가 할 일:** (1) `wake_rules.confirmed`에서 미루기 조건(`snooze_count`, `snoozes_today`)을 뺀다(볼륨 쪽만, 기상 성공 판정과 별개). (2) 미루기를 받을 때 이미 학습한 볼륨 기록을 실패로 고치는 `WakeService.on_snooze`와 `correct_wake` 호출을 없앤다. (3) 앱이 보낸 반응 단계(`reaction_level`, `reaction_type` = answer/snooze/dismiss)를 `learn_wake`의 받은 단계로 넘긴다. (4) 3번 미룬 뒤 자동 연결로 시작한 날은 `learn_wake`를 부르지 않는다.
+- **수면시간 context 제거(같은 날 회의 4-3):** 사용자별 사다리 하나만 쓴다. 서버는 `WakeInputs`의 수면시간을 학습 입력으로 쓰지 않아도 된다(넘겨도 AI가 무시). `rs_wake_log.context_key`는 이제 항상 `all`이고, 수면시간은 `prefs` 등 사후 분석용 칸에만 남긴다. 리포트 취침시간추이는 서버 몫이다.
+- **앱이 할 일:** 없음(반응 단계 보고는 11/25 반영 완료).
+- **서버 현재 상태(11/26 확인, new/feat/backend-service 3f9b0ca "미루기 때 받은 단계를 바로 확인 실패로 학습"):** 서버는 아직 11/24 B25 방식으로, 미루기를 받으면 미룬 순간의 단계를 `confirmed=False`(확인 실패)로 바로 학습하고, 이미 성공으로 학습한 날은 `on_snooze`·`correct_wake`로 실패로 되돌린다. 이 결정(B28)과 반대다.
+  - AI 쪽 `learn_wake`는 `confirmed`를 무시하므로 서버가 `False`를 넘겨도 볼륨 학습은 반응 단계 성공으로 들어간다(시작~받은 단계 앞까지 실패, 받은 단계 성공).
+  - 하지만 서버의 `WakeService.on_snooze`와 `correct_wake`(서버가 사다리 칸을 직접 고침)는 AI 함수를 거치지 않아, 남아 있으면 미룬 날의 성공 1을 실패로 옮긴다. 서버는 위 "서버가 할 일" (1)·(2)대로 미루기 조건과 되돌리기 로직을 지워야 한다. `rs_wake_log.confirmed` 칸도 미루기와 상관없이 기록되도록 맞춘다(기상 성공 지표는 B25 그대로).
+
+### B29. 깨우는 말 강도는 프롬프트 밖에서만 정한다 (11/26, AI 반영 완료, 서버 변경 없음)
+- **결정:** 강도는 서버가 통화를 시작할 때 기존 자동 강도 규칙(`intensity.today_intensity`, 최근 알람 3번 중 2번 힘들면 다음 알람부터 +1 등)으로만 정한다. 규칙은 바꾸지 않았다. 통화 중에는 강도를 바꾸지 않는다.
+- **AI가 바꾼 것:** 프롬프트의 "재기상 알림 뒤 이 통화의 깨우는 말을 한 단계 강하게" 조건 규칙을 지웠다. 실제 모델 시험에서 6번 중 2번만 따랐고(11/26), 프롬프트와 서버 계산이 강도를 따로 바꾸면 충돌할 수 있어서다. 재기상 알림에는 이름을 부르며 깨우는 한 문장으로만 답하고 강도는 그대로다.
+- **참고:** 개선안 4-5의 "당일 상태 기준 강도"는 반영하지 않았다(규칙 변경 없음).
+- **서버·앱이 할 일:** 없음.
+
+### B30. 밤에 말한 "오늘 챙길 일"을 아침 브리핑에서 리마인드 (11/26 실사용 피드백, AI 반영 완료, 서버·앱 변경 없음)
+- **문제:** 밤 대화의 "내일 미리 챙겨야 할 일정이나 걱정되는 일이 있어요?"에 사용자가 답한 내용은 `tomorrow_notes`로 정확히 추출되고 서버도 아침 입력으로 넘겼다. 그런데 아침 브리핑 지시문이 일정은 캘린더에서만 말하게 하고 밤 특이사항은 "응원"하라고만 해서, 캘린더가 비면 "오늘 등록된 일정은 없어요"로 끝나고 빠졌다(실제 모델: 캘린더 없음 4번 중 1번, 짧은 브리핑 2번 중 0번 언급).
+- **AI가 바꾼 것:** `reminders_block(night)`가 `tomorrow_notes`를 [오늘 챙길 일] 블록으로 따로 보여 준다. 브리핑 일정 단계(c)는 이것을 하나도 빼지 않고 리마인드로 말한다(기록에 시각이 있으면 시각과 함께, 기록에 없는 장소·시각·결과는 덧붙이지 않음). 캘린더가 비어도 "일정이 없다"로 끝내지 않고, 짧은 브리핑 전략에서도 빼지 않으며, 어젯밤 이어받기 단계(d)에서는 되풀이하지 않는다. `night_record_block(n, with_notes=True)`의 기본 동작은 그대로라 코칭 등 다른 프롬프트는 바뀌지 않는다.
+- **확인:** 같은 밤 기록으로 실제 모델 10번 모두 시각과 함께 언급(캘린더 없음 4/4, 캘린더 있음 2/2, 짧은 브리핑 4/4).
+- **서버·앱이 할 일:** 없음(`tomorrow_notes`는 이미 `NightView`로 전달 중).
 
 ## 5. 서버 어댑터(`backend/clients/ai_gateway.py`) 수정 목록
 
@@ -540,3 +562,4 @@ alter table rs_morning_session add constraint rs_morning_session_stretch_area_ch
 14. **스트레칭 부위 12개:** 서버·DB 허용 값과 180초, 앱 그림 11개가 필요하다(B20).
 15. **끝말잇기 글자 판정:** 서버가 `{words, word}`로 `judge_wordchain`을 불러 결과 JSON을 앱에 그대로 돌려주고, AI 호출 실패(`FAILED`)는 오류로 바꿔 준다(B26).
 16. **코칭 강도 사용자별 학습:** 서버가 코칭 강도 Bandit 상태를 `global` 대신 `user:{id}`로 읽고 저장한다. 상황은 2칸(B27).
+17. **밤에 말한 오늘 챙길 일:** 아침 브리핑이 캘린더와 별개로 반드시 리마인드한다. 서버·앱 변경 없음(B30).
