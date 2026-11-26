@@ -3,6 +3,11 @@ package com.example.respeclive.ui.content
 import android.widget.Toast
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,6 +26,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +52,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.sin
 
 /** 이어 하기에서 내 차례 제한 시간 */
 private const val TURN_SECONDS = 20
@@ -59,6 +67,9 @@ private const val WORDCHAIN_STEP = 1
  * 승패(시간 초과 또는 더 이을 단어가 없음)가 났으면 기록만 보여 주고, 아니면 넥스티(앱의 단어 목록)와 이어 함.
  * 기록은 기기에만 저장. 이어 하기에서 승패가 나면 서버 단계를 '완료'로 맞춤
  */
+/** 넥스티 생각 중 말풍선 표시용 (실제 단어로는 나올 수 없는 값) */
+private const val TYPING = "\u0000typing"
+
 @Composable
 fun WordChainScreen(sessionId: String, onClose: () -> Unit) {
     val context = LocalContext.current
@@ -88,6 +99,7 @@ fun WordChainScreen(sessionId: String, onClose: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var secondsLeft by remember { mutableIntStateOf(TURN_SECONDS) }
     var checking by remember { mutableStateOf(false) }   // AI가 내 단어를 판단하는 중 (타이머 멈춤)
+    var pending by remember { mutableStateOf<String?>(null) }   // 보냈지만 AI 판단을 기다리는 내 단어 (말풍선은 바로 보임)
 
     fun finish(r: WordChainResult) {
         result = r
@@ -144,16 +156,21 @@ fun WordChainScreen(sessionId: String, onClose: () -> Unit) {
         }
         error = null
         checking = true
+        // 보낸 단어는 판단을 기다리지 않고 바로 말풍선으로 (넥스티 쪽에는 생각 중 말풍선)
+        pending = word
+        input = ""
         scope.launch {
             val chain = WordChainMorning.chainWords(morning).map { it.text } + game.map { it.text }
             val turn = RespecApi.wordChainTurn(chain, word)
             checking = false
+            pending = null
             if (result != null) return@launch          // 기다리는 사이 화면을 벗어났거나 끝남
             if (turn != null && !turn.valid) {
-                error = turn.reason ?: "끝말잇기에 쓸 수 없는 단어예요"
+                // 쓸 수 없는 단어: 말풍선을 거두고 입력 칸에 되돌려 고칠 수 있게
+                input = word
+                error = turn.reason ?: "끝말잇기에 쓸 수 없는 단어예요."
                 return@launch
             }
-            input = ""
             game.add(WordChainLine(mine = true, text = word))
             if (turn != null) {
                 // AI가 준 넥스티 단어도 규칙을 한 번 더 확인하고, 틀리면 앱 단어 목록에서
@@ -187,21 +204,23 @@ fun WordChainScreen(sessionId: String, onClose: () -> Unit) {
         val listState = rememberLazyListState()
         // 모닝콜에서 주고받은 말과 이어 한 단어를 구분 없이 한 대화로
         val conversation = WordChainMorning.chainWords(morning) + game     // 끝말잇기 단어만
-        val total = conversation.size + 1
-        LaunchedEffect(game.size, result) { listState.animateScrollToItem(total - 1) }
+        // 판단을 기다리는 내 단어와 넥스티의 생각 중(…) 말풍선
+        val waiting = pending?.let { listOf(WordChainLine(mine = true, text = it), WordChainLine(mine = false, text = TYPING)) }.orEmpty()
+        val total = conversation.size + waiting.size + 1
+        LaunchedEffect(game.size, result, pending) { listState.animateScrollToItem(total - 1) }
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth(),
             state = listState,
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
-            items(conversation) { Bubble(it) }
+            items(conversation + waiting) { Bubble(it) }
             item { result?.let { ResultBanner(it) } }
         }
 
         if (result == null && !started) {
             Text(
-                if (conversation.isEmpty()) "넥스티와 새로 끝말잇기를 시작해요" else "'${conversation.last().text}'에서 이어 해요",
+                if (conversation.isEmpty()) "넥스티와 새로 끝말잇기를 시작해요." else "'${conversation.last().text}'에서 이어 해요.",
                 color = RespecColors.TextSub, fontSize = 13.sp, fontWeight = FontWeight.SemiBold
             )
             Spacer(Modifier.height(8.dp))
@@ -340,8 +359,40 @@ private fun Bubble(line: WordChainLine) {
             Column {
                 Text("넥스티", color = RespecColors.TextSub, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(start = 4.dp, bottom = 3.dp))
-                Text(line.text, color = RespecColors.Text, fontSize = 16.sp, modifier = bubble)
+                if (line.text == TYPING) TypingDots(bubble) else Text(line.text, color = RespecColors.Text, fontSize = 16.sp, modifier = bubble)
             }
+        }
+    }
+}
+
+/** 넥스티가 단어를 고르는 중: 말풍선 가운데에서 점 세 개가 차례로 떠오르는 물결 */
+@Composable
+private fun TypingDots(bubble: Modifier) {
+    val wave = rememberInfiniteTransition(label = "typing")
+    val t by wave.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing)),
+        label = "wave"
+    )
+    // 글자 한 줄 높이에 맞춘 칸 안에서 세로 가운데 정렬
+    Row(
+        bubble.height(22.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        repeat(3) { i ->
+            // 점마다 1/6 주기씩 늦게, 한 주기의 앞쪽 절반 동안만 위로 떴다 내려옴
+            val phase = ((t - i / 6f) % 1f + 1f) % 1f
+            val lift = if (phase < 0.5f) sin(phase * 2f * PI.toFloat()) else 0f
+            Box(
+                Modifier
+                    .offset(y = (-4).dp * lift)
+                    .size(7.dp)
+                    .alpha(0.4f + 0.6f * lift)
+                    .clip(CircleShape)
+                    .background(RespecColors.TextSub)
+            )
         }
     }
 }
