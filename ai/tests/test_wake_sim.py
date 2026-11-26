@@ -46,15 +46,15 @@ def test_bandit_learns_the_sleep_length_context_for_short_hard():
     assert sum(gaps) / len(gaps) > 1.0
 
 
-def test_snoozer_days_are_learned_as_failures_and_other_types_keep_their_random_stream():
+def test_snoozing_does_not_change_volume_learning():
+    """11/26 보상 분리: 미루기는 볼륨 학습에 영향이 없다. 같은 아침을 겪은 snoozer와 normal의 학습 기록이 같아야 한다."""
     from ai.personalization.wake_sim import SNOOZE_RATE
     assert 0 < SNOOZE_RATE < 0.5
     a = run_policy("bandit", "snoozer", 60, 7)
     b = run_policy("bandit", "normal", 60, 7)
-    assert a["shorts"] == b["shorts"]                              # 수면 길이는 같은 환경 난수를 쓴다
-    ok_a = sum(v[0] for v in a["ladder"].counts.values())
-    ok_b = sum(v[0] for v in b["ladder"].counts.values())
-    assert ok_a < ok_b                                             # 미룬 날은 성공으로 세지 않아 성공 기록이 더 적다
+    assert a["shorts"] == b["shorts"] and a["starts"] == b["starts"]      # 같은 환경, 같은 선택
+    assert a["ladder"].counts == b["ladder"].counts                       # 미룬 날이 학습 기록을 바꾸지 않는다
+    assert 0 < sum(a["snoozes"]) < 60 and not any(b["snoozes"])           # snoozer만 실제로 미룬다
 
 
 def test_snoozer_is_still_started_at_the_level_it_needs():

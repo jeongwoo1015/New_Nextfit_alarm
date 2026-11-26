@@ -22,7 +22,7 @@ VAL_TYPES = ("very_deep", "habit_change", "no_effect", "new_user", "snoozer")   
 POLICIES = ("fixed1", "fixed3", "random", "rule", "bandit", "bandit_global")
 SHORT_RATE = 0.4                  # 수면이 짧은 날의 비율
 CHANGE_DAY = 30                   # habit_change가 바뀌는 날
-SNOOZE_RATE = 0.2                 # snoozer가 소리와 상관없이 그날 알람을 미루는 비율(11/24 결정: 미루면 그날 기상은 실패)
+SNOOZE_RATE = 0.2                 # snoozer가 소리와 상관없이 알람에 반응한 뒤 미루는 비율(11/26 결정: 미루기는 볼륨 학습에 영향이 없다 — 반응한 단계가 성공으로 센다)
 EVAL_FROM = 21                    # 이 날부터를 평가한다(앞은 학습 기간)
 
 
@@ -53,7 +53,7 @@ def run_policy(policy: str, user_type: str, days: int = 60, seed: int = 0, globa
         raise ValueError(f"policy는 {POLICIES}, user_type은 {SET_TYPES + VAL_TYPES} 중 하나예요")
     env, pick, snooze_rng = random.Random(seed), random.Random(seed + 1), random.Random(seed + 2)
     ladder = WakeLadder()
-    starts, correct, received, immediate, shorts = [], [], [], [], []
+    starts, correct, received, immediate, shorts, snoozes = [], [], [], [], [], []
     for day in range(days):
         short = env.random() < SHORT_RATE
         luck = [env.random() for _ in LEVELS]
@@ -74,9 +74,10 @@ def run_policy(policy: str, user_type: str, days: int = 60, seed: int = 0, globa
             k = decide_start_level(ladder, use_global, minutes, rng=pick, threshold=threshold, prior_strength=prior_strength, mc_samples=0).applied
         got = next((lv for lv in range(k, max(LEVELS) + 1) if luck[lv - 1] < probs[lv - 1]), None)
         if policy in ("bandit", "bandit_global"):
-            learn_wake(ladder, ctx, k, got, not snoozed)             # 미룬 날은 받았어도 확인 실패로 센다(서버 B25와 같다)
+            learn_wake(ladder, ctx, k, got)                          # 반응한 단계만 학습한다. 미룬 날도 같다(11/26 보상 분리)
         starts.append(k)
         shorts.append(short)
+        snoozes.append(snoozed)
         correct.append(k == correct_start(probs, threshold=threshold))
         received.append(got if got is not None else max(LEVELS))
         immediate.append(got == k)
@@ -85,7 +86,7 @@ def run_policy(policy: str, user_type: str, days: int = 60, seed: int = 0, globa
 
     def conv() -> int | None:
         return next((i for i in range(0, days - 9) if sum(correct[i:i + 10]) >= 8), None)
-    return {"policy": policy, "user_type": user_type, "days": days, "starts": starts, "shorts": shorts, "ladder": ladder,
+    return {"policy": policy, "user_type": user_type, "days": days, "starts": starts, "shorts": shorts, "snoozes": snoozes, "ladder": ladder,
             "correct_rate": sum(correct[ev]) / n, "avg_start": sum(starts[ev]) / n, "immediate_rate": sum(immediate[ev]) / n,
             "avg_received": sum(received[ev]) / n, "converge_day": conv()}
 

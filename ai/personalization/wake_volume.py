@@ -5,8 +5,10 @@
 
 구조
 - 행동: 시작 단계 후보 CANDIDATES(1단계/3단계), 상한 START_CAP(3). 올라가는 방식은 지금 그대로다.
-- 학습(사다리): 시작 단계 k에서 w단계에 받았으면 k~w-1단계는 실패, w단계는 성공으로 센다(볼륨이 점점 커지므로 단계가 세지는 성질이 성립한다).
-  받고도 AI 확인에 답하지 않았거나 재기상이 있었으면(confirmed=False) w단계도 실패, 끝까지 받지 않았으면 시작~마지막 단계가 모두 실패다.
+- 학습(사다리, 11/26 회의로 보상 분리): 사용자가 그날 첫 알람에서 **자발적으로 처음 반응한 단계**(받기·미루기·끄기 버튼을 누른 순간의 단계)만 본다.
+  시작 단계 k에서 w단계에 처음 반응했으면 k~w-1단계는 실패, w단계는 성공으로 센다(볼륨이 점점 커지므로 단계가 세지는 성질이 성립한다).
+  반응한 뒤의 미루기·재기상·AI 확인 질문 답변은 볼륨 학습에 넣지 않는다(그것은 AI 깨우는 말 강도의 몫이다). 3단계에서 미루기를 눌렀다면 3단계 반응 성공이다.
+  끝까지 반응하지 않았으면 시작~마지막 단계가 모두 실패다. 3번 미룬 뒤 자동 연결은 자발적 반응이 아니므로 서버가 이 함수를 부르지 않는다(학습 제외).
 - 선택(Thompson Sampling): 후보 단계마다 Beta(성공, 실패)에서 성공 확률을 하나 뽑아, THRESHOLD 이상이 나온 가장 낮은 후보로 시작한다(없으면 가장 높아 보이는 값과 비슷한 후보 중 가장 낮은 단계).
   기록이 적으면 값이 크게 흔들려 가끔 낮은 단계를 시험하고(탐색), 쌓이면 확실한 단계로 굳는다. 전체 사용자 기록(global)은 약한 prior로만 쓴다.
 - 상황(Context): 추정 수면 가능 시간 한 가지(짧음 6시간 미만 / 보통 / 모름). 방향(짧게 자면 크게)은 가정하지 않고 칸별 기록이 정한다.
@@ -70,14 +72,15 @@ class WakeLadder:
         cell = self.counts.setdefault(self._k(ctx, level), [0, 0])
         cell[0 if success else 1] += 1
 
-    def learn(self, ctx: str, start_level: int, received_level: int | None, confirmed: bool = True) -> bool:
-        """아침 한 번의 결과를 반영한다. received_level=None이면 끝까지 받지 않은 날. 잘못된 값이면 False."""
+    def learn(self, ctx: str, start_level: int, received_level: int | None, confirmed=None) -> bool:
+        """아침 한 번의 결과를 반영한다. received_level = 첫 알람에서 자발적으로 처음 반응한 단계(받기·미루기·끄기 모두), None이면 끝까지 반응하지 않은 날.
+        잘못된 값이면 False. confirmed는 11/26 이전 호출과 맞추려고 받기만 하고 쓰지 않는다(미루기·재기상·확인 답변은 볼륨 학습에 영향이 없다)."""
         if start_level not in LEVELS or (received_level is not None and (received_level not in LEVELS or received_level < start_level)):
             return False
         last = received_level if received_level is not None else max(LEVELS)
         for lv in range(start_level, last):
             self.add(ctx, lv, False)
-        self.add(ctx, last, received_level is not None and bool(confirmed))
+        self.add(ctx, last, received_level is not None)
         return True
 
     def observations(self, ctx: str, levels=CANDIDATES) -> int:
@@ -193,9 +196,10 @@ def raise_announced(ai_text: str, new_level: int) -> bool:
     return bool(re.search(rf"(?<!\d){int(new_level)}\s*단계", text) and re.search(r"소리|볼륨|알람", text))
 
 
-def learn_wake(personal: WakeLadder, ctx: str, start_level: int, received_level: int | None, confirmed: bool = True) -> bool:
-    """아침 결과 반영. 시작 단계를 사용자가 정한 날(source가 user_*)도 그대로 학습한다(그 선택도 새 데이터다)."""
-    return personal.learn(ctx, start_level, received_level, confirmed)
+def learn_wake(personal: WakeLadder, ctx: str, start_level: int, received_level: int | None, confirmed=None) -> bool:
+    """아침 결과 반영(첫 반응 단계만, 11/26). 시작 단계를 사용자가 정한 날(source가 user_*)도 그대로 학습한다(그 선택도 새 데이터다).
+    confirmed는 옛 호출 호환용이고 쓰지 않는다. 자동 연결로 시작한 날은 부르지 않는다."""
+    return personal.learn(ctx, start_level, received_level)
 
 
 @dataclass

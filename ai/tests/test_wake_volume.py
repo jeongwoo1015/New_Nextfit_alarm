@@ -21,8 +21,18 @@ def test_ladder_learn_counts_failures_below_and_success_at_received_level():
     assert lad.get("short", 3) == (2, 0)
     lad.learn("ok", 1, None)                                            # 끝까지 못 받음: 1~5 모두 실패
     assert [lad.get("ok", lv) for lv in range(1, 6)] == [(0, 1)] * 5
-    lad.learn("ok", 3, 4, confirmed=False)                              # 받았지만 AI 확인에 답하지 않음: 받은 단계도 실패
-    assert lad.get("ok", 3) == (0, 2) and lad.get("ok", 4) == (0, 2)
+    lad.learn("ok", 3, 4)                                               # 첫 반응 단계(4)가 성공, 그 아래(3)는 실패
+    assert lad.get("ok", 3) == (0, 2) and lad.get("ok", 4) == (1, 1)
+
+
+def test_snooze_rewake_and_unanswered_check_do_not_change_volume_learning():
+    """11/26 보상 분리: 반응한 뒤의 미루기·재기상·확인 답변 여부(confirmed)는 볼륨 학습에 영향이 없다. 3단계에서 미루기를 눌러도 3단계 반응 성공."""
+    a, b = WakeLadder(), WakeLadder()
+    a.learn("ok", 1, 3)
+    b.learn("ok", 1, 3, confirmed=False)                                # 옛 호출 방식: 값을 넘겨도 무시된다
+    assert a.counts == b.counts and a.get("ok", 3) == (1, 0)
+    c = WakeLadder()
+    assert learn_wake(c, "ok", 3, 3, confirmed=False) and c.get("ok", 3) == (1, 0)
 
 
 def test_ladder_rejects_bad_records_and_round_trips():
