@@ -552,6 +552,16 @@ fun MorningChatScreen(
                         call.args.optString("scope").takeIf { it.isNotBlank() })
                     JSONObject().put("result", "ok")
                 }
+                // 사용자가 말한 잠든 시각 (11/26 요청, AI·서버 준비 전): 서버가 어젯밤 취침 시각을 이 값으로 다시 기록.
+                // AI는 응답을 받아야 이어 말하므로 ok는 바로 돌려주고 저장은 뒤에서 함
+                "report_bedtime" -> {
+                    val sid = sessionId
+                    val time = call.args.optString("time")
+                    if (sid != null && Regex("\\d{2}:\\d{2}").matches(time)) {
+                        ApiClient.scope.launch { RespecApi.reportBedtime(sid, time) }
+                    }
+                    JSONObject().put("result", "ok")
+                }
                 else -> JSONObject().put("result", "ok")
             }
         }

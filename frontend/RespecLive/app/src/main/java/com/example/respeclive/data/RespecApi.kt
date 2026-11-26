@@ -317,6 +317,15 @@ object RespecApi {
     }
 
     /** 대화로 설정 바꾸기 (AI update_setting, CONTRACTS B22): 인자를 그대로 서버에 → 바뀐 설정, 거절·실패면 null */
+    /**
+     * 모닝콜에서 사용자가 말한 잠든 시각 저장 (AI report_bedtime, 11/26 서버에 요청한 API: 아직 없으면 404로 실패하고 끝).
+     * PUT /morning/sessions/{id}/bedtime {bed_time: "HH:MM"}. 서버가 어젯밤 취침 시각을 이 값으로 다시 기록함
+     */
+    suspend fun reportBedtime(sessionId: String, time: String): Boolean {
+        val r = ApiClient.put("/morning/sessions/$sessionId/bedtime", JSONObject().put("bed_time", time)) ?: return false
+        return r.ok
+    }
+
     suspend fun aiChangeSetting(field: String, value: String, scope: String?): JSONObject? {
         val body = JSONObject().put("field", field).put("value", value)
         scope?.takeIf { it.isNotBlank() }?.let { body.put("scope", it) }
