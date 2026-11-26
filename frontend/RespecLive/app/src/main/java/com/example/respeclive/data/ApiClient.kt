@@ -78,7 +78,7 @@ object ApiClient {
     private suspend fun sendOnce(method: String, path: String, body: RequestBody?, timeoutMs: Long): ApiResponse? {
         val token = ServerAuth.bearer() ?: run {
             lastErrorCode = null
-            lastError = ServerAuth.lastError ?: "로그인하지 못했어요"
+            lastError = ServerAuth.lastError ?: "로그인하지 못했어요."
             return null
         }
         return withContext(Dispatchers.IO) {

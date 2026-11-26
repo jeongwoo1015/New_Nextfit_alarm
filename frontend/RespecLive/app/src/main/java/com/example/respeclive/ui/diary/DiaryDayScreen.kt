@@ -72,7 +72,7 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
 
     LaunchedEffect(date, reload) {
         val r = RespecApi.diaryDay(date)
-        if (r == null) error = ApiClient.lastError ?: "기록을 불러오지 못했어요" else day = r
+        if (r == null) error = ApiClient.lastError ?: "기록을 불러오지 못했어요." else day = r
     }
 
     // 사진 고르기 (권한 없이 쓰는 시스템 사진 선택기) → JPEG로 바꿔 올림
@@ -84,7 +84,7 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
             val url = jpeg?.let { RespecApi.uploadDiaryPhoto(date, it) }
             uploading = false
             if (url == null) {
-                Toast.makeText(context, if (jpeg == null) "사진을 읽지 못했어요" else ApiClient.lastError ?: "사진을 올리지 못했어요", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, if (jpeg == null) "사진을 읽지 못했어요." else ApiClient.lastError ?: "사진을 올리지 못했어요.", Toast.LENGTH_SHORT).show()
             } else {
                 reload++
             }
@@ -149,7 +149,7 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
                     Icon(Icons.Filled.AddAPhoto, null, tint = RespecColors.Purple, modifier = Modifier.size(40.dp))
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        if (future) "아직 오지 않은 날이에요" else "오늘을 남길 사진을 올려 보세요",
+                        if (future) "아직 오지 않은 날이에요." else "오늘을 남길 사진을 올려 보세요.",
                         color = RespecColors.TextSub, fontSize = 15.sp
                     )
                 }
@@ -188,9 +188,9 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
             val diary = night?.text("diary_text")
             Text(
                 diary ?: when {
-                    night == null -> "이날은 밤 대화 기록이 없어요"
-                    night.optString("extract_status") == "PENDING" -> "밤 대화를 정리하는 중이에요. 잠시 뒤에 다시 확인해 주세요"
-                    else -> "한 줄 일기가 없어요"
+                    night == null -> "이날은 밤 대화 기록이 없어요."
+                    night.optString("extract_status") == "PENDING" -> "밤 대화를 정리하는 중이에요. 잠시 뒤에 다시 확인해 주세요."
+                    else -> "한 줄 일기가 없어요."
                 },
                 color = if (diary != null) RespecColors.Text else RespecColors.TextSub,
                 fontSize = if (diary != null) 18.sp else 15.sp,
@@ -214,7 +214,7 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
                 Spacer(Modifier.height(6.dp))
             }
             Text(
-                text ?: "이날은 받은 포춘이 없어요",
+                text ?: "이날은 받은 포춘이 없어요.",
                 color = if (text != null) RespecColors.Text else RespecColors.TextSub,
                 fontSize = if (text != null) 18.sp else 15.sp,
                 fontWeight = if (text != null) FontWeight.SemiBold else FontWeight.Normal,
@@ -225,7 +225,7 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
         // 리포트 (그날 아침 세션): 기상 시간 · 루틴 수행 · 루틴 성공률
         SectionTitle("리포트")
         if (session == null) {
-            Card { Text("이날은 모닝콜 기록이 없어요", color = RespecColors.TextSub, fontSize = 15.sp) }
+            Card { Text("이날은 모닝콜 기록이 없어요.", color = RespecColors.TextSub, fontSize = 15.sp) }
         } else {
             val done = summary?.optInt("routine_done") ?: 0
             val total = summary?.optInt("routine_total") ?: 0
@@ -258,7 +258,7 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
             }
             if (session.optBoolean("coaching_skipped")) {
                 Spacer(Modifier.height(10.dp))
-                Text("이날은 루틴을 쉬어 간 날이에요", color = RespecColors.TextSub, fontSize = 13.sp,
+                Text("이날은 루틴을 쉬어 간 날이에요.", color = RespecColors.TextSub, fontSize = 13.sp,
                     modifier = Modifier.align(Alignment.CenterHorizontally))
             }
             if (steps.isNotEmpty()) {
@@ -293,7 +293,7 @@ fun DiaryDayScreen(date: String, onBack: () -> Unit) {
                         val ok = RespecApi.deleteDiaryPhoto(date)
                         deleting = false
                         if (ok) reload++
-                        else Toast.makeText(context, ApiClient.lastError ?: "사진을 삭제하지 못했어요", Toast.LENGTH_SHORT).show()
+                        else Toast.makeText(context, ApiClient.lastError ?: "사진을 삭제하지 못했어요.", Toast.LENGTH_SHORT).show()
                     }
                 }) { Text("삭제", color = RespecColors.Danger) }
             },

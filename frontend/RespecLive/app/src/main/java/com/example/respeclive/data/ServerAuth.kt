@@ -88,9 +88,9 @@ object ServerAuth {
             JSONObject().put("email", email).put("password", password)
         ) { code, json ->
             when {
-                code == 400 && json.errorCode() == "email_not_confirmed" -> "이메일 인증을 아직 마치지 않았어요. 받은 메일의 링크를 눌러 주세요"
-                code == 400 || code == 401 -> "이메일 또는 비밀번호가 맞지 않아요"
-                code == 429 -> "시도가 너무 많아요. 잠시 뒤 다시 해 주세요"
+                code == 400 && json.errorCode() == "email_not_confirmed" -> "이메일 인증을 아직 마치지 않았어요. 받은 메일의 링크를 눌러 주세요."
+                code == 400 || code == 401 -> "이메일 또는 비밀번호가 맞지 않아요."
+                code == 429 -> "시도가 너무 많아요. 잠시 뒤 다시 해 주세요."
                 else -> "로그인하지 못했어요 (HTTP $code)"
             }
         }
@@ -109,11 +109,11 @@ object ServerAuth {
         ) { code, json ->
             val err = json.errorCode()
             when {
-                err == "user_already_exists" || err == "email_exists" -> "이미 가입한 이메일이에요. 로그인해 주세요"
-                err == "weak_password" -> "비밀번호가 너무 쉬워요. 더 길고 복잡하게 만들어 주세요"
-                err == "email_address_invalid" || err == "validation_failed" -> "이메일 주소를 확인해 주세요"
-                err == "signup_disabled" -> "지금은 회원가입을 받지 않아요"
-                code == 429 -> "시도가 너무 많아요. 잠시 뒤 다시 해 주세요"
+                err == "user_already_exists" || err == "email_exists" -> "이미 가입한 이메일이에요. 로그인해 주세요."
+                err == "weak_password" -> "비밀번호가 너무 쉬워요. 더 길고 복잡하게 만들어 주세요."
+                err == "email_address_invalid" || err == "validation_failed" -> "이메일 주소를 확인해 주세요."
+                err == "signup_disabled" -> "지금은 회원가입을 받지 않아요."
+                code == 429 -> "시도가 너무 많아요. 잠시 뒤 다시 해 주세요."
                 else -> "가입하지 못했어요 (HTTP $code)"
             }
         }
@@ -129,8 +129,8 @@ object ServerAuth {
      * 맞으면 null, 틀리거나 확인하지 못하면 화면에 보일 문구
      */
     suspend fun verifyPassword(password: String): String? = withContext(Dispatchers.IO) {
-        val mail = email ?: return@withContext "로그인한 이메일을 알 수 없어요. 다시 로그인한 뒤 해 주세요"
-        if (!configured) return@withContext "로그인 서버 설정이 없어요"
+        val mail = email ?: return@withContext "로그인한 이메일을 알 수 없어요. 다시 로그인한 뒤 해 주세요."
+        if (!configured) return@withContext "로그인 서버 설정이 없어요."
         try {
             val request = Request.Builder()
                 .url(ApiConfig.SUPABASE_URL.trimEnd('/') + "/auth/v1/token?grant_type=password")
@@ -140,14 +140,14 @@ object ServerAuth {
             http.newCall(request).execute().use { resp ->
                 when {
                     resp.isSuccessful -> null
-                    resp.code == 400 || resp.code == 401 -> "비밀번호가 맞지 않아요"
-                    resp.code == 429 -> "시도가 너무 많아요. 잠시 뒤 다시 해 주세요"
+                    resp.code == 400 || resp.code == 401 -> "비밀번호가 맞지 않아요."
+                    resp.code == 429 -> "시도가 너무 많아요. 잠시 뒤 다시 해 주세요."
                     else -> "비밀번호를 확인하지 못했어요 (HTTP ${resp.code})"
                 }
             }
         } catch (e: Exception) {
             Log.w(TAG, "비밀번호 확인 실패: ${e.message}")
-            "로그인 서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요"
+            "로그인 서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요."
         }
     }
 
@@ -172,7 +172,7 @@ object ServerAuth {
 
     private suspend fun refresh(): String? {
         val rt = refreshToken ?: run {
-            lastError = "로그인이 필요해요"
+            lastError = "로그인이 필요해요."
             return null
         }
         var expired = false
@@ -182,7 +182,7 @@ object ServerAuth {
         ) { code, _ ->
             // 400/401: refresh token이 만료·취소됨 → 다시 로그인해야 함. 그 밖(서버 오류)은 다음에 다시 시도
             if (code == 400 || code == 401) expired = true
-            if (expired) "로그인이 만료됐어요. 다시 로그인해 주세요" else "로그인을 이어 가지 못했어요 (HTTP $code)"
+            if (expired) "로그인이 만료됐어요. 다시 로그인해 주세요." else "로그인을 이어 가지 못했어요(HTTP $code)."
         }
         if (expired) clear()
         return if (error == null) accessToken else null
@@ -226,7 +226,7 @@ object ServerAuth {
             }
         } catch (e: Exception) {
             Log.w(TAG, "Auth $path 실패: ${e.message}")
-            "로그인 서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요".also { lastError = it }
+            "로그인 서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요.".also { lastError = it }
         }
     }
 

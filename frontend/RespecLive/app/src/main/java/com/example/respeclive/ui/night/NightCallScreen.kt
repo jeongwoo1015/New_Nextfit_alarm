@@ -66,7 +66,7 @@ fun NightCallScreen(
             Spacer(Modifier.height(12.dp))
             Text("AI 굿나잇콜", color = RespecColors.Text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
-            Text("오늘 하루를 함께 마무리해요", color = RespecColors.TextSub, fontSize = 14.sp)
+            Text("오늘 하루를 함께 마무리해요.", color = RespecColors.TextSub, fontSize = 14.sp)
         }
 
         // 발신자: 달 수면모자를 쓴 졸린 넥스티 + 파동

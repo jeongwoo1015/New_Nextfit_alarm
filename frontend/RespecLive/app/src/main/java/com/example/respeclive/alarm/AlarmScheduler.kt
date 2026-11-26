@@ -120,7 +120,7 @@ object AlarmScheduler {
             if (h > 0) add("${h}시간")
             if (m > 0 || (d == 0 && h == 0)) add("${m}분")
         }
-        return parts.joinToString(" ") + " 후에 울려요"
+        return parts.joinToString(" ") + " 후에 울려요."
     }
 
     private fun setAlarm(context: Context, requestCode: Int, id: Int, type: AlarmType, label: String, triggerAt: Long) {

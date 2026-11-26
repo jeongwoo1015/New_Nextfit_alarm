@@ -62,7 +62,7 @@ import kotlinx.coroutines.launch
 import com.example.respeclive.ui.common.SubScreenHeaderTop
 import com.example.respeclive.ui.theme.RespecColors
 
-// 아직 정해지지 않은 연락처·문서 주소. 비어 있으면 누를 때 "준비 중이에요" 안내
+// 아직 정해지지 않은 연락처·문서 주소. 비어 있으면 누를 때 "준비 중이에요." 안내
 private const val FEEDBACK_EMAIL = ""
 private const val PRIVACY_URL = ""
 private const val TERMS_URL = ""
@@ -214,12 +214,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                             ServerAuth.signOut()
                             AlarmRepository.clear(context)
                             WakeHistory.clear(context)
-                            Toast.makeText(context, "탈퇴했어요. 그동안 함께해 줘서 고마워요", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "탈퇴했어요. 그동안 함께해 줘서 고마워요.", Toast.LENGTH_LONG).show()
                             // 로그인 상태가 바뀌면 AppNavHost가 로그인 화면으로 바꿈
                         } else {
                             withdrawing = false
                             closeWithdraw()
-                            Toast.makeText(context, "탈퇴하지 못했어요. 인터넷 연결을 확인하고 다시 해 주세요", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "탈퇴하지 못했어요. 인터넷 연결을 확인하고 다시 해 주세요.", Toast.LENGTH_LONG).show()
                         }
                     }
                 }) {
@@ -248,7 +248,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     }
     val appDetails = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg)
     fun openUrl(url: String) {
-        if (url.isBlank()) Toast.makeText(context, "준비 중이에요", Toast.LENGTH_SHORT).show()
+        if (url.isBlank()) Toast.makeText(context, "준비 중이에요.", Toast.LENGTH_SHORT).show()
         else open(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     }
 
@@ -283,7 +283,7 @@ fun SettingsScreen(onBack: () -> Unit) {
 
         Section("알람") {
             var vibrate by remember { mutableStateOf(AlarmVibrator.isEnabled(context)) }
-            SettingRow("진동", "알람이 울릴 때 진동도 함께 울려요. 잘 못 일어나는 날이 이어지면 더 세게 울려요", trailing = {
+            SettingRow("진동", "알람이 울릴 때 진동도 함께 울려요. 잘 못 일어나는 날이 이어지면 더 세게 울려요.", trailing = {
                 Switch(
                     checked = vibrate,
                     onCheckedChange = { vibrate = it; AlarmVibrator.setEnabled(context, it) },
@@ -303,31 +303,31 @@ fun SettingsScreen(onBack: () -> Unit) {
         }
 
         Section("권한") {
-            PermissionRow("알림 허용", "정해진 시각에 알람을 울리기 위해 필요해요", perms.notifications) {
+            PermissionRow("알림 허용", "정해진 시각에 알람을 울리기 위해 필요해요.", perms.notifications) {
                 open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName), appDetails)
             }
             Divider()
-            PermissionRow("전체 화면 알람", "잠긴 화면에서도 알람을 띄우기 위해 필요해요", perms.fullScreen) {
+            PermissionRow("전체 화면 알람", "잠긴 화면에서도 알람을 띄우기 위해 필요해요.", perms.fullScreen) {
                 if (Build.VERSION.SDK_INT >= 34) open(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, pkg), appDetails)
                 else open(appDetails)
             }
             Divider()
-            PermissionRow("다른 앱 위에 표시", "다른 앱을 쓰는 중에도 알람을 바로 띄워요", perms.overlay) {
+            PermissionRow("다른 앱 위에 표시", "다른 앱을 쓰는 중에도 알람을 바로 띄워요.", perms.overlay) {
                 open(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, pkg), appDetails)
             }
             Divider()
-            PermissionRow("배터리 최적화 제외", "알람이 늦거나 빠지지 않도록 해요", perms.battery) {
+            PermissionRow("배터리 최적화 제외", "알람이 늦거나 빠지지 않도록 해요.", perms.battery) {
                 open(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS), appDetails)
             }
             Divider()
-            PermissionRow("마이크", "넥스티와 대화할 때 목소리를 듣기 위해 필요해요", perms.mic) {
+            PermissionRow("마이크", "넥스티와 대화할 때 목소리를 듣기 위해 필요해요.", perms.mic) {
                 open(appDetails)
             }
         }
 
         Section("의견") {
-            SettingRow("의견 보내기", "사용하며 좋은 기능이나 개선점을 알려 주세요", trailing = { Chevron() }) {
-                if (FEEDBACK_EMAIL.isBlank()) Toast.makeText(context, "준비 중이에요", Toast.LENGTH_SHORT).show()
+            SettingRow("의견 보내기", "사용하며 좋은 기능이나 개선점을 알려 주세요.", trailing = { Chevron() }) {
+                if (FEEDBACK_EMAIL.isBlank()) Toast.makeText(context, "준비 중이에요.", Toast.LENGTH_SHORT).show()
                 else open(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$FEEDBACK_EMAIL")).putExtra(Intent.EXTRA_SUBJECT, "넥스티 의견"))
             }
             Divider()
@@ -352,9 +352,9 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Text(ServerAuth.email ?: "-", color = RespecColors.TextSub, fontSize = 14.sp)
             })
             Divider()
-            SettingRow("로그아웃", "이 기기에 예약된 알람도 함께 꺼져요", trailing = { Chevron() }) { confirmLogout = true }
+            SettingRow("로그아웃", "이 기기에 예약된 알람도 함께 꺼져요.", trailing = { Chevron() }) { confirmLogout = true }
             Divider()
-            SettingRow("회원 탈퇴", "계정과 모든 기록이 지워지고 되돌릴 수 없어요", trailing = { Chevron() }) { confirmWithdraw = true }
+            SettingRow("회원 탈퇴", "계정과 모든 기록이 지워지고 되돌릴 수 없어요.", trailing = { Chevron() }) { confirmWithdraw = true }
         }
 
         Spacer(Modifier.height(24.dp))

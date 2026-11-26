@@ -65,9 +65,9 @@ fun LoginScreen() {
     val canSubmit = emailOk && passwordOk && confirmOk && !busy
 
     // 입력 중에 보이는 안내 (값을 넣기 시작한 칸만)
-    val emailHint = if (email.isNotBlank() && !emailOk) "이메일 주소 형식을 확인해 주세요" else null
-    val passwordHint = if (signUp && password.isNotEmpty() && !passwordOk) "비밀번호는 ${MIN_PASSWORD}자 이상이에요" else null
-    val confirmHint = if (signUp && confirm.isNotEmpty() && !confirmOk) "비밀번호가 서로 달라요" else null
+    val emailHint = if (email.isNotBlank() && !emailOk) "이메일 주소 형식을 확인해 주세요." else null
+    val passwordHint = if (signUp && password.isNotEmpty() && !passwordOk) "비밀번호는 ${MIN_PASSWORD}자 이상이에요." else null
+    val confirmHint = if (signUp && confirm.isNotEmpty() && !confirmOk) "비밀번호가 서로 달라요." else null
 
     fun submit() {
         if (!canSubmit) return
@@ -81,7 +81,7 @@ fun LoginScreen() {
                 when (val r = ServerAuth.signUp(mail, password)) {
                     ServerAuth.SignUpResult.Done -> Unit   // 로그인 상태가 바뀌어 화면이 넘어감
                     ServerAuth.SignUpResult.NeedsConfirm -> {
-                        notice = "$mail 로 인증 메일을 보냈어요. 메일의 링크를 누른 뒤 로그인해 주세요"
+                        notice = "$mail 로 인증 메일을 보냈어요. 메일의 링크를 누른 뒤 로그인해 주세요."
                         signUp = false
                         confirm = ""
                     }
@@ -107,10 +107,10 @@ fun LoginScreen() {
         Spacer(Modifier.height(32.dp))
         NextyCharacter(NextyMotion.HELLO,Modifier.size(160.dp))
         Spacer(Modifier.height(8.dp))
-        Text("Re:Spec", color = RespecColors.Text, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
+        Text("넥스티", color = RespecColors.Text, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
         Spacer(Modifier.height(6.dp))
         Text(
-            if (signUp) "계정을 만들고 넥스티와 아침을 시작해요" else "넥스티가 기다리고 있었어요!",
+            if (signUp) "계정을 만들고 넥스티와 아침을 시작해요." else "넥스티가 기다리고 있었어요!",
             color = RespecColors.TextSub,
             fontSize = 14.sp,
             textAlign = TextAlign.Center

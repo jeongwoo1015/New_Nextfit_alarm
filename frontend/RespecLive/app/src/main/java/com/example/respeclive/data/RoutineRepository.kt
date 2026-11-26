@@ -161,7 +161,7 @@ object RoutineRepository {
         val sid = board.sessionId ?: return null
         val order = item.stepOrder ?: return null
         val view = RespecApi.markStep(sid, order, if (item.done) "PENDING" else "DONE")
-            ?: return ApiClient.lastError ?: "체크를 저장하지 못했어요"
+            ?: return ApiClient.lastError ?: "체크를 저장하지 못했어요."
         withContext(Dispatchers.Main.immediate) {
             if (sid == sessionId) applyView(view) else updateBoard(view)
         }

@@ -52,7 +52,7 @@ fun MorningReportScreen(sessionId: String, talkSec: Int, onOpenReport: () -> Uni
     LaunchedEffect(sessionId) {
         val v = RespecApi.endMorning(sessionId)
         if (v == null) {
-            error = ApiClient.lastError ?: "리포트를 불러오지 못했어요"
+            error = ApiClient.lastError ?: "리포트를 불러오지 못했어요."
             return@LaunchedEffect
         }
         view = v
@@ -152,14 +152,14 @@ private fun ReportTitle(progress: JSONObject?, contentType: String?) {
     val done = progress?.optInt("done") ?: 0
     val (title, sub) = when {
         done > 0 && done == total -> "오늘 아침도 해냈어요!" to when (contentType) {
-            "EXERCISE" -> "스트레칭으로 몸까지 활짝 깨웠어요"
-            "QUIZ" -> "게임으로 머리까지 말끔하게 깨웠어요"
-            "LANGUAGE" -> "오늘의 영어 문장까지 챙겼어요"
-            else -> "오늘 아침 할 일을 모두 마쳤어요"
+            "EXERCISE" -> "스트레칭으로 몸까지 활짝 깨웠어요."
+            "QUIZ" -> "게임으로 머리까지 말끔하게 깨웠어요."
+            "LANGUAGE" -> "오늘의 영어 문장까지 챙겼어요."
+            else -> "오늘 아침 할 일을 모두 마쳤어요."
         }
-        done > 0 -> "오늘 아침도 해냈어요!" to "${total}개 중 ${done}개를 해냈어요. 시작이 반이에요"
-        total > 0 -> "좋은 아침이에요!" to "제때 일어난 것만으로도 충분히 잘했어요"
-        else -> "좋은 아침이에요!" to "오늘도 좋은 하루 보내세요"
+        done > 0 -> "오늘 아침도 해냈어요!" to "${total}개 중 ${done}개를 해냈어요. 시작이 반이에요."
+        total > 0 -> "좋은 아침이에요!" to "제때 일어난 것만으로도 충분히 잘했어요."
+        else -> "좋은 아침이에요!" to "오늘도 좋은 하루 보내세요."
     }
     Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
         Sparkles(Modifier.matchParentSize())
@@ -246,7 +246,7 @@ private fun MorningTimeline(session: JSONObject, view: JSONObject) {
         Text("오늘 아침 대화", color = RespecColors.Text, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
         Spacer(Modifier.height(16.dp))
         if (rows.isEmpty()) {
-            Text("이번 통화에는 남길 기록이 없어요", color = RespecColors.TextSub, fontSize = 14.sp)
+            Text("이번 통화에는 남길 기록이 없어요.", color = RespecColors.TextSub, fontSize = 14.sp)
         }
         rows.forEachIndexed { i, row -> TimelineItem(row, isLast = i == rows.lastIndex) }
     }
