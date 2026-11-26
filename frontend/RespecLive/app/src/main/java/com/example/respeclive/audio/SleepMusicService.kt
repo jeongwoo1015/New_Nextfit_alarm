@@ -25,8 +25,8 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 상황별 수면 음악 볼륨 (앱 재생 비율): 대화·녹음 듣기 중에는 마이크에 섞이지 않게 아주 작게,
- * 그 밖에는 앱에서 줄이지 않고 폰 미디어 볼륨 그대로 (1)
+ * 수면 음악 볼륨 (앱 재생 비율, 폰 미디어 볼륨에 곱함). 굿나잇콜은 통화 중 배경과 통화 뒤가 같아야 해서
+ * QUIET 하나로 끝까지 틂 (11/26 실사용 피드백). NORMAL은 폰 미디어 볼륨 그대로 (지금 굿나잇콜에서는 쓰지 않음)
  */
 enum class SleepLevel(val volume: Float) { QUIET(0.06f), NORMAL(1f) }
 

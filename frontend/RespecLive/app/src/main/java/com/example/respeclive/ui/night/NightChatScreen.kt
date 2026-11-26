@@ -105,8 +105,12 @@ private fun nightLines(tone: String?): NightLines = if (tone == "CASUAL") CASUAL
 
 /** 녹음 시작 알림음: 길이와 크기(0~100, 통화 볼륨 기준). 소리가 녹음에 섞이지 않도록 끝난 뒤 녹음을 시작 */
 private const val START_BEEP_MS = 180
-private const val START_BEEP_VOLUME = 50
-private const val START_BEEP_GAP_MS = 250L
+private const val START_BEEP_VOLUME = 65
+private const val START_BEEP_GAP_MS = 100L
+/** 안내 말이 끝난 뒤 띵까지 (11/26 실사용 피드백: 간격이 길어 400 → 150) */
+private const val RECORD_LEAD_MS = 150L
+/** 녹음 안내 말이 끝난 뒤 AI가 더 말하지 않는지 확인하는 시간 (보통은 1.2초) */
+private const val END_QUIET_MS = 600L
 
 // 말 감지 설정 (한 마디 녹음용)
 private const val MIN_THRESHOLD = 2500
@@ -194,7 +198,7 @@ fun NightChatScreen(onClose: () -> Unit) {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
         if (result[Manifest.permission.RECORD_AUDIO] == false) {
-            Toast.makeText(context, "마이크 권한이 있어야 대답할 수 있어요", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "마이크 권한이 있어야 대답할 수 있어요.", Toast.LENGTH_SHORT).show()
         }
         micReady.complete(Unit)
     }
@@ -206,14 +210,13 @@ fun NightChatScreen(onClose: () -> Unit) {
     }
 
     // ---- 통화 볼륨으로 통일: 화면에 있는 동안 통화 모드 유지. 수면 음악만 남으면 풀고 미디어 볼륨으로 ----
-    // 통화 모드에서는 폰이 미디어 소리(수면 음악)를 아주 작게 줄이다가, 풀리는 순간 미디어 볼륨 그대로 커짐.
-    // 푼 뒤에는 앱에서 줄이지 않고 폰 미디어 볼륨 그대로 틂 (SleepLevel.NORMAL)
+    // 수면 음악은 통화 중 배경으로 틀 때와 통화가 끝난 뒤가 같은 볼륨이어야 함 (11/26 실사용 피드백).
+    // 그래서 처음 틀 때의 볼륨(SleepLevel.QUIET)을 끝까지 유지하고, 통화 모드를 풀 때도 앱에서 키우지 않음
     val callAudioHeld = remember { booleanArrayOf(false) }
     fun releaseCallAudio() {
         if (!callAudioHeld[0]) return
         CallAudio.release(context)
         callAudioHeld[0] = false
-        SleepMusic.setLevel(context, SleepLevel.NORMAL)
     }
     LaunchedEffect(sleeping) {
         if (sleeping) {
@@ -249,13 +252,12 @@ fun NightChatScreen(onClose: () -> Unit) {
         }
     }
 
-    // ---- 수면 음악 볼륨: 대화·녹음 듣기 중에는 아주 작게, 한 마디 녹음·들어보기 중에는 멈춤 (마이크에 섞이지 않게) ----
+    // ---- 수면 음악: 한 마디 녹음·들어보기 중에는 멈춤 (마이크에 섞이지 않게). 볼륨은 바꾸지 않음 ----
     LaunchedEffect(musicOn, musicStarted, talking, phase, saveStep) {
         if (!musicStarted) return@LaunchedEffect
         if (!musicOn || (saveStep && phase != Phase.AiSpeaking)) {
             SleepMusic.pause(context)
         } else {
-            SleepMusic.setLevel(context, if (talking || phase == Phase.Listening) SleepLevel.QUIET else SleepLevel.NORMAL)
             SleepMusic.resume(context)
         }
     }
@@ -309,7 +311,7 @@ fun NightChatScreen(onClose: () -> Unit) {
         // '내일의 한 마디' 녹음: 말 시작 감지 → 말 끝 감지. 말이 없었거나 너무 짧으면 null
         suspend fun recordOneLiner(): File? {
             phase = Phase.Listening
-            delay(400)
+            delay(RECORD_LEAD_MS)
             while (muted && !skipSave) delay(300)   // 음소거 중이면 해제할 때까지 대기
             if (skipSave) return null
             playStartBeep()                         // 띵: 이제부터 녹음
@@ -317,7 +319,7 @@ fun NightChatScreen(onClose: () -> Unit) {
 
             val file = NightMessageStore.newMessageFile(context)
             if (!recorder.start(file)) {
-                Toast.makeText(context, "마이크를 열지 못했어요", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "마이크를 열지 못했어요.", Toast.LENGTH_SHORT).show()
                 return null
             }
             finishNow = false
@@ -400,7 +402,7 @@ fun NightChatScreen(onClose: () -> Unit) {
                 musicStarted = true
             } else {
                 musicOn = false
-                Toast.makeText(context, "재생할 수면 음악이 없어요", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "재생할 수면 음악이 없어요.", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -413,7 +415,8 @@ fun NightChatScreen(onClose: () -> Unit) {
         // AI가 마무리하며 끝냈으면(end_session) 한마디 녹음 안내를 AI가 이미 함. 사용자가 통화 종료 버튼으로 끝냈으면 녹음 없이 닫음
         val endedByAi = select<Boolean> {
             toolEvents.onReceive {
-                client.awaitReplyEnd()      // end_session 뒤에 이어지는 녹음 안내 말까지 끝까지 들려줌
+                // end_session 뒤에 이어지는 녹음 안내 말까지 끝까지 들려줌. 곧바로 띵 → 녹음이라 끝난 뒤 확인은 짧게 (11/26 간격 줄이기)
+                client.awaitReplyEnd(quietMs = END_QUIET_MS)
                 true
             }
             endTalk.onReceive { false }
@@ -515,7 +518,7 @@ fun NightChatScreen(onClose: () -> Unit) {
                 voiceText = withTimeoutOrNull(5_000) { textJob.await() }
                 // 기기에도 보관 (서버 조회 실패 시 대체 재생, 아침에 글자로도 보여 줌)
                 NightMessageStore.save(context, rec, voiceText)
-                Toast.makeText(context, "내일의 나에게 남긴 한 마디를 저장했어요", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "내일의 나에게 남긴 한 마디를 저장했어요.", Toast.LENGTH_SHORT).show()
             } else {
                 textJob.cancel()
                 rec.delete()
@@ -544,7 +547,7 @@ fun NightChatScreen(onClose: () -> Unit) {
 
         val saved = withTimeoutOrNull(SAVE_WAIT_MS) { uploadJob.await() } == true
         if (!saved && (hasUser || voice != null)) {
-            Toast.makeText(context, "서버에 저장하지 못했어요. 한 마디는 기기에 보관돼요", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "서버에 저장하지 못했어요. 한 마디는 기기에 보관돼요.", Toast.LENGTH_SHORT).show()
         }
         delay(800)
         if (musicOn && SleepMusic.playing.value) {
@@ -582,7 +585,7 @@ fun NightChatScreen(onClose: () -> Unit) {
                 start()
             }
         } catch (e: Exception) {
-            Toast.makeText(context, "재생하지 못했어요", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "재생하지 못했어요.", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -627,13 +630,13 @@ fun NightChatScreen(onClose: () -> Unit) {
         !talking && phase == Phase.Review -> when {
             pendingText != null -> "“$pendingText”"
             transcribing -> "녹음한 말을 글자로 바꾸는 중…"
-            else -> "녹음은 됐지만 글자로 바꾸지 못했어요. 들어보기로 확인해 주세요"
+            else -> "녹음은 됐지만 글자로 바꾸지 못했어요. 들어보기로 확인해 주세요."
         }
         !talking && liveSaying -> ""
         !talking -> subtitle
-        status == LiveClient.Status.Error -> liveMessage ?: "연결이 끊겼어요. 통화 종료를 누르면 한 마디 남기기로 넘어가요"
+        status == LiveClient.Status.Error -> liveMessage ?: "연결이 끊겼어요. 통화 종료를 누르면 한 마디 남기기로 넘어가요."
         status == LiveClient.Status.Reconnecting -> "연결이 잠시 끊겨서 다시 연결하는 중…"
-        status != LiveClient.Status.Live -> "리스펙과 연결하는 중…"
+        status != LiveClient.Status.Live -> "넥스티와 연결하는 중…"
         else -> lastLine?.text.orEmpty()
     }
 
@@ -741,7 +744,7 @@ private fun CallHeader(elapsed: Int, musicOn: Boolean, onMusicChange: (Boolean) 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(10.dp).clip(CircleShape).background(RespecColors.Mint))
                 Spacer(Modifier.width(8.dp))
-                Text("리스펙", color = RespecColors.Text, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
+                Text("넥스티", color = RespecColors.Text, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
             }
             FitText(
                 "AI 굿나잇콜 통화 중 · %02d:%02d".format(elapsed / 60, elapsed % 60),
@@ -807,7 +810,7 @@ private fun VoiceOrb(size: Dp, phase: Phase, level: Float, isSaveStep: Boolean, 
         Phase.Listening, Phase.Recording -> if (isSaveStep && muted) "음소거 중 · 해제하면 녹음돼요" else null
         else -> null
     } ?: when (phase) {
-        Phase.AiSpeaking -> if (isSaveStep) "리스펙이 이야기하는 중 · 탭하면 건너뛰기" else "리스펙이 이야기하는 중"
+        Phase.AiSpeaking -> if (isSaveStep) "넥스티가 이야기하는 중 · 탭하면 건너뛰기" else "넥스티가 이야기하는 중"
         Phase.Listening -> "듣고 있어요"
         Phase.Recording -> if (isSaveStep) "녹음 중  $time" else "말씀을 듣고 있어요"
         Phase.Review -> "한 마디를 녹음했어요  $time"
