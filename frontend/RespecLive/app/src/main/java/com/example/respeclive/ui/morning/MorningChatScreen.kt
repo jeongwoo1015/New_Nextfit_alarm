@@ -31,6 +31,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -211,7 +212,7 @@ fun MorningChatScreen(
     val userTurns by client.userTurnsFlow.collectAsState()   // 받아쓰기 없이 끊김으로 센 말도 포함
 
     var stage by remember { mutableStateOf(Stage.Preparing) }
-    var notice by remember { mutableStateOf("리스펙이 준비하는 중…") }
+    var notice by remember { mutableStateOf("넥스티가 준비하는 중…") }
     var sessionId by remember { mutableStateOf<String?>(null) }
     var responded by remember { mutableStateOf(false) }
     var banner by remember { mutableStateOf<Banner?>(null) }
@@ -235,6 +236,9 @@ fun MorningChatScreen(
     // 보류한 판정 보고 (단계 번호 → verdict). AI는 보고한 단계를 마친 것으로 보고 다음 단계로 넘어가므로 화면은 바로 넘기고,
     // 서버 기록은 사용자 말 받아쓰기가 도착하거나 AI가 다음 단계를 보고하거나 코칭이 끝날 때 함 (B19)
     val heldReports = remember { mutableStateMapOf<Int, String>() }
+    // 받아들여 서버에 보내는 중인 판정(done·skipped·not_done) 단계. 화면은 서버 응답을 기다리지 않고 바로 다음 단계로
+    // ("나머지는 다음에 할게" 뒤 건너뛰기 보고마다 서버 왕복을 기다려서, 넥스티는 알겠다고 하는데 화면엔 2단계 자세가 한참 남았음, 11/26 실사용)
+    val pendingFinal = remember { mutableStateListOf<Int>() }
     var heldShown by remember { mutableIntStateOf(0) }     // 보류한 보고로 화면을 넘긴 마지막 단계 번호 (화면은 그다음 단계)
     var rescheduleArgs by remember { mutableStateOf<JSONObject?>(null) }
     // 말로 미룸: AI가 reschedule_alarm을 부른 순간부터 true. 이후 통화가 끝나면(저절로든 종료 버튼이든) 리포트 없이 홈으로
@@ -290,7 +294,7 @@ fun MorningChatScreen(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
         if (result[Manifest.permission.RECORD_AUDIO] == false) {
-            Toast.makeText(context, "마이크 권한이 없으면 버튼으로 대답해 주세요", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "마이크 권한이 없으면 버튼으로 대답해 주세요.", Toast.LENGTH_SHORT).show()
         }
         micReady.complete(Unit)
     }
@@ -367,16 +371,31 @@ fun MorningChatScreen(
             val fresh = orders.filter { announced.add(it) }
             val last = fresh.maxOrNull() ?: return
             val idx = items.indexOfFirst { it.stepOrder == last }
-            if (idx >= 0) banner = Banner("${idx + 1}번째 스텝 완료!", items[idx].title)
+            if (idx < 0) return
+            // 끝말잇기는 한 판뿐이라 단계 번호 없이 완료만 (스트레칭·영어처럼 여러 단계면 몇 번째인지)
+            banner = if (RoutineRepository.session?.contentOption == "WORDCHAIN") Banner("끝말잇기 완료!", "")
+            else Banner("${idx + 1}번째 스텝 완료!", items[idx].title)
         }
 
         // 판정 보고 처리는 한 번에 하나씩 (보고·보류 기록·받아쓰기 도착이 서로 끼어들지 않게)
         val reportLock = Mutex()
         var heldAt = 0L                 // 마지막으로 판정을 보류한 시각
 
-        suspend fun record(order: Int, verdict: String) {
-            val sid = RoutineRepository.sessionId ?: return
-            RespecApi.reportVerdict(sid, order, verdict)?.let { RoutineRepository.applyView(it) }
+        suspend fun send(order: Int, verdict: String) {
+            try {
+                val sid = RoutineRepository.sessionId ?: return
+                RespecApi.reportVerdict(sid, order, verdict)?.let { RoutineRepository.applyView(it) }
+            } finally {
+                pendingFinal.remove(order)
+            }
+        }
+
+        // 서버 기록은 받은 순서대로 뒤에서 하나씩. 판정 처리(reportLock)는 기록을 기다리지 않음
+        val recordQueue = Channel<Pair<Int, String>>(Channel.UNLIMITED)
+        launch { for ((o, v) in recordQueue) send(o, v) }
+        fun record(order: Int, verdict: String) {
+            if (verdict in FINAL_VERDICTS && order !in pendingFinal) pendingFinal.add(order)
+            recordQueue.trySend(order to verdict)
         }
 
         // 보류한 보고 중 below보다 앞 단계를 기록
@@ -399,7 +418,7 @@ fun MorningChatScreen(
         suspend fun handleReport(order: Int, verdict: String): Boolean {
             // AI가 다음 단계를 보고했으면 앞에서 보류한 단계는 AI가 그대로 넘어간 것이므로 먼저 확정
             if (heldReports.keys.any { it < order }) flushHeld(below = order)
-            val current = items.firstOrNull { !it.done && !it.skipped }?.stepOrder
+            val current = items.firstOrNull { !it.done && !it.skipped && it.stepOrder !in pendingFinal }?.stepOrder
             val skip = verdict == "skipped"
             // 완료 배너는 받아쓰기를 기다리지 않고 바로: 직전에 받아들인 보고 뒤 사용자가 말했거나 버튼을 누른 지금 단계의 done
             // (말로 대답하면 받아쓰기가 판정보다 늦게 와서 아래 대기만큼 배너가 늦게 떴음. 버튼은 받아쓰기 없이 바로 세어 빨랐음).
@@ -730,7 +749,7 @@ fun MorningChatScreen(
         micReady.await()
         val placeJob = async { DeviceLocation.lastKnown(context) }   // 재연결 때마다 다시 찾지 않도록 한 번만
         stage = Stage.Briefing
-        notice = "리스펙과 연결하는 중…"
+        notice = "넥스티와 연결하는 중…"
         client.start {
             // 오늘 일정은 폰 캘린더에서 (권한은 밤 대화에서 받음. 없으면 빈 일정), 날씨용 위치는 마지막으로 알던 위치
             RespecApi.briefingToken(sid, CalendarEvents.today(context), placeJob.await())
@@ -854,7 +873,7 @@ fun MorningChatScreen(
         stage == Stage.Message -> messageText?.let { "“$it”" } ?: notice
         stage == Stage.Wrapup -> wrapText
         stage == Stage.Preparing || stage == Stage.Finished -> notice
-        status == LiveClient.Status.Error -> liveMessage ?: "연결이 끊겼어요"
+        status == LiveClient.Status.Error -> liveMessage ?: "연결이 끊겼어요."
         status == LiveClient.Status.Reconnecting -> "연결이 잠시 끊겨서 다시 연결하는 중…"
         preparing -> notice
         else -> lastLine?.text ?: notice
@@ -864,7 +883,7 @@ fun MorningChatScreen(
     // 부위를 고르기 전에 단계를 판정했으면(부위 질문 없이 진행) 고르는 중이 아님
     val choosingArea = areaPending && stage == Stage.Coaching && items.none { it.done || it.skipped }
     // 화면의 지금 단계는 AI를 따라감: 보류한 보고로 넘긴 단계가 있으면 그다음 단계부터
-    val currentStep = items.firstOrNull { !it.done && !it.skipped && (it.stepOrder ?: 0) > heldShown }?.takeUnless { choosingArea }
+    val currentStep = items.firstOrNull { !it.done && !it.skipped && it.stepOrder !in pendingFinal && (it.stepOrder ?: 0) > heldShown }?.takeUnless { choosingArea }
     val currentTitle = currentStep?.title
     val contentType = RoutineRepository.session?.contentType
     // 끝말잇기는 정답·오답이 없는 게임이라 넥스티 말로 O / X를 추측하지 않음
@@ -931,7 +950,7 @@ fun MorningChatScreen(
         val sid = sessionId ?: return@LaunchedEffect
         if (!wordChainTimeUp) return@LaunchedEffect
         WordChainStore.saveMorningResult(context, sid, WordChainResult(WordChainWinner.NEXTY, WordChainReason.TIMEOUT, inMorning = true))
-        Toast.makeText(context, "시간이 다 됐어요. 이번 끝말잇기는 넥스티가 이겼어요", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, "시간이 다 됐어요. 이번 끝말잇기는 넥스티가 이겼어요.", Toast.LENGTH_LONG).show()
         currentStep?.stepOrder?.let { order -> scope.launch { RespecApi.markStep(sid, order, "DONE")?.let { RoutineRepository.applyView(it) } } }
         toolEvents.trySend(ROUTINE_OVER)
     }
@@ -1087,7 +1106,7 @@ fun MorningChatScreen(
                                 stage == Stage.Coaching && currentTitle != null ->
                                     "지금은 · $currentTitle" + (remainingMs?.let { " · ${(it + 999) / 1000}초" } ?: "")
                                 stage == Stage.Briefing -> "아침 브리핑"
-                                else -> "리스펙이 이야기하는 중"
+                                else -> "넥스티가 이야기하는 중"
                             },
                             color = if (showRoutine) RespecColors.TextSub else tint,
                             fontSize = CallLayout.ORB_STATUS_TEXT,
@@ -1281,7 +1300,7 @@ private fun MorningHeader(elapsed: Int) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(10.dp).clip(CircleShape).background(RespecColors.Mint))
             Spacer(Modifier.width(8.dp))
-            Text("리스펙", color = RespecColors.Text, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
+            Text("넥스티", color = RespecColors.Text, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
         }
         FitText(
             "AI 모닝콜 통화 중 · %02d:%02d".format(elapsed / 60, elapsed % 60),
@@ -1297,9 +1316,11 @@ private fun BannerCard(banner: Banner) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(shape)
+            // 아래 타이머 링(라임색)이 비쳐 보이지 않게 카드 색을 먼저 깔고 그림자로 띄움
+            .shadow(10.dp, shape)
+            .background(RespecColors.Card)
             .background(RespecColors.Lime.copy(alpha = 0.12f))
-            .border(1.dp, RespecColors.Lime.copy(alpha = 0.4f), shape)
+            .border(1.5.dp, RespecColors.Lime, shape)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1312,7 +1333,7 @@ private fun BannerCard(banner: Banner) {
         Spacer(Modifier.width(12.dp))
         Column {
             Text(banner.title, color = RespecColors.AccentText, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
-            Text(banner.sub, color = RespecColors.Text, fontSize = 13.sp)
+            if (banner.sub.isNotEmpty()) Text(banner.sub, color = RespecColors.Text, fontSize = 13.sp)
         }
     }
 }
