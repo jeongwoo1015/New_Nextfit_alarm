@@ -112,7 +112,7 @@ fun ContentScreen(onResumeGame: (sessionId: String) -> Unit) {
         Spacer(Modifier.height(18.dp))
 
         when {
-            list == null && failed -> Empty(tab.icon, "서버에 연결하지 못했어요", "잠시 뒤 다시 열어 주세요")
+            list == null && failed -> Empty(tab.icon, "서버에 연결하지 못했어요", "잠시 뒤 다시 열어 주세요.")
             list == null -> Empty(tab.icon, "불러오는 중…", null)
             else -> {
                 val items = list.filter { tabOf(it) == tab }.reversed()     // 최근 모닝콜이 위로
@@ -220,13 +220,12 @@ private fun ContentCard(
     }
 }
 
-/** "알람 이름 · 07:00" (기기에 알람이 없으면 시각만) */
-@Composable
-private fun alarmCaption(s: ContentSession): String {
-    val name = s.alarmServerId?.let { id -> AlarmRepository.alarms.firstOrNull { it.serverId == id }?.label }?.takeIf { it.isNotBlank() }
-    val time = s.wakeTime?.take(5)
-    return listOfNotNull(name ?: "모닝콜", time).joinToString(" · ")
-}
+/** 그 모닝콜 알람의 이름 (기기에 알람이 없거나 이름이 비었으면 "모닝콜") */
+private fun alarmName(s: ContentSession): String =
+    s.alarmServerId?.let { id -> AlarmRepository.alarms.firstOrNull { it.serverId == id }?.label }?.takeIf { it.isNotBlank() } ?: "모닝콜"
+
+/** "알람 이름 · 07:00" (시각은 그날 알람에 설정해 둔 시각 base_wake_time) */
+private fun alarmCaption(s: ContentSession): String = listOfNotNull(alarmName(s), s.wakeTime?.take(5)).joinToString(" · ")
 
 @Composable
 private fun StretchCard(s: ContentSession) {
@@ -238,7 +237,7 @@ private fun StretchCard(s: ContentSession) {
         trailing = { if (s.steps.isNotEmpty()) Pill("$done / ${s.steps.size}") }
     ) {
         if (s.steps.isEmpty()) {
-            Sub("스트레칭을 시작하지 않았어요")
+            Sub("스트레칭을 시작하지 않았어요.")
             return@ContentCard
         }
         LinearProgressIndicator(
@@ -259,7 +258,6 @@ private fun StretchCard(s: ContentSession) {
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(st.name, color = RespecColors.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                    st.script?.let { Spacer(Modifier.height(2.dp)); Sub(it) }
                 }
                 StatusIcon(st.status)
             }
@@ -279,7 +277,7 @@ private fun EnglishCard(s: ContentSession) {
         trailing = { if (s.steps.isNotEmpty()) Pill("$done / ${s.steps.size}") }
     ) {
         when {
-            s.steps.isEmpty() -> Sub("영어 따라 읽기를 시작하지 않았어요")
+            s.steps.isEmpty() -> Sub("영어 따라 읽기를 시작하지 않았어요.")
             phrases.isEmpty() && answer == null -> {
                 // 서버가 문장을 앱에 주기 전: 단계 결과만
                 s.steps.forEachIndexed { i, st ->
@@ -290,7 +288,7 @@ private fun EnglishCard(s: ContentSession) {
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                Sub("따라 읽은 문장은 서버 준비가 끝나면 여기에 보여요")
+                Sub("따라 읽은 문장은 서버 준비가 끝나면 여기에 보여요.")
             }
             else -> {
                 phrases.forEachIndexed { i, (st, ex) ->
@@ -299,7 +297,6 @@ private fun EnglishCard(s: ContentSession) {
                         Column(Modifier.weight(1f)) {
                             Text(ex.english, color = RespecColors.Text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                             ex.meaning?.let { Spacer(Modifier.height(3.dp)); Text(it, color = RespecColors.Text, fontSize = 14.sp) }
-                            ex.pronunciation?.let { Spacer(Modifier.height(2.dp)); Sub(it) }
                         }
                         StatusIcon(st.status)
                     }
@@ -312,7 +309,7 @@ private fun EnglishCard(s: ContentSession) {
                     }
                     Spacer(Modifier.height(4.dp))
                     Text(q.question, color = RespecColors.Text, fontSize = 15.sp)
-                    q.example?.let { Spacer(Modifier.height(3.dp)); Sub("예시: $it") }
+                    q.example?.let { Spacer(Modifier.height(3.dp)); Sub("예시 답: $it") }
                 }
             }
         }
@@ -391,7 +388,7 @@ private fun WordChainCard(s: ContentSession, onResumeGame: (String) -> Unit) {
         } else {
             Text("아직 승패가 나지 않았어요", color = RespecColors.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(2.dp))
-            Sub("넥스티와 글자로 이어서 승부를 내 보세요")
+            Sub("넥스티와 글자로 이어서 승부를 내 보세요.")
             Spacer(Modifier.height(14.dp))
             Button(
                 onClick = { onResumeGame(s.sessionId) },
@@ -407,7 +404,7 @@ private fun WordChainCard(s: ContentSession, onResumeGame: (String) -> Unit) {
 private fun ChosungCard(s: ContentSession) {
     ContentCard(icon = Icons.Filled.SportsEsports, title = "초성 게임", session = s) {
         if (s.steps.isEmpty()) {
-            Sub("초성 게임 기록이 없어요")
+            Sub("초성 게임 기록이 없어요.")
             return@ContentCard
         }
         s.steps.forEachIndexed { i, st ->
@@ -418,7 +415,7 @@ private fun ChosungCard(s: ContentSession) {
                 StatusIcon(st.status)
             }
             Spacer(Modifier.height(8.dp))
-            if (st.words.isEmpty()) Sub("말한 단어 기록이 없어요") else WordFlow(st.words)
+            if (st.words.isEmpty()) Sub("말한 단어 기록이 없어요.") else WordFlow(st.words)
         }
     }
 }
@@ -432,7 +429,7 @@ private fun QuizCard(s: ContentSession) {
         session = s,
         trailing = { if (s.steps.isNotEmpty()) Pill("$done / ${s.steps.size}") }
     ) {
-        if (s.steps.isEmpty()) Sub("퀴즈를 시작하지 않았어요")
+        if (s.steps.isEmpty()) Sub("퀴즈를 시작하지 않았어요.")
         s.steps.forEachIndexed { i, st ->
             if (i > 0) Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {

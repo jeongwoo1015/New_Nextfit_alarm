@@ -75,7 +75,7 @@ private enum class AppPermission(
     ),
     MIC(
         "마이크",
-        "넥스티와 전화로 대화하고, 내일 아침의 나에게 들려줄 한 마디를 녹음해요.",
+        "넥스티와 전화로 대화하고, 내일 아침의 나에게 들려줄 한마디를 녹음해요.",
         "넥스티에게 말로 대답할 수 없어요. 통화를 받을 때 다시 물어봐요.",
         Icons.Filled.Mic, required = true, runtime = Manifest.permission.RECORD_AUDIO
     ),
