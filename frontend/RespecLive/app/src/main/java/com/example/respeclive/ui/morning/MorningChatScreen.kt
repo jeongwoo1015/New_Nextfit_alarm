@@ -154,11 +154,6 @@ private const val REWAKE_NOTICE = "(앱 알림: 재기상 음악 재생)"
 /** 판정 보고가 사용자 말 받아쓰기보다 먼저 올 때, 받아쓰기를 기다리는 시간 (B19) */
 private const val REPORT_SPEECH_WAIT_MS = 1_500L
 
-/**
- * 보류한 판정 보고로 화면을 다음 단계로 넘기려면 직전 보고(또는 코칭 시작) 뒤 이만큼 지나야 함.
- * 사용자 말 받아쓰기가 늦은 진짜 대답은 단계 시간만큼 지나서 오고, AI가 다음 단계를 안내하며 미리 보낸 보고는 몇 초 만에 옴
- */
-private const val HELD_ADVANCE_GAP_MS = 8_000L
 /** 판정을 보류한 뒤 이 시간 안에 들어온 사용자 말만 그 단계 대답의 늦은 받아쓰기로 봄 (그 뒤의 말은 다음 단계 대답) */
 private const val LATE_SPEECH_MS = 5_000L
 /** 단계를 마친 것으로 보는 판정 (ambiguous·other는 AI가 다시 물으므로 그 단계에 머묾) */
@@ -342,7 +337,6 @@ fun MorningChatScreen(
 
         // 판정 보고 처리는 한 번에 하나씩 (보고·보류 기록·받아쓰기 도착이 서로 끼어들지 않게)
         val reportLock = Mutex()
-        var lastReportAt = 0L           // 직전 판정 보고(또는 코칭 시작·부위 선택) 시각
         var heldAt = 0L                 // 마지막으로 판정을 보류한 시각
 
         suspend fun record(order: Int, verdict: String) {
@@ -372,10 +366,11 @@ fun MorningChatScreen(
             if (heldReports.keys.any { it < order }) flushHeld(below = order)
             val current = items.firstOrNull { !it.done && !it.skipped }?.stepOrder
             val skip = verdict == "skipped"
-            // 완료 배너는 받아쓰기를 기다리지 않고 바로: 사용자가 말했거나, 직전 보고 뒤 충분히 지난(미리 보낸 보고가 아닌) 지금 단계의 done
-            // (말로 대답하면 받아쓰기가 판정보다 늦게 와서 아래 대기만큼 배너가 늦게 떴음. 버튼은 받아쓰기 없이 바로 세어 빨랐음)
-            val sinceLast = System.currentTimeMillis() - lastReportAt
-            if (verdict == "done" && order == current && (client.userTurns > acceptedUserTurns || sinceLast >= HELD_ADVANCE_GAP_MS)) {
+            // 완료 배너는 받아쓰기를 기다리지 않고 바로: 직전에 받아들인 보고 뒤 사용자가 말했거나 버튼을 누른 지금 단계의 done
+            // (말로 대답하면 받아쓰기가 판정보다 늦게 와서 아래 대기만큼 배너가 늦게 떴음. 버튼은 받아쓰기 없이 바로 세어 빨랐음).
+            // 사용자가 아무 대답도 안 했으면 시간이 얼마나 지났든 배너를 띄우지 않음: AI가 동작이 끝나기 전에 혼자 done을 보고하면
+            // 완료 팝업과 함께 화면이 먼저 넘어갔음 (11/27 실기기: 마지막 사용자 말 21초 뒤 done)
+            if (verdict == "done" && order == current && client.userTurns > acceptedUserTurns) {
                 announce(listOf(order))
             }
             val lastUser = client.transcript.value.lastOrNull { it.role == LiveClient.Role.User }
@@ -390,8 +385,6 @@ fun MorningChatScreen(
             val spoke = turns > acceptedUserTurns
             val ok = (spoke && (order == current || skip)) || (skip && turns == skipUserTurns)
             val now = System.currentTimeMillis()
-            val gap = now - lastReportAt
-            lastReportAt = now
             if (ok) {
                 acceptedUserTurns = turns
                 if (skip) skipUserTurns = turns
@@ -408,11 +401,9 @@ fun MorningChatScreen(
             Log.w("Morning", "판정 보고 보류: step=$order verdict=$verdict current=$current spoke=$spoke")
             heldReports[order] = verdict
             heldAt = now
-            // 화면은 AI를 따라 다음 단계로. 단, 직전 보고 직후에 온 보고는 미리 보낸 것일 수 있어 화면은 그대로 둠
-            if (verdict in FINAL_VERDICTS && gap >= HELD_ADVANCE_GAP_MS) {
-                heldShown = maxOf(heldShown, order)
-                if (verdict == "done") announce(listOf(order))
-            }
+            // 보류한 보고로는 화면을 넘기지 않고 배너도 띄우지 않음. 사용자가 말하거나 버튼을 누르면(위 collect) 또는
+            // AI가 다음 단계를 보고하면(flushHeld) 그때 기록하고 넘어감. 예전에는 직전 보고 뒤 8초가 지났으면 늦은 받아쓰기로 보고
+            // 화면을 넘겼는데, 버튼·끊긴 목소리도 사용자 말로 세므로 진짜 대답은 놓치지 않고, 대답 없는 done만 걸러짐 (11/27)
             return true
         }
 
@@ -497,7 +488,6 @@ fun MorningChatScreen(
                         heldReports.clear()
                         heldShown = 0
                         announced.clear()
-                        lastReportAt = System.currentTimeMillis()
                         if (view != null) {
                             RoutineRepository.applyView(view)
                             // 부위를 말한 대답은 새 1번 단계의 판정 근거가 아님 → 1번은 이 뒤의 사용자 말부터 받음 (B19)
@@ -665,7 +655,6 @@ fun MorningChatScreen(
             first.steps?.let { RoutineRepository.applySteps(it) }
             acceptedUserTurns = client.userTurns       // 판정 보고 검사(B19)는 코칭을 시작한 뒤의 사용자 말부터 셈
             skipUserTurns = -1
-            lastReportAt = System.currentTimeMillis()
             coachingStarted = true
 
             // 첫 연결은 받아 둔 토큰, 재연결은 서버가 남은 단계만 넣은 새 토큰
