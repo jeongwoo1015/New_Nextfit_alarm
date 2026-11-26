@@ -97,10 +97,10 @@ fun WordChainScreen(sessionId: String, onClose: () -> Unit) {
         val app = context.applicationContext
         ApiClient.scope.launch {
             RespecApi.markStep(sessionId, WORDCHAIN_STEP, "DONE")
-            RespecApi.saveGameScore(sessionId, WORDCHAIN_STEP, score)?.let { out ->
-                WordChainStore.saveBest(app, out.optInt("best_score", score))
+            RespecApi.saveGameScore(sessionId, WORDCHAIN_STEP, score, r.winner.name)?.let { out ->
+                WordChainStore.applyServer(app, out, score)
                 if (out.optBoolean("is_best") && score > 0) {
-                    withContext(Dispatchers.Main) { Toast.makeText(app, "새 기록! ${score}번 주고받았어요", Toast.LENGTH_SHORT).show() }
+                    withContext(Dispatchers.Main) { Toast.makeText(app, "새 기록! ${score}번 주고받았어요.", Toast.LENGTH_SHORT).show() }
                 }
             }
         }
@@ -292,10 +292,10 @@ fun WordChainScreen(sessionId: String, onClose: () -> Unit) {
 fun wordChainResultText(r: WordChainResult): Pair<String, String> {
     val head = if (r.winner == WordChainWinner.USER) "내가 이겼어요!" else "넥스티가 이겼어요"
     val why = when {
-        r.reason == WordChainReason.TIMEOUT && r.winner == WordChainWinner.USER -> "넥스티의 시간이 다 됐어요"
-        r.reason == WordChainReason.TIMEOUT -> "내 차례에 시간이 다 됐어요"
-        r.winner == WordChainWinner.USER -> "넥스티가 이을 단어가 없었어요"
-        else -> "내가 이을 단어가 없었어요"
+        r.reason == WordChainReason.TIMEOUT && r.winner == WordChainWinner.USER -> "넥스티의 시간이 다 됐어요."
+        r.reason == WordChainReason.TIMEOUT -> "내 차례에 시간이 다 됐어요."
+        r.winner == WordChainWinner.USER -> "넥스티가 이을 단어가 없었어요."
+        else -> "내가 이을 단어가 없었어요."
     }
     return head to (if (r.inMorning) "모닝콜에서 · $why" else why)
 }
@@ -311,6 +311,11 @@ private fun ResultBanner(r: WordChainResult) {
         Text(head, color = RespecColors.AccentText, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
         Spacer(Modifier.height(4.dp))
         Text(why, color = RespecColors.Text, fontSize = 14.sp, textAlign = TextAlign.Center)
+        val wins = WordChainStore.wins(LocalContext.current)
+        if (wins > 0) {
+            Spacer(Modifier.height(6.dp))
+            Text("지금까지 넥스티를 ${wins}번 이겼어요.", color = RespecColors.TextSub, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 

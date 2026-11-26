@@ -117,8 +117,13 @@ fun ContentScreen(onResumeGame: (sessionId: String) -> Unit) {
             else -> {
                 val items = list.filter { tabOf(it) == tab }.reversed()     // 최근 모닝콜이 위로
                 if (items.isEmpty()) {
-                    Empty(tab.icon, tab.emptyText, "${tab.label} 알람을 받으면 여기에 기록이 남아요")
+                    Empty(tab.icon, tab.emptyText, "${tab.label} 알람을 받으면 여기에 기록이 남아요.")
                 } else {
+                    // 게임: 최고 기록·이긴 횟수는 카드마다가 아니라 위에 한 번만
+                    if (tab == ContentTab.GAME) {
+                        GameStats()
+                        Spacer(Modifier.height(14.dp))
+                    }
                     items.forEachIndexed { i, s ->
                         if (i > 0) Spacer(Modifier.height(14.dp))
                         when (tab) {
@@ -314,6 +319,35 @@ private fun EnglishCard(s: ContentSession) {
     }
 }
 
+/** 게임 탭 위: 끝말잇기 최고 기록(한 판에서 가장 많이 주고받은 단어 수)과 넥스티를 이긴 횟수 */
+@Composable
+private fun GameStats() {
+    val context = LocalContext.current
+    val best = WordChainStore.best(context)
+    val wins = WordChainStore.wins(context)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        // 최고 기록 = 한 판에서 가장 많이 주고받은 단어 수
+        GameStat("한 판 최고 기록", best?.let { "단어 ${it}개" } ?: "-", Modifier.weight(1f))
+        GameStat("넥스티를 이긴 횟수", "${wins}번", Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun GameStat(label: String, value: String, modifier: Modifier) {
+    val shape = RoundedCornerShape(18.dp)
+    Column(
+        modifier
+            .clip(shape)
+            .background(RespecColors.Card)
+            .border(1.dp, RespecColors.CardBorder, shape)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Text(label, color = RespecColors.TextSub, fontSize = 12.sp, maxLines = 1)
+        Spacer(Modifier.height(4.dp))
+        Text(value, color = RespecColors.AccentText, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+    }
+}
+
 /** 게임 카드: 끝말잇기·초성 게임·퀴즈를 제목으로 구분 */
 @Composable
 private fun GameCard(s: ContentSession, onResumeGame: (String) -> Unit) {
@@ -329,31 +363,23 @@ private fun WordChainCard(s: ContentSession, onResumeGame: (String) -> Unit) {
     val context = LocalContext.current
     // 승패는 기기에 저장한 기록에서 (돌아올 때마다 다시 읽음)
     val result = WordChainStore.get(context, s.sessionId).result
+    // 이 판에서 주고받은 단어 수 (서버 기록이 있으면 그 값). 승패 아래에 표시. 최고 기록·이긴 횟수는 탭 위 GameStats에
+    val score = s.steps.firstNotNullOfOrNull { it.score } ?: WordChainStore.score(WordChainStore.get(context, s.sessionId))
     ContentCard(
         icon = Icons.Filled.SportsEsports,
         title = "끝말잇기",
         session = s,
         trailing = { Pill(if (result == null) "진행 중" else "끝남") }
     ) {
-        // 주고받은 단어 수와 최고 기록 (서버 기록이 있으면 그 값)
-        val score = s.steps.firstNotNullOfOrNull { it.score } ?: WordChainStore.score(WordChainStore.get(context, s.sessionId)).takeIf { it > 0 }
-        val best = WordChainStore.best(context)
-        if (score != null || best != null) {
-            Text(
-                listOfNotNull(score?.let { "주고받은 단어 ${it}개" }, best?.let { "최고 기록 ${it}개" }).joinToString(" · "),
-                color = RespecColors.TextSub, fontSize = 13.sp, fontWeight = FontWeight.SemiBold
-            )
-            Spacer(Modifier.height(12.dp))
-        }
         if (result != null) {
-            val (head, why) = wordChainResultText(result)
+            val (head, _) = wordChainResultText(result)
             val won = result.winner == WordChainWinner.USER
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.EmojiEvents, null, tint = if (won) RespecColors.AccentText else RespecColors.TextSub, modifier = Modifier.size(30.dp))
                 Spacer(Modifier.width(10.dp))
                 Column {
                     Text(head, color = RespecColors.Text, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
-                    Sub(why)
+                    Sub("주고받은 단어 ${score}개")
                 }
             }
             Spacer(Modifier.height(14.dp))

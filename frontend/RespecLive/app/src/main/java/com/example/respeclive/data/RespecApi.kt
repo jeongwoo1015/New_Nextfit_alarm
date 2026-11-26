@@ -287,9 +287,15 @@ object RespecApi {
         return if (r.ok) r.json() else null
     }
 
-    /** 게임 기록(주고받은 횟수, 앱이 셈) 저장 → GameScoreOut {score, best_score, is_best}. 게임 세션이 아니면 null */
-    suspend fun saveGameScore(sessionId: String, stepOrder: Int, score: Int): JSONObject? {
-        val r = ApiClient.put("/morning/sessions/$sessionId/steps/$stepOrder/score", JSONObject().put("score", score)) ?: return null
+    /**
+     * 게임 기록(주고받은 횟수, 앱이 셈) 저장 → GameScoreOut {score, best_score, is_best, user_wins?}. 게임 세션이 아니면 null.
+     * winner: 끝말잇기 승패 "USER"/"NEXTY" (승패가 안 났으면 보내지 않음). 서버에 요청한 필드(11/26):
+     * 서버가 받으면 넥스티를 이긴 횟수(user_wins)를 돌려줌. 아직 모르는 서버는 이 필드를 무시함
+     */
+    suspend fun saveGameScore(sessionId: String, stepOrder: Int, score: Int, winner: String? = null): JSONObject? {
+        val body = JSONObject().put("score", score)
+        if (winner != null) body.put("winner", winner)
+        val r = ApiClient.put("/morning/sessions/$sessionId/steps/$stepOrder/score", body) ?: return null
         return if (r.ok) r.json() else null
     }
 

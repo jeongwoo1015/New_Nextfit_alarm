@@ -53,13 +53,13 @@ object WordChainRules {
 
     /** 잘못된 이유 (null이면 이어도 되는 단어) */
     fun problem(word: String, previous: String?, requiredStart: Char?, used: Collection<String>): String? = when {
-        word.length < MIN_LEN -> "두 글자 이상 단어를 말해 주세요"
-        word.length > MAX_LEN -> "${MAX_LEN}글자 이하 단어를 말해 주세요"
-        word in used -> "이미 나온 단어예요"
+        word.length < MIN_LEN -> "두 글자 이상 단어를 말해 주세요."
+        word.length > MAX_LEN -> "${MAX_LEN}글자 이하 단어를 말해 주세요."
+        word in used -> "이미 나온 단어예요."
         previous != null && word.first() !in nextStarts(previous) ->
-            "'${nextStarts(previous).joinToString("' 또는 '")}'(으)로 시작해야 해요"
+            "'${nextStarts(previous).joinToString("' 또는 '")}'(으)로 시작해야 해요."
         previous == null && requiredStart != null && word.first() !in setOfNotNull(requiredStart, dueum(requiredStart)) ->
-            "'$requiredStart'(으)로 시작해야 해요"
+            "'$requiredStart'(으)로 시작해야 해요."
         else -> null
     }
 }
@@ -192,6 +192,9 @@ object WordChainStore {
     private const val PREFS = "wordchain"
     private const val MAX_SESSIONS = 30
     private const val KEY_BEST = "__best_score"
+    /** 넥스티를 이긴 횟수 (11/26 실사용 피드백). 서버가 user_wins를 주면 그 값으로 맞추고, 아니면 기기에서 셈 */
+    private const val KEY_WINS = "__user_wins"
+    private val META_KEYS = setOf(KEY_BEST, KEY_WINS)
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -203,8 +206,12 @@ object WordChainStore {
     private fun put(context: Context, sessionId: String, record: WordChainRecord) {
         val p = prefs(context)
         val e = p.edit().putString(sessionId, encode(record).toString())
+        // 이 세션에서 처음 승패가 났고 내가 이겼으면 이긴 횟수 +1 (한 세션은 한 번만: 결과는 한 번 정해지면 바뀌지 않음)
+        if (get(context, sessionId).result == null && record.result?.winner == WordChainWinner.USER) {
+            e.putInt(KEY_WINS, p.getInt(KEY_WINS, 0) + 1)
+        }
         // 오래된 기록 정리 (세션 수만 제한)
-        val keys = p.all.keys.filter { it != sessionId && it != KEY_BEST }
+        val keys = p.all.keys.filter { it != sessionId && it !in META_KEYS }
         if (keys.size >= MAX_SESSIONS) keys.take(keys.size - MAX_SESSIONS + 1).forEach { e.remove(it) }
         e.apply()
     }
@@ -225,6 +232,16 @@ object WordChainStore {
 
     /** 서버가 알려 준 끝말잇기 최고 기록 (콘텐츠 탭 표시용) */
     fun best(context: Context): Int? = prefs(context).getInt(KEY_BEST, -1).takeIf { it >= 0 }
+
+    /** 넥스티를 이긴 횟수 (아직 없으면 0) */
+    fun wins(context: Context): Int = prefs(context).getInt(KEY_WINS, 0)
+
+    /** 게임 기록 저장 응답(GameScoreOut) 반영: 최고 기록, 서버가 센 이긴 횟수(있을 때만) */
+    fun applyServer(context: Context, out: JSONObject, score: Int) {
+        val e = prefs(context).edit().putInt(KEY_BEST, out.optInt("best_score", score))
+        if (out.has("user_wins") && !out.isNull("user_wins")) e.putInt(KEY_WINS, out.optInt("user_wins"))
+        e.apply()
+    }
 
     fun saveBest(context: Context, best: Int) {
         prefs(context).edit().putInt(KEY_BEST, best).apply()
