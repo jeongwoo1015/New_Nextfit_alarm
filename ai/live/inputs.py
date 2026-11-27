@@ -16,7 +16,7 @@ class Persona:
     voice_type: str = "FEMALE"
     personality: str = ""              # KIND 다정한 / FRIENDLY 친근한 / STRICT 엄격한(화면 이름 "무서운"도 가능) / CHEERFUL 유쾌한
     intensity: int = 2                 # 깨우는 말의 강도 1 약 / 2 중 / 3 강. 서버가 자동 강도 올리기를 반영한 그날 값(ai.personalization.intensity)을 넣는다
-    auto_intensity: bool = True        # 자동 강도 올리기. False면 통화 중 재기상 알림에도 강도를 올리지 않는다
+    auto_intensity: bool = True        # 자동 강도 올리기. False면 서버의 today_intensity가 고른 강도를 그대로 쓴다. 통화 중에는 이 값과 상관없이 강도를 바꾸지 않는다
 
 
 @dataclass(frozen=True)
