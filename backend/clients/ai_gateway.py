@@ -205,7 +205,7 @@ class WakeDecision:
 def default_wake_decision(user_id: str, session_date: date, w: WakeInputs) -> WakeDecision:
     """AI를 쓸 수 없을 때: 사용자 값 → 직전 단계(상한 안) → 1단계. 올리지 않으므로 알릴 것도 없다."""
     level = w.next_level or min(w.previous_level or 1, w.max_start_level or 5)
-    return WakeDecision({"user_id": user_id, "session_date": session_date.isoformat(), "context_key": "unknown",
+    return WakeDecision({"user_id": user_id, "session_date": session_date.isoformat(), "context_key": "all",
                          "recommended_level": level, "applied_level": level,
                          "source": "user_today" if w.next_level else "default", "explored": False, "propensity": None,
                          "state": "USER" if w.next_level else "RECOMMENDED", "reason": "기본 단계",
@@ -306,8 +306,7 @@ class AIGateway(Protocol):
     def learn_strategy(self, bandit_state: dict | None, log: StrategyLog, session: MorningSession,
                        steps: list[SessionStep]) -> StrategyLearning: ...    # 코칭 강도: 그날 결과로 보상을 매기고 학습 (11/21)
     def learn_wake(self, state: dict | None, context_key: str, start_level: int, received_level: int | None,
-                   confirmed: bool) -> dict | None: ...                     # 반영한 새 학습 상태, 값이 잘못됐으면 None
-    def correct_wake(self, state: dict | None, context_key: str, received_level: int) -> dict | None: ...
+                   confirmed: bool | None) -> dict | None: ...              # 반영한 새 학습 상태, 값이 잘못됐으면 None (confirmed는 AI가 무시, B28)
     def judge_wordchain(self, words: list[str], word: str) -> dict: ...
     # 끝말잇기 글자 판정 (AI B26): {"valid": true, "next": "정원"|None} / {"valid": false, "reason": "…"} / {"status": "FAILED"}
     # 이미 확인 성공으로 학습한 날을 실패로 고침(11/24 미루기): 받은 단계 칸의 성공 1 → 실패 1. 옮길 성공이 없으면 None
@@ -516,18 +515,6 @@ class RealAIGateway:
         ladder = WakeLadder.from_dict(state)
         return ladder.to_dict() if learn_wake(ladder, context_key, start_level, received_level, confirmed) else None
 
-    def correct_wake(self, state, context_key, received_level) -> dict | None:
-        """AI에 되돌리는 함수가 없어 서버가 WakeLadder 칸을 직접 고친다(11/25, AI 파트에 공유).
-        칸 키는 AI의 WakeLadder._k로 만들어 저장 형식에 따로 기대지 않는다. 형식이 바뀌면 test_ai_gateway가 잡는다."""
-        from ai.personalization.wake_volume import WakeLadder
-        ladder = WakeLadder.from_dict(state)
-        success, _ = ladder.get(context_key, received_level)
-        if success < 1:
-            return None
-        ladder.counts[WakeLadder._k(context_key, received_level)][0] -= 1
-        ladder.add(context_key, received_level, False)
-        return ladder.to_dict()
-
     def judge_wordchain(self, words: list[str], word: str) -> dict:
         """AI는 규칙 위반이면 AI를 부르지 않고 거르고, 호출 실패(LLMError·응답 형식)는 FAILED로 준다.
         그 밖의 예외(네트워크 등)도 판정하지 못한 것이므로 FAILED로 맞춘다."""
@@ -599,9 +586,6 @@ class UnavailableAIGateway:
 
     def learn_wake(self, state, context_key, start_level, received_level, confirmed):
         return None             # 학습 없이 기록만 남는다
-
-    def correct_wake(self, state, context_key, received_level):
-        return None
 
     judge_wordchain = _fail     # 앱은 오류면 자기 규칙·단어 목록으로 이어 간다
 

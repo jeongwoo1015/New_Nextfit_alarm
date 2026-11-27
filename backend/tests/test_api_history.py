@@ -16,7 +16,8 @@ H = auth(USER_A)
 
 
 def morning(client, clock, day: date, respond=True, done=6):
-    """그날 07:00 알람 → (07:03 첫 응답·확인 멘트 완료) → 코칭 단계 done개 완료 → 종료. 프리셋 N은 6단계."""
+    """그날 07:00 알람 → (07:03 첫 응답·확인 멘트 완료) → 코칭 단계 done개 완료 → (응답한 날은 포춘까지 마침) → 종료. 프리셋 N은 6단계.
+    리포트 기상 성공 = 포춘까지 끝까지 마친 세션(11/26 회의)."""
     alarm = client.get("/alarms", headers=H).json()[0]
     clock.now = datetime(day.year, day.month, day.day, 7, 0, tzinfo=KST)
     v = client.post("/morning/sessions", json={"alarm_id": alarm["alarm_id"]}, headers=H).json()
@@ -28,7 +29,10 @@ def morning(client, clock, day: date, respond=True, done=6):
     client.post(f"{url}/coaching-token", headers=H)
     for n in range(1, done + 1):
         client.post(f"{url}/steps/{n}/verdict", json={"verdict": "done"}, headers=H)
+    if respond:
+        client.post(f"{url}/complete", headers=H)
     client.post(f"{url}/end", headers=H)
+    return url
 
 
 @pytest.fixture
@@ -196,3 +200,53 @@ def test_bedtime_rate_excludes_tonight_until_done(client, clock, week):
     r = client.get("/reports", params={"period": "week"}, headers=H).json()
     assert (r["overall"]["bed_days"], r["overall"]["bed_record_days"]) == (0, 4)   # 오늘 밤 전이라 11/2~11/5
     assert r["overall"]["bedtime_success_rate"] == 0.0 and r["overall"]["avg_bed_clock"] is None
+
+
+def test_wake_success_is_flow_completed(client, clock):
+    """11/26 회의: 리포트 기상 성공 = 포춘까지 끝까지 마친 세션. 확인 멘트를 마쳤어도 중간에 끊었으면 실패, 미뤘어도 끝까지 마쳤으면 성공."""
+    onboard(client)
+    alarm = client.get("/alarms", headers=H).json()[0]
+    clock.now = datetime(2026, 11, 2, 7, 0, tzinfo=KST)
+    sid = client.post("/morning/sessions", json={"alarm_id": alarm["alarm_id"]}, headers=H).json()["session"]["session_id"]
+    url = f"/morning/sessions/{sid}"
+    client.post(f"{url}/response", headers=H)
+    client.post(f"{url}/wake-check", headers=H)                                  # 확인은 마쳤지만
+    client.post(f"{url}/end", headers=H)                                         # 중간에 끊음
+    clock.now = datetime(2026, 11, 3, 7, 0, tzinfo=KST)
+    sid = client.post("/morning/sessions", json={"alarm_id": alarm["alarm_id"]}, headers=H).json()["session"]["session_id"]
+    url = f"/morning/sessions/{sid}"
+    client.post(f"{url}/snooze", headers=H)                                      # 미뤘지만
+    clock.now = datetime(2026, 11, 3, 7, 20, tzinfo=KST)
+    first = client.post(f"{url}/complete", headers=H).json()["session"]["flow_completed_at"]   # 끝까지 마침
+    clock.now = datetime(2026, 11, 3, 7, 30, tzinfo=KST)
+    again = client.post(f"{url}/complete", headers=H).json()["session"]
+    assert again["flow_completed_at"] == first and again["wake_success"] is False   # 처음 시각 유지, 강도용 판정은 그대로
+    clock.now = datetime(2026, 11, 3, 21, 0, tzinfo=KST)
+    t = client.get("/reports", params={"period": "week", "date": "2026-11-02"}, headers=H).json()["totals"]
+    assert (t["n_sessions"], t["wake_success_rate"]) == (2, 0.5)
+
+
+def test_reported_bedtime_overrides_bed_clock(client, clock):
+    """11/26 회의: 모닝콜에서 말한 잠든 시각(PUT /bedtime "HH:MM")이 그 밤의 취침 시각을 덮어쓴다.
+    정오 이후 = 전날 밤, 정오 전 = 자정 넘긴 그날. 밤 대화가 없던 밤도 평균 취침 시각에 들어간다. 지금보다 뒤면 422."""
+    onboard(client)
+    alarm = client.get("/alarms", headers=H).json()[0]
+    clock.now = datetime(2026, 11, 2, 23, 30, tzinfo=KST)
+    client.post("/night/token", json={}, headers=H)
+    client.post("/night/transcript", json={"transcript": [{"role": "user", "text": "잘게"}]}, headers=H)   # 11/2 밤 23:30
+    clock.now = datetime(2026, 11, 3, 7, 0, tzinfo=KST)
+    sid = client.post("/morning/sessions", json={"alarm_id": alarm["alarm_id"]}, headers=H).json()["session"]["session_id"]
+    s = client.put(f"/morning/sessions/{sid}/bedtime", json={"bed_time": "01:30"}, headers=H).json()
+    assert s["reported_bedtime"].startswith("2026-11-03T01:30")
+    s = client.put(f"/morning/sessions/{sid}/bedtime", json={"bed_time": "00:30"}, headers=H).json()   # 다시 말하면 바꿈
+    assert s["reported_bedtime"].startswith("2026-11-03T00:30")
+    r = client.put(f"/morning/sessions/{sid}/bedtime", json={"bed_time": "09:00"}, headers=H)
+    assert (r.status_code, r.json()["error"]["code"]) == (422, "BEDTIME_INVALID")
+    clock.now = datetime(2026, 11, 4, 7, 0, tzinfo=KST)                          # 11/3 밤은 밤 대화 없이 말로만
+    sid = client.post("/morning/sessions", json={"alarm_id": alarm["alarm_id"]}, headers=H).json()["session"]["session_id"]
+    assert client.put(f"/morning/sessions/{sid}/bedtime", json={"bed_time": "23:30"}, headers=H).json()[
+        "reported_bedtime"].startswith("2026-11-03T23:30")
+    clock.now = datetime(2026, 11, 4, 21, 0, tzinfo=KST)
+    t = client.get("/reports", params={"period": "week", "date": "2026-11-02"}, headers=H).json()["totals"]
+    assert t["avg_bed_clock"] == "00:00"                                          # 00:30과 23:30의 평균
+    assert t["bed_days"] == 1                                                     # 취침 성공(밤 대화)은 그대로

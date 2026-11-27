@@ -190,6 +190,9 @@ class MorningSession:
     applied_intensity: int | None = None   # 그날 실제로 쓴 강도 (자동 강도 반영 후, 11/16)
     stretch_area: str | None = None        # 그날 고른 스트레칭 부위 (11/16)
     snoozed_until: datetime | None = None  # 미루기(버튼·말)로 다시 울릴 시각 (11/22). 횟수는 snooze_count
+    reported_bedtime: datetime | None = None   # 모닝콜에서 말한 어젯밤 잠든 시각 (11/27 DB, 리포트 취침 시각을 덮어씀)
+    auto_connected: bool = False           # 이 알람을 3번 미룬 뒤 자동 연결로 시작 (11/27 DB, 기상 볼륨 학습 제외)
+    flow_completed_at: datetime | None = None  # 포춘까지 모닝콜을 끝까지 마친 시각 (11/27 DB, 리포트 기상 성공 기준)
 
 
 @dataclass(frozen=True)

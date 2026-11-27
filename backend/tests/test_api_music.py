@@ -49,3 +49,14 @@ def test_sleep_music_follows_tonight_condition(client, repos, ai):
     assert (r["music_id"], r["mood"], r["expires_in"]) == ("sleep-tired", "TIRED", 3600)
     assert client.get("/music/sleep", params={"mood": "NORMAL"}, headers=H).json()["mood"] == "NORMAL"   # 직접 고름
     assert client.get("/music/sleep", params={"mood": "SAD"}, headers=H).status_code == 422
+
+
+def test_rewake_genre_preview_before_onboarding(client, repos):
+    """11/27 앱: 장르를 고를 때 그 장르 곡을 미리 듣는다(GET /music/rewake?genre=). 설정 전(온보딩 중)에도 된다."""
+    add_music(repos, "pop1", "REWAKE", genre="POP")
+    add_music(repos, "jazz1", "REWAKE", genre="JAZZ")
+    r = client.get("/music/rewake", params={"genre": "POP"}, headers=H)
+    assert r.status_code == 200 and (r.json()["music_id"], r.json()["genre"]) == ("pop1", "POP")
+    assert client.get("/music/rewake", params={"genre": "ROCK"}, headers=H).status_code == 422
+    onboard(client)                                                                 # 설정 장르 JAZZ여도 고른 장르를 준다
+    assert client.get("/music/rewake", params={"genre": "POP"}, headers=H).json()["music_id"] == "pop1"

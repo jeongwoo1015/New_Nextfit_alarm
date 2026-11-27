@@ -109,23 +109,27 @@ def test_important_day_from_morning_events(user, ai, repos):
     assert wake_rules.is_important_day([]) is False
 
 
-def test_report_then_learn_once_at_wake_check(user, ai, repos, clock):
+def learns(ai):
+    return [c[1] for c in ai.calls if c[0] == "wake_learn"]
+
+
+def test_report_learns_at_once_and_check_only_records(user, ai, repos, clock):
+    """11/26 AI B28: 첫 반응 단계를 보고받으면 바로 한 번 학습한다(내 기록 + 전체 기록, 칸은 all 하나).
+    확인 질문은 RS_WAKE_LOG.CONFIRMED 기록만 하고 다시 학습하지 않는다. 다시 울린 알람의 보고는 무시한다."""
     night(user, SILENT)
     sid = morning(user, clock)
     url = f"/morning/sessions/{sid}"
     r = user.post(f"{url}/wake-volume", json={"start_level": 1, "received_level": 3}, headers=H).json()
     assert (r["start_level"], r["received_level"], r["confirmed"], r["user_set"]) == (1, 3, None, False)
-    assert not [c for c in ai.calls if c[0] == "wake_learn"]                       # 확인 질문 전에는 학습하지 않음
+    assert learns(ai) == [("all", 1, 3, None)] * 2
+    assert repos.personalization.get_bandit_state(f"wake:user:{USER_A}")["days"] == [["all", 1, 3, None]]
+    assert repos.personalization.get_bandit_state("wake:global")["days"] == [["all", 1, 3, None]]
     user.post(f"{url}/response", headers=H)
     user.post(f"{url}/wake-check", headers=H)
-    learned = [c[1] for c in ai.calls if c[0] == "wake_learn"]
-    assert learned == [("ok", 1, 3, True)] * 2                                  # 내 기록 + 전체 기록
-    assert repos.personalization.get_bandit_state(f"wake:user:{USER_A}")["days"] == [["ok", 1, 3, True]]
-    assert repos.personalization.get_bandit_state("wake:global")["days"] == [["ok", 1, 3, True]]
     assert repos.personalization.get_wake_log(USER_A, FRI)["confirmed"] is True
-    user.post(f"{url}/end", headers=H)                                             # 끝내도 다시 학습하지 않음
+    user.post(f"{url}/end", headers=H)
     r = user.post(f"{url}/wake-volume", json={"start_level": 2, "received_level": 2}, headers=H).json()
-    assert (r["start_level"], len([c for c in ai.calls if c[0] == "wake_learn"])) == (1, 2)   # 두 번째 보고는 무시
+    assert (r["start_level"], len(learns(ai))) == (1, 2)
 
 
 def test_rewake_before_check_is_not_confirmed(user, ai, repos, clock):
@@ -134,74 +138,58 @@ def test_rewake_before_check_is_not_confirmed(user, ai, repos, clock):
     user.post(f"{url}/wake-volume", json={"start_level": 1, "received_level": 1}, headers=H)
     user.post(f"{url}/rewake", headers=H)
     user.post(f"{url}/wake-check", headers=H)
-    assert [c[1] for c in ai.calls if c[0] == "wake_learn"][0][3] is False
-    assert repos.personalization.get_wake_log(USER_A, FRI)["confirmed"] is False
+    assert learns(ai) == [("all", 1, 1, None)] * 2                                # 재기상은 볼륨 학습에 영향 없음
+    assert repos.personalization.get_wake_log(USER_A, FRI)["confirmed"] is False  # 기록에만 남는다
 
 
-def test_snooze_after_learning_corrects_once(user, ai, repos, clock):
-    """11/24 AI B25: 확인 성공으로 학습한 뒤 루틴·콘텐츠 통화에서 미루면, 기록과 두 사다리를 한 번만 확인 실패로 고친다."""
-    night(user, SILENT)
+def test_snooze_does_not_touch_volume_learning(user, ai, repos, clock):
+    """11/26 AI B28: 3단계에서 미루기를 눌렀으면 볼륨에서는 3단계 반응 성공이다. 미루기 전후 어느 때든 학습을 고치지 않는다."""
     sid = morning(user, clock)
     url = f"/morning/sessions/{sid}"
-    user.post(f"{url}/wake-volume", json={"start_level": 1, "received_level": 3}, headers=H)
-    user.post(f"{url}/response", headers=H)
-    user.post(f"{url}/wake-check", headers=H)
-    assert repos.personalization.get_wake_log(USER_A, FRI)["confirmed"] is True
-    user.post(f"{url}/snooze", json={"minutes_later": 10}, headers=H)
-    assert [c[1] for c in ai.calls if c[0] == "wake_correct"] == [("ok", 3)] * 2              # 내 기록 + 전체 기록
-    assert repos.personalization.get_wake_log(USER_A, FRI)["confirmed"] is False
-    assert repos.personalization.get_wake_log(USER_A, FRI)["learned_at"] is not None
-    assert repos.personalization.get_bandit_state(f"wake:user:{USER_A}")["days"] == [["ok", 1, 3, False]]
-    assert repos.personalization.get_bandit_state("wake:global")["days"] == [["ok", 1, 3, False]]
-    user.post(f"{url}/snooze", headers=H)                                          # 두 번째 미루기는 고칠 것이 없음
-    assert len([c for c in ai.calls if c[0] == "wake_correct"]) == 2
-    assert len([c for c in ai.calls if c[0] == "wake_learn"]) == 2                 # 다시 학습하지도 않음
-
-
-def test_snooze_before_learning_learns_as_failure(user, ai, repos, clock):
-    """받은 뒤 확인 멘트 전에 말로 미뤘으면 미루는 순간 확인 실패로 학습하고, 고치는 호출은 없다. 다시 울려 확인해도 다시 학습하지 않는다."""
-    sid = morning(user, clock)
-    url = f"/morning/sessions/{sid}"
-    user.post(f"{url}/wake-volume", json={"start_level": 2, "received_level": 2}, headers=H)
-    user.post(f"{url}/snooze", headers=H)
-    assert [c[1][1:] for c in ai.calls if c[0] == "wake_learn"] == [(2, 2, False)] * 2
-    assert repos.personalization.get_wake_log(USER_A, FRI)["confirmed"] is False
-    user.post(f"{url}/response", headers=H)
-    user.post(f"{url}/wake-check", headers=H)
-    assert len([c for c in ai.calls if c[0] == "wake_learn"]) == 2
-    assert not [c for c in ai.calls if c[0] == "wake_correct"]
-
-
-def test_snooze_button_reports_reacted_level(user, ai, repos, clock):
-    """앱 미루기 버튼(11/25): 미루기를 먼저 보내고 미룬 순간의 단계를 보고한다. 1~2단계 실패 + 3단계 확인 실패로 바로 학습하고(5단계까지 실패로 넣지 않는다),
-    다시 울린 알람의 보고·확인·종료는 학습을 바꾸지 않는다."""
-    sid = morning(user, clock)
-    url = f"/morning/sessions/{sid}"
-    user.post(f"{url}/snooze", headers=H)
+    user.post(f"{url}/snooze", headers=H)                                         # 앱 미루기 버튼: 미룬 뒤 그 순간의 단계를 보고
     r = user.post(f"{url}/wake-volume", json={"start_level": 1, "received_level": 3}, headers=H).json()
-    assert (r["start_level"], r["received_level"], r["confirmed"]) == (1, 3, False)
-    assert [c[1][1:] for c in ai.calls if c[0] == "wake_learn"] == [(1, 3, False)] * 2
-    assert repos.personalization.get_bandit_state("wake:global")["days"] == [["unknown", 1, 3, False]]   # 밤 대화 없음 → 상황 모름
+    assert (r["received_level"], r["confirmed"]) == (3, None)
+    assert learns(ai) == [("all", 1, 3, None)] * 2
     user.post(f"{url}/wake-volume", json={"start_level": 1, "received_level": 1}, headers=H)   # 다시 울려 받음 → 무시
     user.post(f"{url}/response", headers=H)
     user.post(f"{url}/wake-check", headers=H)
+    user.post(f"{url}/snooze", json={"minutes_later": 10}, headers=H)           # 확인 뒤 말로 미뤄도 그대로
     user.post(f"{url}/end", headers=H)
-    assert len([c for c in ai.calls if c[0] == "wake_learn"]) == 2
-    assert not [c for c in ai.calls if c[0] == "wake_correct"]
-    assert repos.personalization.get_wake_log(USER_A, FRI)["received_level"] == 3
+    assert len(learns(ai)) == 2
+    log = repos.personalization.get_wake_log(USER_A, FRI)
+    assert (log["received_level"], log["confirmed"]) == (3, True)               # 확인 기록은 미루기와 상관없음
+    assert repos.personalization.get_bandit_state("wake:global")["days"] == [["all", 1, 3, None]]
 
 
-def test_not_received_learns_at_once_and_end_without_check(user, ai, repos, clock):
+def test_not_received_learns_at_once_and_end_records_unconfirmed(user, ai, repos, clock):
     sid = morning(user, clock)
     user.post(f"/morning/sessions/{sid}/wake-volume", json={"start_level": 2, "received_level": None}, headers=H)
-    assert [c[1] for c in ai.calls if c[0] == "wake_learn"][0][1:] == (2, None, False)
+    assert learns(ai)[0] == ("all", 2, None, None)
 
     clock.now = datetime(2026, 11, 7, 7, 0, tzinfo=KST)                           # 다음 날: 확인 없이 끝남
     alarm = user.get("/alarms", headers=H).json()[0]
     sid = user.post("/morning/sessions", json={"alarm_id": alarm["alarm_id"]}, headers=H).json()["session"]["session_id"]
     user.post(f"/morning/sessions/{sid}/wake-volume", json={"start_level": 1, "received_level": 2}, headers=H)
     user.post(f"/morning/sessions/{sid}/end", headers=H)
-    assert [c[1] for c in ai.calls if c[0] == "wake_learn"][-1][1:] == (1, 2, False)
+    assert learns(ai)[-1] == ("all", 1, 2, None)
+    assert repos.personalization.get_wake_log(USER_A, date(2026, 11, 7))["confirmed"] is False
+
+
+def test_auto_connected_session_is_not_learned(user, ai, repos, clock):
+    """11/26: 알람을 3번 미룬 뒤 다시 울리면 앱이 모닝콜을 자동 연결한다. 그 울림은 사용자의 반응이 아니라서
+    세션을 auto_connected로 남기고, 그 세션의 보고는 받지 않는다(409 AUTO_CONNECTED, 볼륨 학습 제외)."""
+    alarm = user.get("/alarms", headers=H).json()[0]
+    sid = morning(user, clock)
+    url = f"/morning/sessions/{sid}"
+    for _ in range(3):
+        assert user.post(f"{url}/snooze", headers=H).status_code == 200
+    s = user.post("/morning/sessions", json={"alarm_id": alarm["alarm_id"]}, headers=H).json()["session"]   # 4번째 울림
+    assert (s["snooze_count"], s["auto_connected"]) == (3, True)
+    r = user.post(f"{url}/wake-volume", json={"start_level": 1, "received_level": 5}, headers=H)
+    assert (r.status_code, r.json()["error"]["code"]) == (409, "AUTO_CONNECTED")
+    assert not learns(ai)
+    user.post(f"{url}/end", headers=H)
+    assert not learns(ai)
 
 
 def test_wake_volume_input_checks(user, clock):

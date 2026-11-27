@@ -37,9 +37,11 @@
 | `PATCH /night/records/{id}/voice-text` | 굿나잇콜 | 목소리 업로드 뒤 기기에서 받아쓴 '내일의 한마디' `{text}`(500자 이하, 빈 글 = 비우기). 목소리를 다시 올리면 비워지므로 다시 보낸다. 목소리가 없으면 409 `VOICE_NOT_UPLOADED` |
 | `POST /morning/sessions` | 알람 울림 | `{alarm_id}` → 오늘 세션 만들기(하루 한정 변경 반영) 또는 기존 세션(재연결). 응답 뒤 백그라운드에서 오늘의 포춘 문장을 만들어 세션에 저장. 이 응답에만 `morning_plan`(아침 순서표, AI B15)과 스트레칭 알람이면 `stretch_routines`(부위 12개 루틴, 루틴마다 4단계 180초, 부위를 아직 고를 수 있을 때만, AI B17)이 들어 있다. 처음 만들 때 그날 강도(`applied_intensity`, 자동 강도 반영)를 정해 저장. 굿나잇콜 알람이면 409 `NOT_WAKE_ALARM` |
 | `POST /morning/sessions/{id}/rewake` · `/response` | 모닝콜 | 8초 무응답 재기상(AI 음악) 횟수 +1 / 첫 음성 응답 시각(= 기상 성공 시각) |
-| `POST /morning/sessions/{id}/snooze` | 모닝콜 | 미루기. 버튼은 본문 없이(5분), 말로 미루기(AI `reschedule_alarm`)는 `{"minutes_later": 1~60}` 또는 `{"at_time": "HH:MM"}`(오늘, 60분 안). 응답 `snooze_count`·`snoozes_today`·`snoozed_until` → 앱이 그 시각에 한 번 다시 예약. 버튼·말 합쳐 하루 3번(넘으면 409 `SNOOZE_LIMIT`). 다시 울리면 `POST /morning/sessions`로 같은 세션. 미루면 확인 멘트 전후·통화 종류와 상관없이 그날 기상은 실패(이미 성공인 그날 세션도 되돌림, 11/24 AI B25) |
+| `POST /morning/sessions/{id}/snooze` | 모닝콜 | 미루기. 버튼은 본문 없이(5분), 말로 미루기(AI `reschedule_alarm`)는 `{"minutes_later": 1~60}` 또는 `{"at_time": "HH:MM"}`(오늘, 60분 안). 응답 `snooze_count`·`snoozes_today`·`snoozed_until` → 앱이 그 시각에 한 번 다시 예약. 버튼·말 합쳐 알람(세션)마다 3번(넘으면 409 `SNOOZE_LIMIT`, 11/26). 다시 울리면 `POST /morning/sessions`로 같은 세션이고, 3번 다 미룬 알람이 다시 울리면 앱이 자동 연결하며 서버는 그 세션을 `auto_connected`로 남긴다(기상 볼륨 학습 제외). 미루면 그날 `wake_success`는 실패(11/24 AI B25, 자동 강도용). 볼륨 학습에는 영향 없음(11/26 AI B28) |
 | `POST /morning/sessions/{id}/wake-check` | 브리핑 | 확인 멘트(2~3개)를 모두 마침 — 브리핑 Live의 `wake_check_done`을 앱이 전달. 이때 기상 성공 판정 |
-| `POST /morning/sessions/{id}/wake-volume` | 모닝콜 | 기상 볼륨 결과 `{"start_level": 1~5, "received_level": 1~5 \| null}` (전화를 받은 직후, 받지 않고 껐으면 null). 그날 처음 보고한 세션만 기록. 확인 질문을 마치거나 세션이 끝나면 서버가 한 번 학습 |
+| `POST /morning/sessions/{id}/wake-volume` | 모닝콜 | 기상 볼륨 결과 `{"start_level": 1~5, "received_level": 1~5 \| null}` (`received_level` = 받기·미루기·끄기를 누른 순간의 단계, 반응 없이 꺼졌으면 null). 그날 처음 보고한 세션만 기록하고 바로 한 번 학습(11/26 AI B28). 자동 연결 세션은 409 `AUTO_CONNECTED` |
+| `POST /morning/sessions/{id}/complete` | 종료 | 포춘까지 모닝콜의 모든 순서를 끝까지 마쳤을 때 한 번(중간에 끊었으면 부르지 않음). `flow_completed_at` 기록 = 리포트 기상 성공(11/26). 다시 불러도 처음 시각 유지 |
+| `PUT /morning/sessions/{id}/bedtime` | 모닝콜 | 모닝콜에서 말한 어젯밤 잠든 시각(AI `report_bedtime`) `{"bed_time": "HH:MM"}`. 정오 이후 = 전날 밤, 정오 전 = 그날 새벽으로 날짜를 붙여 `reported_bedtime`에 저장, 리포트 취침 시각을 덮어씀. 지금보다 뒤면 422 `BEDTIME_INVALID` |
 | `PUT /morning/sessions/{id}/steps/{n}/score` | 게임 | 게임 기록 `{"score": 주고받은 횟수}`(앱이 셈, 이어 하기로 다시 보내면 바뀜). 게임(QUIZ) 세션만, 아니면 422 `NOT_GAME_SESSION`. 응답 `best_score`(같은 게임 최고 기록)·`is_best`. 말한 단어는 서버에 저장하지 않음(기기에만, 11/23) |
 | `POST /wordchain/turn` | 게임 | 끝말잇기 글자 판정(AI B26) `{"words": [이어진 단어…], "word": "이번 단어"}` → `{"valid", "next", "reason"}`. 맞음 `next`=넥스티 단어(null이면 이을 단어 없음 = 넥스티 패배), 틀림 `reason`(화면에 그대로). AI가 판정하지 못하면 503 `WORDCHAIN_FAILED`, AI 없음 503 `AI_UNAVAILABLE`. 보통 1초 안팎, 앱 요청대로 5초 안에 답하도록 서버는 4초 예산 안에서 멈춤(넘으면 `WORDCHAIN_FAILED`). 기록 저장 안 함 |
 | `GET /wake-volume/next` | 모닝콜 | 다음 아침 첫 모닝콜의 시작 볼륨 `start_level`과 재기상 음악 `rewake_level`(+1). 앱이 밤 대화 뒤·앱을 열 때 받아 두고 울릴 때 사용(없으면 1단계). 다음 알람이 없으면 404 `NO_UPCOMING_ALARM` |
@@ -50,15 +52,15 @@
 | `PATCH /morning/sessions/{id}/steps/{n}` | 체크리스트 | 직접 체크·건너뛰기·해제 |
 | `POST /morning/sessions/{id}/stretch-area` | 스트레칭 코칭 | Live `select_stretch_area {area}` 전달(부위 12개, 옛 5개 값 `NECK_SHOULDER` 등은 가까운 새 부위로 바꿔 저장). 아직 판정하지 않은 단계를 그 부위 루틴(1번부터)으로 바꾸고 `stretch_area` 저장. 판정한 단계가 있거나 이미 다른 부위를 골랐으면 409 `STRETCH_AREA_LOCKED`(앱은 AI에 ok만 돌려주고 기존 단계로 진행) |
 | `PATCH /morning/sessions/{id}/steps/{n}/duration` | 코칭 | 오늘 진행 중 변경("오늘 스트레칭 좀 적게", Live 함수를 앱이 전달). PENDING만, 30초 단위, 오늘 합계 ≤ 상한, 0초 = 오늘만 빼기 |
-| `POST /morning/sessions/{id}/end` | 종료 | `end_session` 또는 통화 종료. 기상 성공 기록 |
+| `POST /morning/sessions/{id}/end` | 종료 | `end_session` 또는 통화 종료(중간에 끊어도). 기상 볼륨 확인 기록(`confirmed`), 코칭 강도 보상 |
 | `GET /morning/sessions/{id}` · `GET /morning/sessions/today` | 루틴 화면 | 세션, 단계, 진행 개수(`finished` = "완료!") |
-| `GET /reports?period=week\|month\|year&date=` | 리포트 | 상단 `overall` = 전체 기간 누적(기상 성공률·루틴 성공률·취침 성공률 `bedtime_success_rate`), `totals`·`series` = 선택한 기간(평균 기상 시각, 루틴 완료 52/70, 그래프 칸 주: 월~일 / 월: 1주~5주 / 연: 1~12월), 현재·최장 연속 달성일. 취침(11/06): 성공률 = 밤 대화를 마친 날 ÷ 기록 기간(첫 기록일~어제, 오늘 밤을 마쳤으면 오늘까지), `avg_bed_clock` = 밤 기록이 처음 저장된 시각의 평균(자정 넘김 이어서). `wake_levels` = 나의 기상 단계 변화(이 기간 중 오늘까지 날짜별 시작·받은 단계, `user_set`) |
+| `GET /reports?period=week\|month\|year&date=` | 리포트 | 상단 `overall` = 전체 기간 누적(기상 성공률 = 포춘까지 끝까지 마친 세션 비율(11/26, `flow_completed_at`)·루틴 성공률·취침 성공률 `bedtime_success_rate`), `totals`·`series` = 선택한 기간(평균 기상 시각, 루틴 완료 52/70, 그래프 칸 주: 월~일 / 월: 1주~5주 / 연: 1~12월), 현재·최장 연속 달성일. 취침(11/06): 성공률 = 밤 대화를 마친 날 ÷ 기록 기간(첫 기록일~어제, 오늘 밤을 마쳤으면 오늘까지), `avg_bed_clock` = 밤 기록이 처음 저장된 시각의 평균(자정 넘김 이어서), 모닝콜에서 잠든 시각을 말한 밤은 그 값(11/26). `wake_levels` = 나의 기상 단계 변화(이 기간 중 오늘까지 날짜별 시작·받은 단계, `user_set`) |
 | `GET /contents/steps?date=YYYY-MM-DD` | 콘텐츠 화면 | 그날 콘텐츠 세션 단계 `{date, steps: [{session_id, step_order, step_name, step_status, content_type, content_option, stretch_area, script, words, score}]}`. `script` = 동작 설명·영어 문장·시작 단어, `score` = 게임 기록(주고받은 횟수), `words`는 서버에 저장하지 않아 빈 목록(끝말잇기 단어는 기기 기록, 11/23) |
 | `GET /diary/calendar?month=YYYY-MM` | 한 줄 일기 | 날짜별 사진 URL 또는 루틴 성공률, 세션·밤 기록 여부 |
 | `GET /diary/{date}` | 일기 상세 | 그날 밤 기록(한 줄 일기)·아침 세션과 단계·사진·하루 요약. 세션은 알람이 먼저 울린 순 |
 | `PUT /diary/{date}/photo` | 일기 사진 | jpg를 본문 그대로(`Content-Type: image/jpeg`, 10MB 이하, 미래 날짜 불가). 다시 올리면 덮어씀 |
 | `DELETE /diary/{date}/photo` | 일기 사진 | 대표 사진 지우기(행과 파일). 사진이 없어도 204 |
-| `GET /music/rewake` | 모닝콜 | 재기상 음악(설정의 음악 장르) 서명 URL, 12시간 유효(밤에 미리 받아 두기). 없으면 404 `MUSIC_NOT_FOUND` → 기본 알람음 |
+| `GET /music/rewake?genre=` | 모닝콜 | 재기상 음악(설정의 음악 장르) 서명 URL, 12시간 유효(밤에 미리 받아 두기). `genre`를 주면 그 장르 곡(장르 고를 때 미리 듣기, 온보딩 전에도 됨). 없으면 404 `MUSIC_NOT_FOUND` → 기본 알람음 |
 | `GET /music/sleep?mood=` | 굿나잇콜 | 수면 음악(무드 = 오늘 밤 기록의 컨디션, 없으면 NORMAL) 서명 URL |
 
 오류 응답은 모두 `{"error": {"code", "message", "details?"}}`. 전체 명세는 서버 실행 후 `/docs`(OpenAPI).
@@ -140,11 +142,16 @@ AI 쪽 브리핑 입력의 `coaching_min`은 0(코칭 안 함)/10(진행)으로�
 1. 밤 토큰(`POST /night/token`): 내일 시작 단계를 정한다. 어제보다 올라가면 밤 입력에 이전 단계를 넣어 AI가 알린다. 내일 오전(12시 전) 일정이 있으면 중요한 날(탐색 안 함).
 2. 밤 대화 저장(`POST /night/transcript`): AI가 올린다고 실제로 말했는지 확인해 확정한다. 안 알렸으면 어제 단계를 유지, 대화로 바꾼 값(`/settings/ai-change`)은 따른다.
 3. `GET /wake-volume/next`: 밤 대화가 없던 날은 이때 정하고 올리지 않는다. 같은 날 다시 정할 때는 같은 입력(prefs의 `sleep_minutes`·`important_day`)과 seed(`user|날짜`)라 밤에 알린 추천이 바뀌지 않는다.
-4. 알람이 울리면(세션 시작) `wake_next_level`을 비운다. 앱 보고 → 확인 질문을 마친 때(재기상·미루기 없음 = 확인 성공), 확인 없이 끝난 때, 받지 않은 때 한 번만 학습(`wake:user:{id}`, `wake:global`).
-   11/24(AI B25): 그날 미뤘으면 확인 실패로 학습한다. 이미 확인 성공으로 학습한 뒤 미루면 기록의 `confirmed`를 False로 바꾸고 두 사다리의 받은 단계 칸을 성공 1 → 실패 1로 한 번만 옮긴다(`correct_wake`, AI에 되돌리는 함수가 없어 서버가 `WakeLadder` 칸을 직접 고침).
+4. 알람이 울리면(세션 시작) `wake_next_level`을 비운다. 앱이 첫 반응 단계(받기·미루기·끄기를 누른 순간)를 보고하면 바로 한 번만 학습한다(`wake:user:{id}`, `wake:global`, 칸은 `all` 하나).
+   11/26(AI B28): 볼륨은 첫 반응 단계만 학습한다. 미루기·재기상·확인 질문 답변은 볼륨 학습에 넣지 않는다(11/24 B25의 "미루면 볼륨도 실패"와 되돌리기 `correct_wake`는 없앰).
+   `confirmed`(확인 응답 + 재기상 없음)는 확인 질문을 마치거나 세션이 끝날 때 기록만 한다. 수면 시간은 상황으로 나누지 않고 `prefs`에 사후 분석용으로만 남긴다.
+   3번 미룬 뒤 자동 연결로 시작한 세션(`auto_connected`)은 보고·학습하지 않는다.
 AI를 쓸 수 없으면 사용자 값 → 직전 단계 → 1단계로 울리고 학습은 하지 않는다.
 
-## 기상 성공 기준 (11/01 팀 확정, 11/24 미루기 규칙 변경)
+## 기상 성공 기준 (11/01 팀 확정, 11/24 미루기 규칙 변경, 11/26 리포트 기준 변경)
+**리포트·일기의 기상 성공(11/26 회의)** = 포춘까지 모닝콜을 끝까지 마친 세션(`flow_completed_at`, 앱이 `POST .../complete`로 알림). 미뤘어도 끝까지 마쳤으면 성공, 확인 멘트를 마쳤어도 중간에 끊으면 실패.
+아래 `wake_success`(확인 멘트 기준)는 자동 강도 계산(AI `today_intensity`)과 AI 입력에 그대로 쓴다.
+
 브리핑 전 확인 멘트 2~3개(예: "잘 주무셨어요?")에 모두 응답했고, 그때까지 ① 스누즈("5분 뒤 다시 울리기")를 한 번도 하지 않았고
 ② 8초 무응답으로 AI 재기상 음악이 한 번도 나오지 않았으면 성공. 기상 성공 시각은 첫 응답(`first_response_at`).
 판정은 확인 멘트를 마친 순간(`POST .../wake-check`, `wake_checked_at`) 한 번만 하고, 그 뒤의 재기상은 판정을 바꾸지 않는다.

@@ -41,10 +41,11 @@ STRETCH_AREAS = ("FULL", "NECK", "SHOULDER", "CHEST_BACK", "WRIST_HAND", "ELBOW_
 # 예전 앱이 보내면 바꿔 읽고, 이미 저장된 세션 값은 그대로 둔다
 LEGACY_STRETCH_AREAS = {"NECK_SHOULDER": "NECK", "ARM_WRIST": "WRIST_HAND", "BACK_HIP": "LOW_BACK", "LEG": "THIGH"}
 STRETCH_AREA_INPUTS = STRETCH_AREAS + tuple(LEGACY_STRETCH_AREAS)   # 요청에서 받는 값
-# 미루기 (11/20 회의, 11/22 DB): 버튼·말 모두 snooze_count 하나로 세고 하루 3번까지. AI ai.live.tools의 SNOOZE_MAX_*와 같은 값
+# 미루기 (11/20 회의, 11/22 DB, 11/26 회의): 버튼·말 모두 snooze_count 하나로 세고 알람(세션)마다 3번까지.
+# 3번 다 미룬 알람이 다시 울리면 앱이 모닝콜을 자동 연결한다(AUTO_CONNECTED). AI ai.live.tools의 SNOOZE_MAX_*와 같은 값
 SNOOZE_DEFAULT_MIN = 5              # 버튼 "5분 뒤 다시 울리기" (시간을 보내지 않을 때)
 SNOOZE_MAX_MIN = 60                 # 지금부터 60분 안
-SNOOZE_MAX_PER_DAY = 3              # 그날 모든 모닝 세션의 미루기 합계
+SNOOZE_MAX_PER_ALARM = 3            # 한 세션(그날 그 알람)의 미루기 횟수 (11/26: 하루 합계 → 알람마다)
 WAKE_LEVELS = (1, 2, 3, 4, 5)       # 기상 알람 볼륨 단계 (11/22 RS_USER_SETTING.WAKE_*_LEVEL, 앱 AlarmSoundPlayer.MAX_LEVEL = 5)
 # 대화로 바꿀 수 있는 설정 (11/20 회의 4, AI update_setting). value는 AI가 글자로 보낸다
 AI_SETTING_FIELDS = ("music_genre", "personality", "intensity", "wake_volume")

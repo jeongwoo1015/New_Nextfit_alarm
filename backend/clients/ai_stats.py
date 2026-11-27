@@ -1,7 +1,7 @@
 """리포트·일기 통계 — AI 파트 `ai.personalization.user_model`을 부른다 (Gemini 키·네트워크 불필요).
 
 개인화 판단과 리포트가 같은 계산을 쓰도록 AI 파트가 만든 함수다(기상 성공률, 평균 기상 시간, 루틴 완료율, 연속 달성일,
-주·월·연 칸). 가정(기상 시각 = 첫 응답, 세션 없는 날은 건너뛰되 3일 넘게 비면 연속이 끊김 등)도 그쪽 설명을 따른다.
+주·월·연 칸). 기상 성공은 포춘까지 끝까지 마친 세션으로 바꿔 넘긴다(11/26 회의, _report_row). 가정(기상 시각 = 첫 응답, 세션 없는 날은 건너뛰되 3일 넘게 비면 연속이 끊김 등)도 그쪽 설명을 따른다.
 """
 from dataclasses import asdict, dataclass
 from datetime import date
@@ -51,9 +51,15 @@ def _ai():
     return records, user_model
 
 
+def _report_row(s) -> dict:
+    """리포트·일기의 기상 성공 = 포춘까지 모닝콜을 끝까지 마친 세션(FLOW_COMPLETED_AT, 11/26 회의).
+    RS_MORNING_SESSION.WAKE_SUCCESS(확인 멘트 기준, 미루면 실패)는 자동 강도 계산용으로 그대로 두고, 통계에 넘길 때만 바꾼다."""
+    return {**asdict(s), "wake_success": s.flow_completed_at is not None}
+
+
 def _sessions(rec: RecentRecords):
     records, _ = _ai()
-    return records.build_sessions([asdict(s) for s in rec.sessions], [asdict(s) for s in rec.steps],
+    return records.build_sessions([_report_row(s) for s in rec.sessions], [asdict(s) for s in rec.steps],
                                   [asdict(n) for n in rec.nights])
 
 

@@ -19,10 +19,11 @@ def _out(t: MusicTrack) -> MusicOut:
 
 
 @router.get("/rewake", response_model=MusicOut)
-def rewake_music(user_id: str = Depends(current_user_id), svc: MusicService = Depends(music_service)):
+def rewake_music(genre: Literal[codes.MUSIC_GENRES] | None = Query(None, description="장르를 고를 때 미리 듣기. 비우면 설정의 장르"),
+                 user_id: str = Depends(current_user_id), svc: MusicService = Depends(music_service)):
     """8초 무응답 때 트는 재기상 음악 (설정의 음악 장르). 밤에 미리 받아 두면 아침 네트워크와 상관없이 울린다.
-    없으면 404 MUSIC_NOT_FOUND → 기본 알람음·진동으로."""
-    return _out(svc.rewake(user_id))
+    genre를 주면 그 장르의 곡(온보딩·설정에서 미리 듣기, 설정 전에도 됨). 없으면 404 MUSIC_NOT_FOUND → 기본 알람음·진동으로."""
+    return _out(svc.rewake(user_id, genre))
 
 
 @router.get("/sleep", response_model=MusicOut)

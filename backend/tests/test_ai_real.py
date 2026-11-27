@@ -209,7 +209,7 @@ def test_wake_volume_uses_ai_module():
     w = WakeInputs(sleep_minutes=450, previous_level=1)
     a = gw.decide_wake_level("u1", date(2026, 11, 6), None, None, w, "u1|2026-11-06")
     b = gw.decide_wake_level("u1", date(2026, 11, 6), None, None, w, "u1|2026-11-06")
-    assert a == b and a.row["context_key"] == "ok" and a.row["applied_level"] in (1, 3)
+    assert a == b and a.row["context_key"] == "all" and a.row["applied_level"] in (1, 3)      # 11/26 B28: 수면 상황 없음
     assert set(a.row) >= {"recommended_level", "applied_level", "source", "state", "explored", "propensity", "previous_level", "prefs"}
     held = gw.decide_wake_level("u1", date(2026, 11, 6), None, None, WakeInputs(450, previous_level=1, notified=False), "s")
     assert held.row["applied_level"] == 1 and held.raise_pending is False

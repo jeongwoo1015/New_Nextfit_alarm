@@ -102,14 +102,13 @@ def test_stretch_area_codes_match_ai():
     assert all(codes.normalize_stretch_area(a) == normalize_area(a) for a in codes.STRETCH_AREA_INPUTS)
 
 
-def test_real_gateway_correct_wake_moves_one_success_to_failure():
-    """서버가 AI WakeLadder 칸을 직접 고친다(11/24 미루기). AI 저장 형식이 바뀌면 여기서 깨진다."""
-    from ai.personalization.wake_volume import WakeLadder
+def test_real_gateway_learns_first_reaction_only():
+    """11/26 AI B28: 확인 여부(confirmed)와 상관없이 첫 반응 단계를 성공으로, 그 앞 단계를 실패로 배운다(칸은 all 하나)."""
+    from ai.personalization.wake_volume import CONTEXT, WakeLadder
     gw = RealAIGateway("k")
-    state = gw.learn_wake(None, "ok", 1, 3, True)
-    state = gw.learn_wake(state, "ok", 1, 3, True)
-    fixed = gw.correct_wake(state, "ok", 3)
-    ladder = WakeLadder.from_dict(fixed)
-    assert ladder.get("ok", 3) == (1, 1) and ladder.get("ok", 1) == (0, 2)   # 받은 단계만 바뀌고 앞 단계 실패는 그대로
-    assert gw.correct_wake(gw.correct_wake(fixed, "ok", 3), "ok", 3) is None  # 옮길 성공이 없으면 None
-    assert gw.correct_wake(None, "short", 2) is None
+    assert CONTEXT == "all"
+    ladder = WakeLadder.from_dict(gw.learn_wake(None, "all", 1, 3, False))
+    assert (ladder.get("all", 1), ladder.get("all", 2), ladder.get("all", 3)) == ((0, 1), (0, 1), (1, 0))
+    ladder = WakeLadder.from_dict(gw.learn_wake(None, "all", 2, None, None))
+    assert [ladder.get("all", lv) for lv in (2, 3, 4, 5)] == [(0, 1)] * 4            # 끝까지 반응 없음
+    assert gw.learn_wake(None, "all", 3, 2, None) is None                            # 시작보다 낮게 반응할 수 없음

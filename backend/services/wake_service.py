@@ -4,7 +4,7 @@
 1. 밤 대화 토큰: 내일 시작 단계를 정한다(올리는 날이면 AI가 알리도록 밤 입력에 넣는다).
 2. 밤 대화 저장: AI가 올린다고 실제로 말했는지 보고 확정한다(안 알렸으면 직전 단계 유지, 대화로 바꾼 값은 따른다).
 3. GET /wake-volume/next: 앱이 미리 받아 둔다. 밤 대화가 없던 날은 이때 정한다(알리지 못했으니 올리지 않는다).
-4. 아침: 앱이 시작·받은 단계를 보고하고, 확인 질문을 마치거나 세션이 끝나면 한 번만 학습한다.
+4. 아침: 앱이 시작 단계와 첫 반응 단계를 보고하면 바로 한 번 학습한다(11/26 AI B28, 미루기·재기상·확인 답변은 볼륨 학습에서 뺀다).
 
 같은 날 다시 정할 때는 같은 입력(prefs에 남긴 수면 시간·중요한 날)과 같은 seed로 AI를 불러 밤에 알린 추천값이 바뀌지 않게 한다.
 개인화가 실패해도 알람·대화는 이어진다(로그만 남긴다).
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from backend.clients.ai_gateway import AIGateway, SettingsView, WakeInputs, settings_view
-from backend.core.errors import NotFound
+from backend.core.errors import Conflict, NotFound
 from backend.core.timeutil import apply_date, now_kst, record_date, to_kst
 from backend.domain import wake_rules
 from backend.domain.alarm_rules import pick_override_alarm, ring_at
@@ -23,6 +23,7 @@ from backend.repositories.registry import Repositories
 
 log = logging.getLogger(__name__)
 GLOBAL_KEY = "wake:global"
+CONTEXT = "all"           # 11/26 AI B28: 수면 상황을 나누지 않아 학습 칸은 하나 (ai.personalization.wake_volume.CONTEXT)
 
 
 def user_key(user_id: str) -> str:
@@ -138,31 +139,30 @@ class WakeService:
             log.exception("다음 알람 볼륨 비우기 실패 user=%s", user_id)
 
     def report(self, user_id: str, s: MorningSession, start_level: int, received_level: int | None) -> dict:
-        """④ 앱 보고: 시작 단계와 받은 단계(못 받았으면 None). 그날 처음 보고한 세션만 기록한다(다시 울림·다른 알람은 그대로)."""
+        """④ 앱 보고: 시작 단계와 첫 반응 단계(받기·미루기·끄기 버튼을 누른 순간의 단계, 반응 없이 꺼졌으면 None).
+        그날 처음 보고한 세션만 기록하고(다시 울림·다른 알람은 그대로) 바로 학습한다. 11/26 결정(AI B28): 볼륨은 첫 반응 단계만
+        보므로 확인 질문·미루기·재기상을 기다릴 필요가 없다. 자동 연결로 시작한 세션은 사용자의 반응이 아니라서 기록하지 않는다."""
         row = self.r.personalization.get_wake_log(user_id, s.session_date)
         if row and row.get("start_level") is not None:
             return row
+        if s.auto_connected:
+            raise Conflict("자동 연결로 시작한 모닝콜은 기상 볼륨을 기록하지 않아요", "AUTO_CONNECTED")
         row = self.r.personalization.save_wake_result(user_id, s.session_date, start_level, received_level, None, s.session_id)
-        if (received_level is None or s.wake_checked_at is not None or s.session_end_at is not None
-                or self._snoozes_today(user_id, s.session_date) > 0):   # 미룬 뒤 보고(앱 미루기 버튼: 미룬 순간의 단계)는 결과가 정해졌으니 바로 학습
-            self.learn(user_id, s)
+        self.learn(user_id, s)
         return self.r.personalization.get_wake_log(user_id, s.session_date) or row
 
     def learn(self, user_id: str, s: MorningSession) -> bool:
-        """한 번만 학습: 받지 못한 날, 확인 질문을 마친 때, 확인 없이 세션이 끝난 때. 내 기록과 전체 기록을 함께 갱신한다."""
+        """그날 기록을 한 번만 학습한다(첫 반응 단계, AI B28). 내 기록과 전체 기록을 함께 갱신한다. 자동 연결 세션은 학습하지 않는다."""
         try:
             row = self.r.personalization.get_wake_log(user_id, s.session_date)
-            if not row or row.get("start_level") is None or row.get("session_id") != s.session_id or row.get("learned_at"):
+            if (s.auto_connected or not row or row.get("start_level") is None or row.get("session_id") != s.session_id
+                    or row.get("learned_at")):
                 return False
-            ok = row.get("received_level") is not None and wake_rules.confirmed(s, self._snoozes_today(user_id, s.session_date))
             if not self.r.personalization.mark_wake_learned(user_id, s.session_date):
                 return False
-            self.r.personalization.save_wake_result(user_id, s.session_date, row["start_level"], row.get("received_level"), ok,
-                                                    s.session_id)
-            ctx = row.get("context_key") or "unknown"
-            for key, owner in ((user_key(user_id), user_id), (GLOBAL_KEY, None)):
-                state = self.ai.learn_wake(self.r.personalization.get_bandit_state(key), ctx, row["start_level"],
-                                           row.get("received_level"), ok)
+            for key, owner in ((user_key(user_id), user_id), (GLOBAL_KEY, None)):   # 행에 남은 옛 상황 칸(short/ok)과 상관없이 하나의 칸
+                state = self.ai.learn_wake(self.r.personalization.get_bandit_state(key), CONTEXT, row["start_level"],
+                                           row.get("received_level"), None)
                 if state is not None:
                     self.r.personalization.save_bandit_state(key, state, owner)
             return True
@@ -170,29 +170,17 @@ class WakeService:
             log.exception("기상 볼륨 학습 실패 user=%s session=%s", user_id, s.session_id)
             return False
 
-    def _snoozes_today(self, user_id: str, d: date) -> int:
-        return sum(x.snooze_count for x in self.r.sessions.recent_records(user_id, d, d).sessions)
-
-    def on_snooze(self, user_id: str, s: MorningSession) -> bool:
-        """미루기를 받았을 때(11/24 AI B25). 미룬 날은 받은 단계도 실패로 센다(11/25 결정, 볼륨 학습에서도 실패).
-        - 받은 단계를 보고했는데 아직 학습 전이면 지금 확인 실패로 학습한다(다시 울린 알람에서 확인·종료가 오지 않아도 남도록).
-        - 이미 확인 성공으로 학습했으면 한 번만 확인 실패로 고친다: 기록의 confirmed를 먼저 False로 바꿔 두 번 고치지 않게 하고,
-          내 기록·전체 기록의 받은 단계 칸을 성공 1 → 실패 1로 옮긴다.
-        아직 보고 전이면 할 일이 없다(보고가 오면 바로 확인 실패로 학습한다). 실패해도 미루기는 그대로 된다."""
-        d = s.session_date
+    def finish(self, user_id: str, s: MorningSession) -> None:
+        """확인 질문을 마쳤거나 세션이 끝났을 때: 학습이 빠졌으면 하고, RS_WAKE_LOG.CONFIRMED(확인 응답·재기상 없음)를 기록한다.
+        CONFIRMED는 기록용이라 볼륨 학습에 다시 반영하지 않는다(AI B28). 실패해도 아침 흐름은 이어진다."""
         try:
-            row = self.r.personalization.get_wake_log(user_id, d)
-            if row and row.get("start_level") is not None and row.get("received_level") is not None and not row.get("learned_at"):
-                return self.learn(user_id, s)
-            if not row or not row.get("learned_at") or row.get("confirmed") is not True or row.get("received_level") is None:
-                return False
-            self.r.personalization.save_wake_result(user_id, d, row["start_level"], row["received_level"], False, row.get("session_id"))
-            ctx = row.get("context_key") or "unknown"
-            for key, owner in ((user_key(user_id), user_id), (GLOBAL_KEY, None)):
-                state = self.ai.correct_wake(self.r.personalization.get_bandit_state(key), ctx, row["received_level"])
-                if state is not None:
-                    self.r.personalization.save_bandit_state(key, state, owner)
-            return True
+            self.learn(user_id, s)
+            row = self.r.personalization.get_wake_log(user_id, s.session_date)
+            if not row or row.get("session_id") != s.session_id or row.get("start_level") is None:
+                return
+            ok = wake_rules.confirmed(s)
+            if row.get("confirmed") is not ok:
+                self.r.personalization.save_wake_result(user_id, s.session_date, row["start_level"], row.get("received_level"), ok,
+                                                        s.session_id)
         except Exception:
-            log.exception("기상 볼륨 학습 수정 실패 user=%s day=%s", user_id, d)
-            return False
+            log.exception("기상 볼륨 확인 기록 실패 user=%s session=%s", user_id, s.session_id)

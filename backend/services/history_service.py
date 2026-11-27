@@ -116,14 +116,21 @@ class HistoryService:
         self.r.storage.delete_photo(user_id, day)
 
 
+def _rang(s) -> float:
+    return s.alarm_rang_at.timestamp() if s.alarm_rang_at else 0
+
+
 def _with_bedtime(rep: ai_stats.Report, rec, today: date) -> ai_stats.Report:
     """리포트에 취침 통계(팀 결정 11/06)를 더한다: 상단은 전체 기록, 합계·그래프 칸은 각자의 범위."""
     nights = [n for n in rec.nights if n.record_date <= today]
     first = min([s.session_date for s in rec.sessions if s.session_date <= today] + [n.record_date for n in nights], default=None)
     span = bedtime_rules.record_span(first, nights, today)
 
+    reported = {s.session_date - timedelta(days=1): s.reported_bedtime for s in sorted(rec.sessions, key=_rang)
+                if s.reported_bedtime is not None and s.session_date <= today}     # 같은 밤에 여러 번 말했으면 나중 알람 값
+
     def add(t, start, end):
-        return replace(t, **asdict(bedtime_rules.bed_stats(nights, span, start, end)))
+        return replace(t, **asdict(bedtime_rules.bed_stats(nights, span, start, end, reported)))
 
     return replace(rep, overall=add(rep.overall, ALL_HISTORY_SINCE, today + timedelta(days=1)),
                    totals=add(rep.totals, rep.start, rep.end),

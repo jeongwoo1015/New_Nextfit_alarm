@@ -33,12 +33,15 @@ class MusicService:
             raise NotFound(f"{what}이 아직 준비되지 않았어요", "MUSIC_NOT_FOUND")
         return MusicTrack(music, url, expires_in)
 
-    def rewake(self, user_id: str) -> MusicTrack:
-        """8초 무응답 때 트는 재기상 음악. 설정의 음악 장르(RS_USER_SETTING.MUSIC_GENRE)."""
-        setting = self.r.users.get_setting(user_id)
-        if not setting:
-            raise NotFound("온보딩을 먼저 마쳐 주세요", "SETTING_NOT_FOUND")
-        return self._track(self.r.presets.pick_music("REWAKE", genre=setting.music_genre), REWAKE_URL_SEC, "재기상 음악")
+    def rewake(self, user_id: str, genre: str | None = None) -> MusicTrack:
+        """8초 무응답 때 트는 재기상 음악. 설정의 음악 장르(RS_USER_SETTING.MUSIC_GENRE).
+        genre를 주면 그 장르(장르를 고를 때 미리 듣기, 11/27 앱 요청). 이때는 설정이 없어도 된다(온보딩 중)."""
+        if genre is None:
+            setting = self.r.users.get_setting(user_id)
+            if not setting:
+                raise NotFound("온보딩을 먼저 마쳐 주세요", "SETTING_NOT_FOUND")
+            genre = setting.music_genre
+        return self._track(self.r.presets.pick_music("REWAKE", genre=genre), REWAKE_URL_SEC, "재기상 음악")
 
     def sleep(self, user_id: str, mood: str | None = None) -> MusicTrack:
         """밤 대화 뒤 트는 수면 음악. 무드 = 오늘 밤 기록의 컨디션(CONDITION_LABEL), 없으면 NORMAL.

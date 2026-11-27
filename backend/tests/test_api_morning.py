@@ -346,8 +346,8 @@ def test_voice_snooze_minutes_or_time(client, morning, clock):
     assert client.get(url(v), headers=auth(USER_A)).json()["session"]["snooze_count"] == 2   # 거절된 요청은 세지 않음
 
 
-def test_snooze_limit_three_per_day_across_alarms(client, morning, clock, ai):
-    """버튼·말 합쳐 그날 모든 모닝 세션에서 3번까지. 브리핑 입력에 오늘 횟수를 넘긴다."""
+def test_snooze_limit_three_per_alarm(client, morning, clock, ai):
+    """버튼·말 합쳐 알람(세션)마다 3번까지(11/26 회의). 다른 알람은 따로 센다. AI 입력에도 그 알람의 횟수를 넘긴다."""
     v = start(client, morning).json()
     client.post(url(v, "/briefing-token"), json={}, headers=auth(USER_A))
     assert [c for c in ai.calls if c[0] == "briefing_token"][-1][1].snoozes_today == 0
@@ -357,12 +357,16 @@ def test_snooze_limit_three_per_day_across_alarms(client, morning, clock, ai):
     other = client.post("/alarms", json={"alarm_time": "07:30", "morning_call_type": "CONTENT", "content_type": "QUIZ",
                                          "content_option": "WORDCHAIN"}, headers=auth(USER_A)).json()
     w = start(client, other).json()
-    assert client.post(url(w, "/snooze"), headers=auth(USER_A)).json()["snoozes_today"] == 3
-    res = client.post(url(v, "/snooze"), headers=auth(USER_A))
+    first = client.post(url(w, "/snooze"), headers=auth(USER_A)).json()
+    assert (first["snooze_count"], first["snoozes_today"]) == (1, 3)              # 다른 알람은 1번째, 오늘 합계는 3
+    third = client.post(url(v, "/snooze"), headers=auth(USER_A)).json()
+    assert (third["snooze_count"], third["snoozes_today"]) == (3, 4)
+    res = client.post(url(v, "/snooze"), headers=auth(USER_A))                    # 첫 알람은 3번을 다 씀
     assert res.status_code == 409 and res.json()["error"]["code"] == "SNOOZE_LIMIT"
-    client.post(url(v, "/briefing-token"), json={}, headers=auth(USER_A))
+    assert client.post(url(w, "/snooze"), headers=auth(USER_A)).json()["snooze_count"] == 2
+    client.post(url(v, "/briefing-token"), json={}, headers=auth(USER_A))     # AI 입력은 이 알람의 횟수 (말로 미루기 한도도 알람마다)
     assert [c for c in ai.calls if c[0] == "briefing_token"][-1][1].snoozes_today == 3
-    client.post(url(v, "/coaching-token"), headers=auth(USER_A))                 # 루틴·콘텐츠 통화에도 같은 값 (AI B25)
-    assert [c for c in ai.calls if c[0] == "coaching_token"][-1][1].snoozes_today == 3
+    client.post(url(w, "/coaching-token"), headers=auth(USER_A))                 # 루틴·콘텐츠 통화에도 같은 기준 (AI B25)
+    assert [c for c in ai.calls if c[0] == "coaching_token"][-1][1].snoozes_today == 2
     clock.now = datetime(2026, 11, 7, 7, 0, tzinfo=KST)                           # 다음 날은 다시 3번
     assert client.post(url(start(client, morning).json(), "/snooze"), headers=auth(USER_A)).json()["snoozes_today"] == 1

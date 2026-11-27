@@ -6,7 +6,7 @@ from backend.clients.ai_gateway import CalendarEvent
 from backend.core.auth import current_user_id
 from backend.services.morning_service import Location, MorningService, SessionView
 
-from .schemas import (BriefingTokenIn, CoachingTokenOut, FortuneTokenOut, LiveTokenOut, ProgressOut, RewakeOut, SessionOut, SessionStartIn,
+from .schemas import (BedtimeIn, BriefingTokenIn, CoachingTokenOut, FortuneTokenOut, LiveTokenOut, ProgressOut, RewakeOut, SessionOut, SessionStartIn,
                       GameScoreIn, GameScoreOut, SessionViewOut, SnoozeIn, SnoozeOut, WakeLogOut, WakeVolumeIn, StepDurationIn, StepOut, StepStatusIn, StretchAreaIn, StretchStepOut, VerdictIn)
 
 router = APIRouter(prefix="/morning", tags=["morning"])
@@ -59,8 +59,8 @@ def snooze(session_id: str, body: SnoozeIn | None = None, user_id: str = Depends
            svc: MorningService = Depends(morning_service)):
     """미루기. 버튼 "5분 뒤 다시 울리기"는 본문 없이, 말로 미루기(AI reschedule_alarm)는 {"minutes_later": 10} 또는 {"at_time": "09:00"}.
     앱은 응답의 snoozed_until에 알람을 한 번 다시 예약하고, 다시 울리면 POST /morning/sessions로 같은 세션을 받는다.
-    버튼·말 합쳐 하루 3번까지(넘으면 409 SNOOZE_LIMIT), at_time이 지났거나 60분 뒤면 422 SNOOZE_TIME_INVALID.
-    한 번이라도 하면 그날은 기상 실패."""
+    버튼·말 합쳐 알람(세션)마다 3번까지(넘으면 409 SNOOZE_LIMIT), at_time이 지났거나 60분 뒤면 422 SNOOZE_TIME_INVALID.
+    한 번이라도 하면 그날은 기상 실패. 3번 다 미룬 알람이 다시 울리면 앱이 자동 연결하고, 서버는 그 세션을 auto_connected로 남긴다."""
     body = body or SnoozeIn()
     r = svc.snooze(user_id, session_id, body.minutes_later, body.at_time)
     return SnoozeOut(snooze_count=r.snooze_count, snoozes_today=r.snoozes_today, snoozed_until=r.snoozed_until)
@@ -80,6 +80,21 @@ def wake_check(session_id: str, user_id: str = Depends(current_user_id), svc: Mo
     """브리핑 전 확인 멘트(2~3개)를 모두 마쳤을 때 — 브리핑 Live의 wake_check_done을 앱이 전달.
     기상 성공 = 스누즈 0회 + 그때까지 재기상 음악 0회 + 첫 응답 있음. 처음 한 번만 판정한다."""
     return _view(svc.wake_check(user_id, session_id))
+
+
+@router.post("/sessions/{session_id}/complete", response_model=SessionViewOut)
+def complete_flow(session_id: str, user_id: str = Depends(current_user_id), svc: MorningService = Depends(morning_service)):
+    """포춘까지 모닝콜의 모든 순서를 끝까지 마쳤을 때 한 번(중간에 통화를 끊었으면 부르지 않는다).
+    리포트 기상 성공률은 이 기록(flow_completed_at)이 있는 세션을 성공으로 센다(11/26 회의). 다시 불러도 처음 시각을 유지한다."""
+    return _view(svc.complete(user_id, session_id))
+
+
+@router.put("/sessions/{session_id}/bedtime", response_model=SessionOut)
+def report_bedtime(session_id: str, body: BedtimeIn, user_id: str = Depends(current_user_id),
+                   svc: MorningService = Depends(morning_service)):
+    """모닝콜에서 사용자가 말한 어젯밤 잠든 시각(AI report_bedtime) {"bed_time": "HH:MM"}. 서버가 날짜를 붙여 저장하고
+    (정오 이후 = 전날 밤, 정오 전 = 자정을 넘긴 그날) 리포트 취침 시각을 이 값으로 덮어쓴다. 지금보다 뒤면 422 BEDTIME_INVALID."""
+    return svc.report_bedtime(user_id, session_id, body.bed_time)
 
 
 @router.post("/sessions/{session_id}/response", response_model=SessionOut)

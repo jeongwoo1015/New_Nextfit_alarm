@@ -6,9 +6,12 @@
   (오늘 밤이 아직 오지 않았는데 분모에 넣으면 낮 동안 성공률이 떨어져 보이므로)
 - 평균 취침 시각 = 밤 대화를 마친 시각(밤 기록이 처음 만들어진 시각, KST)의 평균 "HH:MM".
   자정을 넘기는 시각을 이어서 평균 내려고 정오 이전 시각은 하루 뒤로 본다(23:30·00:30 → 00:00).
+- 모닝콜에서 잠든 시각을 말했으면(RS_MORNING_SESSION.REPORTED_BEDTIME, 11/26 회의) 그날 밤 시각은 그 값으로 덮어쓴다.
+  밤 대화가 없던 밤에 말한 시각도 평균 취침 시각에는 들어간다(취침 성공률은 밤 대화 기준 그대로).
+  그날 밤 = 세션 날의 전날(RECORD_DATE = APPLY_DATE - 1).
 """
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from backend.core.timeutil import to_kst
 from backend.domain.models import NightRecord
@@ -33,12 +36,19 @@ def record_span(first_day: date | None, nights: list[NightRecord], today: date) 
     return (first_day, last) if first_day <= last else None
 
 
-def avg_bed_clock(nights: list[NightRecord]) -> str | None:
+def bed_times(nights: list[NightRecord], reported: dict[date, datetime] | None = None) -> dict[date, datetime]:
+    """밤(RECORD_DATE)마다 잠든 시각: 모닝콜에서 말한 값이 있으면 그 값, 없으면 밤 대화를 마친 시각."""
+    out = {n.record_date: n.created_at for n in nights if n.created_at is not None}
+    out.update(reported or {})
+    return out
+
+
+def avg_bed_clock(times) -> str | None:
     minutes = []
-    for n in nights:
-        if n.created_at is None:
+    for at in times:
+        if at is None:
             continue
-        t = to_kst(n.created_at)
+        t = to_kst(at)
         m = t.hour * 60 + t.minute + t.second / 60
         minutes.append(m + DAY_MIN if m < NOON_MIN else m)
     if not minutes:
@@ -47,8 +57,9 @@ def avg_bed_clock(nights: list[NightRecord]) -> str | None:
     return f"{avg // 60:02d}:{avg % 60:02d}"
 
 
-def bed_stats(nights: list[NightRecord], span: tuple[date, date] | None, start: date, end: date) -> BedStats:
-    """[start, end) 범위의 취침 통계. 분모는 span과 겹치는 날만 센다."""
+def bed_stats(nights: list[NightRecord], span: tuple[date, date] | None, start: date, end: date,
+              reported: dict[date, datetime] | None = None) -> BedStats:
+    """[start, end) 범위의 취침 통계. 분모는 span과 겹치는 날만 센다. reported = 밤(RECORD_DATE)마다 모닝콜에서 말한 잠든 시각."""
     in_range = [n for n in nights if start <= n.record_date < end]
     days = {n.record_date for n in in_range}
     record_days = 0
@@ -57,4 +68,5 @@ def bed_stats(nights: list[NightRecord], span: tuple[date, date] | None, start: 
         record_days = max((hi - lo).days + 1, 0)
         days = {d for d in days if lo <= d <= hi}
     rate = len(days) / record_days if record_days else None
-    return BedStats(len(days), record_days, rate, avg_bed_clock(in_range))
+    times = [at for d, at in bed_times(nights, reported).items() if start <= d < end]
+    return BedStats(len(days), record_days, rate, avg_bed_clock(times))

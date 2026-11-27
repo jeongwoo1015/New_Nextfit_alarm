@@ -324,6 +324,9 @@ class SessionOut(Out):
     fortune_source: str | None = None   # ai / fallback 기본 문장 / safe 위기 표현이 있어 담담한 문장
     applied_intensity: int | None = None  # 그날 쓴 깨우는 말 강도 1~3 (자동 강도 반영 후)
     stretch_area: str | None = None     # 그날 고른 스트레칭 부위 (아직 안 골랐으면 null)
+    reported_bedtime: datetime | None = None   # 모닝콜에서 말한 어젯밤 잠든 시각 (11/27)
+    auto_connected: bool = False        # 3번 다 미룬 뒤 자동 연결로 시작한 세션 (11/27, 기상 볼륨 학습 제외)
+    flow_completed_at: datetime | None = None  # 포춘까지 끝까지 마친 시각 (11/27, 리포트 기상 성공 기준)
 
 
 class StretchStepOut(Out):
@@ -431,9 +434,13 @@ class WakeNextOut(BaseModel):
     state: str | None
 
 
+class BedtimeIn(BaseModel):
+    bed_time: HHMM                      # 어젯밤 잠든 시각 "HH:MM" (서버가 날짜를 붙인다)
+
+
 class SnoozeOut(BaseModel):
-    snooze_count: int                   # 이 세션의 미루기 횟수
-    snoozes_today: int                  # 오늘 모든 모닝 세션의 미루기 합계 (하루 3번까지)
+    snooze_count: int                   # 이 세션(알람)의 미루기 횟수 (알람마다 3번까지)
+    snoozes_today: int                  # 오늘 모든 모닝 세션의 미루기 합계 (기록용)
     snoozed_until: datetime             # 다시 울릴 시각 (KST). 앱은 이 시각으로 알람을 한 번 다시 예약한다
 
 
