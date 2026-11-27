@@ -453,6 +453,13 @@ object RespecApi {
         return SleepTrack(j.optString("music_id"), url)
     }
 
+    /**
+     * 모닝콜을 순서표 끝(포춘까지)까지 마쳤을 때 한 번 (11/27 서버, flow_completed_at). 리포트·일기의 기상 성공은 이 호출이 온 세션만 셈.
+     * 통화 종료 버튼·말로 미루기·연결 끊김처럼 중간에 끝났으면 부르지 않음
+     */
+    suspend fun completeMorning(sessionId: String): Boolean =
+        ApiClient.post("/morning/sessions/$sessionId/complete")?.ok == true
+
     /** end_session을 받았거나 사용자가 통화를 끊었을 때 */
     suspend fun endMorning(sessionId: String): JSONObject? {
         val r = ApiClient.post("/morning/sessions/$sessionId/end") ?: return null
