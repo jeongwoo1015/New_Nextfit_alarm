@@ -133,7 +133,7 @@ fun FortuneScene(
                     )
                     Spacer(Modifier.height(6.dp))
                     FitText(
-                        if (fortune == null) "잠시만 기다려 주세요" else "넥스티가 열어 줄 거예요 · 쿠키를 톡 눌러도 열려요",
+                        if (fortune == null) "잠시만 기다려 주세요." else "넥스티가 열어 줄 거예요. 쿠키를 톡 눌러도 열려요.",
                         color = RespecColors.TextSub,
                         fontSize = 13.sp,
                         textAlign = TextAlign.Center
@@ -218,8 +218,13 @@ private fun FortuneCookie(opened: Boolean, modifier: Modifier = Modifier) {
             translate(jx, 0f) {
                 rotate(tilt, Offset(s * 0.5f, s * 0.75f)) {
                     if (p > 0.3f) drawSlip(s, rise)      // 쿠키 속에 숨어 있다가 벌어진 틈으로 드러남
-                    // 금을 경계로 왼쪽·오른쪽 반쪽을 따로 그려, 각자 아래 날개를 축으로 바깥으로 젖혀짐
-                    listOf(-1f, 1f).forEach { side ->
+                    // 갈라지기 전에는 통째로 그림: 반쪽 두 개를 맞대어 그리면 경계(금 모양)에 가는 틈이 비쳐 열기 전부터 금이 간 것처럼 보임
+                    if (split == 0f) {
+                        drawCookieBody(s)
+                        if (faceAlpha > 0f) drawCookieFace(s, faceAlpha)
+                    }
+                    // 갈라지면: 금을 경계로 왼쪽·오른쪽 반쪽을 따로 그려, 각자 아래 날개를 축으로 바깥으로 젖혀짐
+                    if (split > 0f) listOf(-1f, 1f).forEach { side ->
                         translate(side * s * 0.06f * split, s * 0.015f * split) {
                             rotate(side * 18f * split, Offset(s * (0.5f + side * 0.2f), s * 0.78f)) {
                                 clipPath(halfRegion(s, side)) {

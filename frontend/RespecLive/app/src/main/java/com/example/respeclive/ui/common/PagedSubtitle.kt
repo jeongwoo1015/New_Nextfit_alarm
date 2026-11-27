@@ -166,12 +166,10 @@ suspend fun typeSubtitlePages(
     }
 }
 
-/** 사용자가 말을 마친 뒤 사용자 말을 보여 주는 시간. 그동안 AI 음성도 미룸 (LiveClient) */
-private const val USER_HOLD_MS = LiveConfig.USER_GAP_MS
-
 /**
  * 사용자 말(받아쓰기)이 바로 AI 말로 덮이지 않도록 붙잡아 둠.
- * 마지막 사용자 줄이 바뀐 뒤 USER_HOLD_MS가 지나기 전이면 그 줄을, 아니면 null.
+ * 마지막 사용자 줄이 바뀐 뒤 보여 주는 시간(LiveConfig.userHoldMs, 말 길이에 맞춰 1.5~3초)이 지나기 전이면 그 줄을, 아니면 null.
+ * 그동안 AI 음성도 같은 시간만큼 미룸 (LiveClient)
  */
 @Composable
 fun rememberHeldUserLine(lines: List<LiveClient.Line>): LiveClient.Line? {
@@ -180,9 +178,10 @@ fun rememberHeldUserLine(lines: List<LiveClient.Line>): LiveClient.Line? {
     var now by remember { mutableLongStateOf(0L) }
     LaunchedEffect(lastUser?.atMs, lastUser?.text) {
         if (lastUser == null) return@LaunchedEffect
-        holdUntil = System.currentTimeMillis() + USER_HOLD_MS
+        val hold = LiveConfig.userHoldMs(lastUser.text)
+        holdUntil = System.currentTimeMillis() + hold
         now = System.currentTimeMillis()
-        delay(USER_HOLD_MS)
+        delay(hold)
         now = System.currentTimeMillis()
     }
     val afterUser = lines.lastOrNull()?.role == LiveClient.Role.Assistant && lines.getOrNull(lines.lastIndex - 1) === lastUser
@@ -294,8 +293,10 @@ fun SubtitleBox(text: String, fromUser: Boolean = false, pageKey: Any? = null, m
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
             label = "subtitlePage"
-        ) { (_, _, shown) ->
+        ) { (user, _, shown) ->
             // 받아쓰기는 몇 글자씩 덩어리로 들어오므로, 박스마다 첫 글자부터 하나씩 타자 치듯 보여 줌 (글이 늘면 이어서 침).
+            // 사용자 말은 이미 한 말이라 빠르게 침 (길게 말하면 다 뜨기 전에 AI 말로 넘어가던 문제, 11/26)
+            val typeMs = if (user) LiveConfig.USER_CHAR_TYPE_MS else CHAR_TYPE_MS
             // 앞부분이 바뀌면(예: "오 초" → "5초") 같은 데까지만 남기고 거기서부터 다시 침.
             // 아직 안 나온 글자는 투명하게 자리를 잡아 두어 줄바꿈이 흔들리지 않음
             val full by rememberUpdatedState(shown)
@@ -307,7 +308,7 @@ fun SubtitleBox(text: String, fromUser: Boolean = false, pageKey: Any? = null, m
                     val keep = minOf(typed, f.commonPrefixWith(typedText).length)
                     typed = if (keep < f.length) keep + 1 else keep
                     typedText = f.take(typed)
-                    delay(CHAR_TYPE_MS)
+                    delay(typeMs)
                 }
             }
             val n = minOf(typed, shown.commonPrefixWith(typedText).length)

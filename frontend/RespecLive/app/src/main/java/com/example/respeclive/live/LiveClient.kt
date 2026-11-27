@@ -183,7 +183,7 @@ class LiveClient(context: Context) {
         startTicker()
         scope.launch {
             if (!connectOnce() && !stopping) {
-                fail(_message.value ?: "연결하지 못했어요")
+                fail(_message.value ?: "연결하지 못했어요.")
             }
         }
     }
@@ -327,16 +327,17 @@ class LiveClient(context: Context) {
      * 마지막 함수 호출(판정 보고, end_session 등) 뒤 AI의 마무리 말을 끝까지 들려줌.
      * AI는 함수를 먼저 보내고 마무리 말을 그다음에 하기도 해서, 시간만 잠깐 기다리면 말이 시작되기 전이나 중간에 끊김.
      * 순서: 함수 호출 뒤 음성이 있는 응답의 turnComplete → 남은 음성 재생 → 잠깐 조용한지 확인(이어지는 응답이 있으면 그것까지).
-     * 함수 호출 뒤 REPLY_START_WAIT_MS 동안 말이 시작되지 않으면 할 말이 없는 것으로 봄. 연결이 끊기면 바로 끝냄
+     * 함수 호출 뒤 REPLY_START_WAIT_MS 동안 말이 시작되지 않으면 할 말이 없는 것으로 봄. 연결이 끊기면 바로 끝냄.
+     * quietMs: 말이 끝난 뒤 이어지는 응답이 없는지 볼 시간 (바로 녹음으로 넘어가는 곳은 짧게)
      */
-    suspend fun awaitReplyEnd(maxWaitMs: Long = 25_000L) {
+    suspend fun awaitReplyEnd(maxWaitMs: Long = 25_000L, quietMs: Long = QUIET_MS) {
         val since = toolMark
         withTimeoutOrNull(maxWaitMs) {
             val started = withTimeoutOrNull(REPLY_START_WAIT_MS) {
                 combine(voicedTurns, turnOpenFlow, _aiSpeaking) { v, open, speaking -> v > since || open || speaking }.first { it }
             } != null
             if (started && !awaitVoicedTurn(since)) return@withTimeoutOrNull
-            drainSpeech()
+            drainSpeech(quietMs)
         }
     }
 
@@ -358,13 +359,13 @@ class LiveClient(context: Context) {
         combine(voicedTurns, _status) { v, s -> if (v > since) true else if (s == Status.Error || s == Status.Ended) false else null }
             .first { it != null } == true
 
-    /** 남은 음성 재생이 끝난 뒤 QUIET_MS 동안 새 응답이 시작되지 않을 때까지 (이어서 시작되면 그 응답이 끝날 때까지 다시) */
-    private suspend fun drainSpeech() {
+    /** 남은 음성 재생이 끝난 뒤 quietMs 동안 새 응답이 시작되지 않을 때까지 (이어서 시작되면 그 응답이 끝날 때까지 다시) */
+    private suspend fun drainSpeech(quietMs: Long = QUIET_MS) {
         while (true) {
             _aiSpeaking.first { !it }
             if (_status.value != Status.Live) return
             val t = turns.value
-            withTimeoutOrNull(QUIET_MS) { turnOpenFlow.first { it } } ?: return
+            withTimeoutOrNull(quietMs) { turnOpenFlow.first { it } } ?: return
             val ok = combine(turns, _status) { n, s -> if (n > t) true else if (s == Status.Error || s == Status.Ended) false else null }
                 .first { it != null } == true
             if (!ok) return
@@ -400,14 +401,14 @@ class LiveClient(context: Context) {
         }
         if (stopping) return false
         if (auth == null) {
-            if (_message.value == null) _message.value = "서버에서 통화 토큰을 받지 못했어요"
+            if (_message.value == null) _message.value = "서버에서 통화 토큰을 받지 못했어요."
             return false
         }
         connectOutcome.tryReceive()      // 이전 연결의 잔여 결과 버리기
         startSignal = auth.startSignal
         session.connect(auth, ::onEvent)
         val ok = withTimeoutOrNull(LiveConfig.SETUP_TIMEOUT_MS) { connectOutcome.receive() } == true
-        if (!ok && _message.value == null) _message.value = "연결 시간이 초과되었어요"
+        if (!ok && _message.value == null) _message.value = "연결 시간이 초과되었어요."
         return ok
     }
 
@@ -429,7 +430,7 @@ class LiveClient(context: Context) {
                         break
                     }
                 }
-                if (!ok && !stopping) fail("연결이 끊겨 다시 연결하지 못했어요")
+                if (!ok && !stopping) fail("연결이 끊겨 다시 연결하지 못했어요.")
             } finally {
                 reconnecting.set(false)
             }
@@ -570,8 +571,9 @@ class LiveClient(context: Context) {
         if (turnOpen) return
         turnOpen = true
         turnAudioMs = 0L
-        // 사용자 말을 화면에 보여 주는 동안(USER_GAP_MS)은 AI 음성을 재생하지 않음
-        val until = lastUserAt + LiveConfig.USER_GAP_MS
+        // 사용자 말을 화면에 보여 주는 동안(말 길이에 맞춰 1.5~3초)은 AI 음성을 재생하지 않음
+        val lastUser = _transcript.value.lastOrNull { it.role == Role.User }?.text.orEmpty()
+        val until = lastUserAt + LiveConfig.userHoldMs(lastUser)
         if (until > SystemClock.elapsedRealtime()) audioOut.holdUntil(until)
     }
 

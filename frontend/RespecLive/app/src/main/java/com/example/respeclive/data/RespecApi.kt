@@ -12,7 +12,8 @@ import java.io.File
 /** 끝말잇기 한 턴 AI 판단: valid면 next(넥스티 단어, 없으면 넥스티 패배), 아니면 reason(보여 줄 이유) */
 class WordChainTurn(val valid: Boolean, val next: String?, val reason: String?)
 
-class SnoozeResult(val snoozedUntilMs: Long?, val code: String?, val snoozesToday: Int? = null)
+/** snoozeCount: 이 세션(알람)의 미룬 횟수, snoozesToday: 오늘 모든 알람의 합계 */
+class SnoozeResult(val snoozedUntilMs: Long?, val code: String?, val snoozesToday: Int? = null, val snoozeCount: Int? = null)
 
 class CoachingToken(val auth: LiveAuth?, val steps: JSONArray?, val code: String?)
 
@@ -28,7 +29,7 @@ object RespecApi {
     private const val WORDCHAIN_TURN_TIMEOUT_MS = 6_000L
 
     /** Live 토큰을 못 받았을 때 LiveClient가 화면에 이유를 보여 주도록 예외로 바꿈 */
-    fun tokenError(): Nothing = throw IllegalStateException(ApiClient.lastError ?: "서버에서 통화 토큰을 받지 못했어요")
+    fun tokenError(): Nothing = throw IllegalStateException(ApiClient.lastError ?: "서버에서 통화 토큰을 받지 못했어요.")
 
     private fun liveAuth(json: JSONObject?): LiveAuth? {
         json ?: return null
@@ -257,7 +258,7 @@ object RespecApi {
     /**
      * 미루기. 버튼은 둘 다 null(서버가 5분), 말로 미루기(AI reschedule_alarm, CONTRACTS B21)는 minutesLater(1~60) 또는
      * atTime("HH:MM", 오늘 60분 안) 중 하나.
-     * 성공하면 다시 울릴 시각(snoozed_until), 실패하면 code (하루 3번을 넘으면 SNOOZE_LIMIT, 연결 실패면 null)
+     * 성공하면 다시 울릴 시각(snoozed_until), 실패하면 code (한도를 넘으면 SNOOZE_LIMIT, 연결 실패면 null)
      */
     suspend fun snoozeTo(sessionId: String, minutesLater: Int?, atTime: String?): SnoozeResult {
         val body = JSONObject()
@@ -267,12 +268,13 @@ object RespecApi {
         if (!r.ok) return SnoozeResult(null, r.errorCode ?: "HTTP_${r.code}")
         val json = r.json()
         val until = json?.optString("snoozed_until")?.takeIf { it.isNotBlank() }?.let { parseServerTime(it) }
-        return SnoozeResult(until, null, json?.optInt("snoozes_today", -1)?.takeIf { it >= 0 })
+        return SnoozeResult(until, null, json?.optInt("snoozes_today", -1)?.takeIf { it >= 0 }, json?.optInt("snooze_count", -1)?.takeIf { it >= 0 })
     }
 
     /**
-     * 아침 기상 볼륨 결과 보고 (AI CONTRACTS B23 학습 입력): 알람이 울리기 시작한 단계와 전화를 받은 순간의 단계(1~5, 못 받았으면 null).
-     * 서버는 그날 처음 보고한 세션만 기록
+     * 아침 기상 볼륨 결과 보고 (AI CONTRACTS B23 학습 입력): 알람이 울리기 시작한 단계와 반응한 순간의 단계(1~5).
+     * 반응한 단계 = 전화를 받거나 미루기 버튼을 누른 순간의 단계(11/25). 받지 않고 껐으면 null.
+     * 서버는 그날 첫 보고만 남기고, 다시 울린 알람의 보고는 무시함 (미룬 날은 서버가 볼륨 학습에서 실패로 봄)
      */
     suspend fun reportWakeResult(sessionId: String, startLevel: Int, receivedLevel: Int?): Boolean {
         val body = JSONObject().put("start_level", startLevel).put("received_level", receivedLevel ?: JSONObject.NULL)
@@ -285,9 +287,15 @@ object RespecApi {
         return if (r.ok) r.json() else null
     }
 
-    /** 게임 기록(주고받은 횟수, 앱이 셈) 저장 → GameScoreOut {score, best_score, is_best}. 게임 세션이 아니면 null */
-    suspend fun saveGameScore(sessionId: String, stepOrder: Int, score: Int): JSONObject? {
-        val r = ApiClient.put("/morning/sessions/$sessionId/steps/$stepOrder/score", JSONObject().put("score", score)) ?: return null
+    /**
+     * 게임 기록(주고받은 횟수, 앱이 셈) 저장 → GameScoreOut {score, best_score, is_best, user_wins?}. 게임 세션이 아니면 null.
+     * winner: 끝말잇기 승패 "USER"/"NEXTY" (승패가 안 났으면 보내지 않음). 서버에 요청한 필드(11/26):
+     * 서버가 받으면 넥스티를 이긴 횟수(user_wins)를 돌려줌. 아직 모르는 서버는 이 필드를 무시함
+     */
+    suspend fun saveGameScore(sessionId: String, stepOrder: Int, score: Int, winner: String? = null): JSONObject? {
+        val body = JSONObject().put("score", score)
+        if (winner != null) body.put("winner", winner)
+        val r = ApiClient.put("/morning/sessions/$sessionId/steps/$stepOrder/score", body) ?: return null
         return if (r.ok) r.json() else null
     }
 
@@ -309,6 +317,15 @@ object RespecApi {
     }
 
     /** 대화로 설정 바꾸기 (AI update_setting, CONTRACTS B22): 인자를 그대로 서버에 → 바뀐 설정, 거절·실패면 null */
+    /**
+     * 모닝콜에서 사용자가 말한 잠든 시각 저장 (AI report_bedtime, 11/26 서버에 요청한 API: 아직 없으면 404로 실패하고 끝).
+     * PUT /morning/sessions/{id}/bedtime {bed_time: "HH:MM"}. 서버가 어젯밤 취침 시각을 이 값으로 다시 기록함
+     */
+    suspend fun reportBedtime(sessionId: String, time: String): Boolean {
+        val r = ApiClient.put("/morning/sessions/$sessionId/bedtime", JSONObject().put("bed_time", time)) ?: return false
+        return r.ok
+    }
+
     suspend fun aiChangeSetting(field: String, value: String, scope: String?): JSONObject? {
         val body = JSONObject().put("field", field).put("value", value)
         scope?.takeIf { it.isNotBlank() }?.let { body.put("scope", it) }
@@ -409,6 +426,17 @@ object RespecApi {
     suspend fun musicUrl(type: String): String? {
         val r = ApiClient.get("/music/$type") ?: return null
         return if (r.ok) r.json()?.optString("url")?.takeIf { it.isNotBlank() } else null
+    }
+
+    /**
+     * 장르를 고를 때 미리 듣는 재기상 음악 (GET /music/rewake?genre=). 응답의 genre가 고른 장르와 같을 때만 URL.
+     * 서버가 genre 파라미터를 아직 모르면 설정 장르 곡을 주거나(다르면 버림) 온보딩 전이라 404 → null
+     */
+    suspend fun rewakeSample(genre: String): String? {
+        val r = ApiClient.get("/music/rewake?genre=$genre") ?: return null
+        val j = if (r.ok) r.json() else null
+        if (j?.optString("genre") != genre) return null
+        return j.optString("url").takeIf { it.isNotBlank() }
     }
 
     /** 수면 음악 한 곡 (music_id로 곡이 바뀌었는지 비교) */

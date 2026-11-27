@@ -93,21 +93,21 @@ object AlarmRepository {
         if (alarm.type == AlarmType.BEDTIME) {
             val body = bedtimeFields(alarm)
             val saved = (if (serverId != null) RespecApi.updateAlarm(serverId, body) else RespecApi.createAlarm(body))
-                ?: return ApiClient.lastError ?: "굿나잇콜 알람을 저장하지 못했어요"
-            val synced = fromServer(saved, alarm.id) ?: return "서버 응답을 읽지 못했어요"
+                ?: return ApiClient.lastError ?: "굿나잇콜 알람을 저장하지 못했어요."
+            val synced = fromServer(saved, alarm.id) ?: return "서버 응답을 읽지 못했어요."
             onMain { upsert(context, synced) }
             return null
         }
         val routineTemplate = if (alarm.isContent) null else
-            routineTemplate(alarm) ?: return ApiClient.lastError ?: "루틴 프리셋을 찾지 못했어요"
+            routineTemplate(alarm) ?: return ApiClient.lastError ?: "루틴 프리셋을 찾지 못했어요."
         val body = editableFields(alarm, routineTemplate)
         val saved = if (serverId != null) RespecApi.updateAlarm(serverId, body) else RespecApi.createAlarm(body)
-        saved ?: return ApiClient.lastError ?: "알람을 저장하지 못했어요"
-        val synced = fromServer(saved, alarm.id) ?: return "서버 응답을 읽지 못했어요"
+        saved ?: return ApiClient.lastError ?: "알람을 저장하지 못했어요."
+        val synced = fromServer(saved, alarm.id) ?: return "서버 응답을 읽지 못했어요."
         onMain { upsert(context, synced) }
         if (!synced.isContent && routineItems != null && synced.serverId != null) {
             val routine = RespecApi.saveAlarmRoutine(synced.serverId, routineItems)
-                ?: return ApiClient.lastError ?: "알람은 저장했지만 항목 시간을 저장하지 못했어요"
+                ?: return ApiClient.lastError ?: "알람은 저장했지만 항목 시간을 저장하지 못했어요."
             onMain { RoutineCatalog.putRoutine(synced, routine) }
         }
         return null
@@ -122,7 +122,7 @@ object AlarmRepository {
     suspend fun delete(context: Context, id: Int): String? {
         val a = get(id) ?: return null
         if (a.serverId != null && !RespecApi.deleteAlarm(a.serverId)) {
-            return ApiClient.lastError ?: "알람을 삭제하지 못했어요"
+            return ApiClient.lastError ?: "알람을 삭제하지 못했어요."
         }
         onMain {
             alarms.removeAll { it.id == id }
@@ -147,7 +147,7 @@ object AlarmRepository {
         val sid = after.serverId ?: return null
         val saved = RespecApi.updateAlarm(sid, changes)?.let { fromServer(it, after.id) }
         onMain { upsert(context, saved ?: before) }
-        return if (saved == null) ApiClient.lastError ?: "알람을 저장하지 못했어요" else null
+        return if (saved == null) ApiClient.lastError ?: "알람을 저장하지 못했어요." else null
     }
 
     private suspend fun onMain(block: () -> Unit) = withContext(Dispatchers.Main.immediate) { block() }

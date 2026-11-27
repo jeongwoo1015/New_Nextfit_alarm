@@ -52,6 +52,8 @@ private const val VOLUME_UP_SECONDS = 10
 private const val REPORT_WAIT_MS = 15_000L
 /** 미루기 버튼: 서버 답을 이 시간까지만 기다리고, 넘으면 기기에서 5분 뒤로 */
 private const val SNOOZE_WAIT_MS = 3_000L
+/** 미루기를 다 쓴 뒤 다시 울리면 이만큼 안내를 보여 주고 저절로 받음 */
+private const val AUTO_ANSWER_DELAY_MS = 3_000L
 
 /**
  * 알람 수신 화면 → 밀어서 받으면 아침 대화 화면.
@@ -70,8 +72,8 @@ fun MorningCallScreen(
     val scope = rememberCoroutineScope()
     var answered by remember { mutableStateOf(false) }
     var session by remember { mutableStateOf<JSONObject?>(null) }
-    // 오늘 미룬 횟수 (버튼에 남은 횟수 표시). 세션의 미루기 횟수가 더 크면 그 값으로
-    var snoozesToday by remember { mutableIntStateOf(SnoozeCount.get(context)) }
+    // 이 알람을 오늘 미룬 횟수 (버튼에 남은 횟수 표시, 알람마다 따로). 세션의 미루기 횟수가 더 크면 그 값으로
+    var snoozesToday by remember { mutableIntStateOf(SnoozeCount.get(context, alarmId)) }
     var snoozing by remember { mutableStateOf(false) }
 
     // 아침 결과 보고 (B23): 시작 단계와 받은 단계(못 받았으면 null). 세션이 아직 안 만들어졌으면 잠깐 기다렸다 보냄.
@@ -91,7 +93,7 @@ fun MorningCallScreen(
         }
     }
     LaunchedEffect(session) {
-        session?.optJSONObject("session")?.optInt("snooze_count", 0)?.let { snoozesToday = SnoozeCount.atLeast(context, it) }
+        session?.optJSONObject("session")?.optInt("snooze_count", 0)?.let { snoozesToday = SnoozeCount.atLeast(context, alarmId, it) }
     }
 
     LaunchedEffect(Unit) {
@@ -114,32 +116,36 @@ fun MorningCallScreen(
                 reportWake(received)
                 answered = true
             },
+            // 이 알람을 3번 다 미룬 뒤 다시 울리면 받기를 기다리지 않고 모닝콜을 바로 시작함 (11/26).
+            // 사용자가 반응한 게 아니므로 받은 단계는 보고하지 않음 (null로 보내면 모든 단계 실패로 학습됨)
+            autoAnswer = !snoozing && snoozesToday >= SnoozeCount.MAX_PER_ALARM,
+            onAutoAnswer = { answered = true },
             onDismiss = {
                 reportWake(null)        // 받지 않고 끔
                 onFinish()
             },
             snoozeLeft = SnoozeCount.left(snoozesToday),
             onSnooze = { pressedLevel ->
-                if (snoozing || snoozesToday >= SnoozeCount.MAX_PER_DAY) return@MorningIncomingScreen
+                if (snoozing || snoozesToday >= SnoozeCount.MAX_PER_ALARM) return@MorningIncomingScreen
                 snoozing = true
                 scope.launch {
-                    // 서버가 하루 3번(버튼·말 합산)을 검사하고 다시 울릴 시각을 정함. 서버에 닿지 못하면 기기에서 5분 뒤로
+                    // 서버가 알람마다 3번(버튼·말 합산)을 검사하고 다시 울릴 시각을 정함. 서버에 닿지 못하면 기기에서 5분 뒤로
                     val sid = session?.optJSONObject("session")?.optString("session_id")?.takeIf { it.isNotBlank() }
                     val r = sid?.let { withTimeoutOrNull(SNOOZE_WAIT_MS) { RespecApi.snoozeTo(it, null, null) } }
                     if (r?.code == "SNOOZE_LIMIT") {
                         // 한도를 넘음: 미루지 않고 알람은 계속 울림
-                        snoozesToday = SnoozeCount.set(context, SnoozeCount.MAX_PER_DAY)
-                        Toast.makeText(context, "오늘은 더 미룰 수 없어요 (하루 ${SnoozeCount.MAX_PER_DAY}번까지)", Toast.LENGTH_SHORT).show()
+                        snoozesToday = SnoozeCount.set(context, alarmId, SnoozeCount.MAX_PER_ALARM)
+                        Toast.makeText(context, "이 알람은 더 미룰 수 없어요(알람마다 ${SnoozeCount.MAX_PER_ALARM}번까지).", Toast.LENGTH_SHORT).show()
                         snoozing = false
                         return@launch
                     }
                     val at = r?.snoozedUntilMs ?: (System.currentTimeMillis() + AlarmScheduler.SNOOZE_MINUTES * 60_000L)
                     AlarmScheduler.scheduleSnoozeAt(context, alarmId, alarmLabel, at)
-                    snoozesToday = r?.snoozesToday?.let { SnoozeCount.set(context, it) } ?: SnoozeCount.increment(context)
+                    snoozesToday = r?.snoozeCount?.let { SnoozeCount.set(context, alarmId, it) } ?: SnoozeCount.increment(context, alarmId)
                     val left = SnoozeCount.left(snoozesToday)
                     Toast.makeText(
                         context,
-                        "${AlarmScheduler.SNOOZE_MINUTES}분 뒤에 다시 울려요 · " + if (left > 0) "오늘 ${left}번 더 미룰 수 있어요" else "오늘은 마지막 미루기예요",
+                        "${AlarmScheduler.SNOOZE_MINUTES}분 뒤에 다시 울려요. " + if (left > 0) "오늘 ${left}번 더 미룰 수 있어요." else "오늘은 마지막 미루기예요.",
                         Toast.LENGTH_SHORT
                     ).show()
                     reportWake(pressedLevel)    // 미루기 버튼을 누른 순간의 단계
@@ -157,13 +163,16 @@ private fun MorningIncomingScreen(
     onDismiss: () -> Unit,
     onSnooze: (pressedLevel: Int) -> Unit,
     alarmLabel: String = "오전 6:00",
-    snoozeLeft: Int = SnoozeCount.MAX_PER_DAY,
+    snoozeLeft: Int = SnoozeCount.MAX_PER_ALARM,
+    autoAnswer: Boolean = false,
+    onAutoAnswer: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val view = LocalView.current
     val alarm = remember { AlarmSoundPlayer(context) }
     val vibration = remember { AlarmVibrator(context) }
-    // 시작 단계: 넥스티에게 말로 정한 값(다음 한 번·상한)이 있으면 그 값, 없으면 서버 추천(아직 API가 없어 1단계)
+    // 시작 단계: 서버가 정해 준 오늘의 시작 단계(GET /wake-volume/next, 미리 받아 둠). 오늘 값을 못 받았으면
+    // 넥스티에게 말로 정한 값(다음 한 번 > 상한), 그것도 없으면 1단계
     val startLevel = remember { WakeLevelPrefs.takeStartLevel() }
     var level by remember { mutableIntStateOf(startLevel) }
     var countdown by remember { mutableIntStateOf(VOLUME_UP_SECONDS) }
@@ -172,7 +181,7 @@ private fun MorningIncomingScreen(
     DisposableEffect(Unit) {
         view.keepScreenOn = true
         alarm.start(level = startLevel)
-        // 진동: 볼륨 단계를 따라 세지고, 최근 아침 기록으로 나눈 유형에 따라 시작 세기가 다름
+        // 진동: 볼륨 단계를 따라 세지고, 서버 기상 성공률로 나눈 유형(WakeHistory)에 따라 시작 세기가 다름
         vibration.start(startLevel, WakeHistory.profile(context))
         onDispose {
             view.keepScreenOn = false
@@ -195,6 +204,13 @@ private fun MorningIncomingScreen(
                 countdown = VOLUME_UP_SECONDS
             }
         }
+    }
+
+    // 미루기를 다 썼으면 안내를 잠깐 보여 주고 저절로 받음
+    LaunchedEffect(autoAnswer) {
+        if (!autoAnswer) return@LaunchedEffect
+        delay(AUTO_ANSWER_DELAY_MS)
+        onAutoAnswer()
     }
 
     BackHandler(onBack = onDismiss) // 테스트용: 뒤로 가기 = 알람 끄기
@@ -226,7 +242,7 @@ private fun MorningIncomingScreen(
             Spacer(Modifier.height(12.dp))
             Text("AI 모닝콜", color = RespecColors.Text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
-            Text("지금 당신의 하루가 시작돼요", color = RespecColors.TextSub, fontSize = 14.sp)
+            Text("지금 당신의 하루가 시작돼요.", color = RespecColors.TextSub, fontSize = 14.sp)
         }
 
         // 세로가 짧은 폰에서는 아래 버튼이 잘리지 않도록 동그라미를 남은 공간에 맞춰 줄임
@@ -275,8 +291,9 @@ private fun MorningIncomingScreen(
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             FitText(
-                if (level >= AlarmSoundPlayer.WAKE_MAX_LEVEL) "알람 소리 최대"
-                else "알람 소리 $level/${AlarmSoundPlayer.WAKE_MAX_LEVEL} · 받지 않으면 ${countdown}초 뒤 커져요",
+                if (autoAnswer) "이 알람은 ${SnoozeCount.MAX_PER_ALARM}번 다 미뤘어요. 넥스티가 바로 연결할게요."
+                else if (level >= AlarmSoundPlayer.WAKE_MAX_LEVEL) "알람 소리 최대"
+                else "알람 소리 $level/${AlarmSoundPlayer.WAKE_MAX_LEVEL} · 받지 않으면 ${countdown}초 뒤 커져요.",
                 color = RespecColors.TextSub,
                 fontSize = 12.sp
             )
@@ -285,7 +302,7 @@ private fun MorningIncomingScreen(
                 onAnswer(level)
             })
             Spacer(Modifier.height(8.dp))
-            // 하루 3번(버튼·말 합산)을 다 쓰면 누를 수 없음
+            // 이 알람의 3번(버튼·말 합산)을 다 쓰면 누를 수 없음
             TextButton(onClick = { onSnooze(level) }, enabled = snoozeLeft > 0) {
                 Text(
                     if (snoozeLeft > 0) "${AlarmScheduler.SNOOZE_MINUTES}분 뒤 다시 울리기 · ${snoozeLeft}번 남음"

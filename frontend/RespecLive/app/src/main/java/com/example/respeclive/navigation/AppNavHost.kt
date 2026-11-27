@@ -64,7 +64,7 @@ private val tabs = listOf(
 )
 
 private fun titleFor(route: String?) = when (route) {
-    "home" -> "리스펙 알람"
+    "home" -> "넥스티 알람"
     "routine" -> "콘텐츠"
     "report" -> "리포트"
     "diary" -> "한 줄 일기"

@@ -77,8 +77,8 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
     val busy = saving || deleting
     // 저장할 수 없는 이유 (없으면 저장 가능). 버튼 위에 그대로 안내함
     val missing = when {
-        label.isBlank() -> "알람 이름을 입력해 주세요"
-        !isBedtime && contentType == null -> "아침 콘텐츠를 골라 주세요"
+        label.isBlank() -> "알람 이름을 입력해 주세요."
+        !isBedtime && contentType == null -> "아침 콘텐츠를 골라 주세요."
         else -> null
     }
     val canSave = !busy && missing == null
@@ -193,7 +193,7 @@ fun AlarmEditScreen(alarmId: Int, onBack: () -> Unit) {
                         .border(1.dp, if (on) RespecColors.Lime else RespecColors.CardBorder, CircleShape)
                         .clickable {
                             if (on && days.size == 1) {
-                                Toast.makeText(context, "요일을 하나 이상 선택해 주세요", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "요일을 하나 이상 선택해 주세요.", Toast.LENGTH_SHORT).show()
                             } else {
                                 days = if (on) days - index else days + index
                             }

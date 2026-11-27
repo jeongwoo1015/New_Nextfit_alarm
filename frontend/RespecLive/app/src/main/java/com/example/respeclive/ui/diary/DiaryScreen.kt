@@ -78,7 +78,7 @@ fun DiaryScreen(onOpenDay: (String) -> Unit) {
 
     LaunchedEffect(monthKey) {
         val list = RespecApi.diaryCalendar(monthKey)
-        error = if (list == null) ApiClient.lastError ?: "달력을 불러오지 못했어요" else null
+        error = if (list == null) ApiClient.lastError ?: "달력을 불러오지 못했어요." else null
         days = list.orEmpty().associateBy { it.optString("date") }
     }
 
