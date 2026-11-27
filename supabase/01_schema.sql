@@ -328,6 +328,9 @@ create table if not exists rs_morning_session (
                        'LOW_BACK', 'PELVIS', 'GLUTE', 'THIGH', 'CALF', 'ANKLE_FOOT',
                        'NECK_SHOULDER', 'ARM_WRIST', 'BACK_HIP', 'LEG')),
   snoozed_until      timestamptz,                       -- 미루기(버튼·말)로 다시 울릴 시각. 횟수는 snooze_count
+  reported_bedtime   timestamptz,                       -- 모닝콜에서 말한 어젯밤 잠든 시각 (리포트 취침 시각을 덮어씀)
+  auto_connected     boolean not null default false,    -- 3번 미룬 뒤 자동 연결로 시작 (기상 볼륨 학습 제외)
+  flow_completed_at  timestamptz,                       -- 포춘까지 모든 구성을 마친 시각 (리포트 기상 성공 기준)
   unique (alarm_id, session_date),
   constraint rs_session_type_fields check (
     (morning_call_type = 'ROUTINE' and template_id is not null and content_type is null)

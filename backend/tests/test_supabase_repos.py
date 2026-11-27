@@ -7,7 +7,7 @@
 import json
 import os
 import uuid
-from datetime import date, time, timedelta
+from datetime import date, time, timedelta, timezone
 
 import pytest
 
@@ -309,6 +309,32 @@ def test_stretch_area_and_intensity(repos, uid, other):
     for bad in ({"personality": "FIRM"}, {"intensity": 0}, {"english_level": "ADVANCED"}, {"theme": "SYSTEM"}):
         with pytest.raises(Exception, match="check constraint"):
             db.table("rs_user_setting").update(bad).eq("user_id", uid).execute()
+    repos.alarms.delete_alarm(uid, a.alarm_id)
+
+
+def test_session_flow_fields(repos, uid, other):
+    """11/26 회의: 모닝콜에서 말한 잠든 시각, 자동 연결 여부, 포춘까지 마친 시각을 세션에 남긴다."""
+    a = repos.alarms.create_alarm(uid, {"alarm_time": time(6, 30), "morning_call_type": "CONTENT",
+                                        "content_type": "QUIZ", "content_option": "PERSON"})
+    snap = SessionSnapshot(uid, a.alarm_id, now_kst().date(), "CONTENT", None, "QUIZ", "PERSON", time(6, 30), time(6, 30))
+    s = repos.sessions.get_or_create_session(snap)
+    db = repos.users.db
+    cols = "reported_bedtime, auto_connected, flow_completed_at"
+    row = lambda: db.table("rs_morning_session").select(cols).eq("session_id", s.session_id).execute().data[0]
+    assert row() == {"reported_bedtime": None, "auto_connected": False, "flow_completed_at": None}   # 기본값
+
+    bed = now_kst().replace(hour=0, minute=40, second=0, microsecond=0)
+    done = now_kst().replace(microsecond=0)
+    repos.sessions.update_session(uid, s.session_id, {"reported_bedtime": bed, "auto_connected": True, "flow_completed_at": done})
+    got = row()
+    assert got["auto_connected"] is True
+    assert (got["reported_bedtime"][:16], got["flow_completed_at"][:19]) == (
+        bed.astimezone(timezone.utc).isoformat()[:16], done.astimezone(timezone.utc).isoformat()[:19])
+
+    assert repos.sessions.update_session(other, s.session_id, {"auto_connected": False}) is None   # 남의 세션은 못 바꿈
+    assert row()["auto_connected"] is True
+    repos.sessions.update_session(uid, s.session_id, {"reported_bedtime": None})                    # 잘못 말한 시각은 지울 수 있음
+    assert row()["reported_bedtime"] is None
     repos.alarms.delete_alarm(uid, a.alarm_id)
 
 

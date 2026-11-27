@@ -390,7 +390,7 @@ class SupabaseNightRepository(_Base):
 # ---------- 5. 모닝 세션·단계 ----------
 _SESSION_CHANGES = {"alarm_rang_at", "first_response_at", "planned_total_sec", "wake_checked_at", "wake_success", "session_end_at",
                     "fortune_text", "fortune_style", "fortune_source", "content_option", "applied_intensity", "stretch_area",
-                    "snoozed_until"}
+                    "snoozed_until", "reported_bedtime", "auto_connected", "flow_completed_at"}
 
 
 class SupabaseSessionRepository(_Base):
