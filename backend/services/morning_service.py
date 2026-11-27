@@ -232,7 +232,7 @@ class MorningService:
         else:
             until = now + timedelta(minutes=minutes_later or codes.SNOOZE_DEFAULT_MIN)
         if s.snooze_count >= codes.SNOOZE_MAX_PER_ALARM:
-            raise Conflict(f"알람마다 {codes.SNOOZE_MAX_PER_ALARM}번까지만 미룰 수 있어요", "SNOOZE_LIMIT")
+            raise Conflict(f"이 알람은 더 미룰 수 없어요(알람마다 {codes.SNOOZE_MAX_PER_ALARM}번까지).", "SNOOZE_LIMIT")
         count = self.r.sessions.add_snooze(user_id, session_id)
         self.r.sessions.update_session(user_id, session_id, {"snoozed_until": until, "wake_success": False})
         self._fail_wake_today(user_id, s.session_date)
