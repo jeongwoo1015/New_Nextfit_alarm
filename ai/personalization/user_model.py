@@ -5,15 +5,18 @@
 
 가정(팀 확정 전, 실제 데이터를 보고 조정):
   - 기상 시각 = 알람 후 첫 응답 시각(FIRST_RESPONSE_AT). 정의서에 실제 기상 시각 컬럼이 없다.
+  - 하루 하나(11/28 서버 요청): 하루에 모닝콜을 여러 번 받아도(낮잠 알람 등) 날마다 하나로 센다.
+    기상 성공 = 그날 가장 먼저 울린 세션(ALARM_RANG_AT가 가장 이른 세션) 하나의 성공 여부. 미루기·자동 연결은 같은 세션이라 포함된다.
+    기상 시각 = 그날 가장 이른 첫 응답 시각 하나. 첫 알람을 놓치고 다음 알람에서 일어난 날은 그 시각이 잡히고, 뒤의 낮잠 알람은 빠진다.
   - 세션 행이 없는 날은 성공도 실패도 아닌 '기록 없음'이다. (울렸어야 하는 날을 알려면 알람 요일 정보가 필요하다.)
-  - 연속 달성: 그날 세션 중 기상 성공이 하나라도 있으면 달성. 세션이 없는 날은 건너뛰되, 세션이 있는 두 날 사이가
-    MAX_GAP_DAYS를 넘으면 끊긴다. 세션이 있는데 기상 성공이 없는 날도 끊긴다.
+  - 연속 달성: 그날 첫 알람 세션이 기상 성공이면 달성(위 '하루 하나'와 같은 기준). 세션이 없는 날은 건너뛰되, 세션이 있는 두 날 사이가
+    MAX_GAP_DAYS를 넘으면 끊긴다. 첫 알람 세션이 실패한 날도 끊긴다.
   - 루틴 완료율 = DONE 단계 ÷ 전체 단계(PENDING도 분모에 포함). 건너뜀 비율·항목별 수행률은 PENDING을 뺀다.
 """
 from dataclasses import dataclass, field, replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
-from .records import DONE, SKIPPED, SessionRecord
+from .records import DONE, KST, SKIPPED, SessionRecord
 
 MIN_SESSIONS = 3      # 이보다 적으면 통계를 믿지 않는다 (가정값)
 MAX_GAP_DAYS = 3      # 세션이 있는 두 날 사이가 이보다 길면 연속이 끊긴다 (금→월 주말을 허용하는 값)
@@ -39,10 +42,10 @@ def _ratio(num: int, den: int) -> float | None:
 @dataclass(frozen=True)
 class UserStats:
     n_sessions: int = 0
-    wake_success_rate: float | None = None      # 0~1, 날 기준(하루에 하나라도 성공이면 성공, 11/26). 기록이 없으면 None
+    wake_success_rate: float | None = None      # 0~1, 날 기준: 날마다 첫 알람 세션 하나의 성공 여부의 평균(11/28). 기록이 없으면 None
     avg_rewake: float | None = None
     avg_reaction_sec: float | None = None       # 알람이 울린 시각을 알 수 있을 때만
-    avg_wake_minutes: float | None = None       # 평균 기상 시각(자정부터의 분)
+    avg_wake_minutes: float | None = None       # 평균 기상 시각(자정부터의 분). 날마다 가장 이른 첫 응답 시각 하나의 평균(11/28)
     avg_talk_min: float | None = None           # 평균 대화 시간(분)
     routine_done: int = 0                       # 수행한 단계 수 (루틴+콘텐츠)
     routine_total: int = 0                      # 전체 단계 수
@@ -91,11 +94,7 @@ def _step_counts(sessions) -> tuple[int, int, int, int]:
 
 def compute_streaks(sessions, upto: date | None = None) -> tuple[int, int]:
     """(현재 연속 달성일, 최장 연속 달성일). upto 이전(upto 포함)의 세션만 본다. 가정은 모듈 설명 참고."""
-    by_day: dict[date, bool] = {}
-    for s in sessions or []:
-        if s.session_date is None or (upto is not None and s.session_date > upto):
-            continue
-        by_day[s.session_date] = by_day.get(s.session_date, False) or bool(s.wake_success)
+    by_day = first_alarm_success_by_day(s for s in (sessions or []) if s.session_date is not None and (upto is None or s.session_date <= upto))
     best = run = 0
     prev: date | None = None
     for day in sorted(by_day):
@@ -112,14 +111,44 @@ def compute_streaks(sessions, upto: date | None = None) -> tuple[int, int]:
     return current, best
 
 
-def day_wake_success_rate(sessions) -> float | None:
-    """기상 성공률을 날 기준으로 센다(11/26 개선안 4-6, DB 칸 설명): 그날 세션 중 하나라도 성공이면 그날은 성공. 성공한 날 ÷ 기록이 있는 날.
-    세션 하나하나의 성공(wake_success)은 서버가 정해 넘긴다(리포트는 포춘까지 끝까지 마친 세션)."""
-    by_day: dict[date, bool] = {}
+def _by_day(sessions) -> dict[date, list[SessionRecord]]:
+    out: dict[date, list[SessionRecord]] = {}
     for s in sessions or []:
         if s.session_date is not None:
-            by_day[s.session_date] = by_day.get(s.session_date, False) or bool(s.wake_success)
-    return _mean(1.0 if ok else 0.0 for ok in by_day.values())
+            out.setdefault(s.session_date, []).append(s)
+    return out
+
+
+def _ts(dt: datetime | None) -> float:
+    """정렬용 시각. 시간대가 없으면 KST로 본다(records.to_dt와 같다). 없으면 가장 뒤."""
+    if dt is None:
+        return float("inf")
+    return (dt if dt.tzinfo else dt.replace(tzinfo=KST)).timestamp()
+
+
+def first_session(day_sessions) -> SessionRecord:
+    """그날 가장 먼저 울린 세션. 울린 시각(ALARM_RANG_AT)이 없으면 첫 응답 시각으로, 둘 다 없으면 맨 뒤로 본다(같으면 받은 순서)."""
+    return min(day_sessions, key=lambda s: _ts(s.alarm_rang_at or s.first_response_at))
+
+
+def first_alarm_success_by_day(sessions) -> dict[date, bool]:
+    """{날짜: 그날 첫 알람 세션의 기상 성공 여부}. 세션 하나하나의 성공(wake_success)은 서버가 정해 넘긴다(리포트는 포춘까지 끝까지 마친 세션)."""
+    return {d: bool(first_session(ss).wake_success) for d, ss in _by_day(sessions).items()}
+
+
+def day_wake_success_rate(sessions) -> float | None:
+    """기상 성공률(날 기준, 11/28 서버 요청): 날마다 첫 알람 세션 하나만 보고, 성공한 날 ÷ 알람이 울린 날(세션이 있는 날)."""
+    return _mean(1.0 if ok else 0.0 for ok in first_alarm_success_by_day(sessions).values())
+
+
+def day_wake_minutes(sessions) -> float | None:
+    """평균 기상 시각(날 기준, 11/28 서버 요청): 날마다 가장 이른 첫 응답 시각(FIRST_RESPONSE_AT) 하나를 그날의 기상 시각으로 써서 평균."""
+    mins = []
+    for ss in _by_day(sessions).values():
+        answered = [s for s in ss if s.first_response_at is not None]
+        if answered:
+            mins.append(min(answered, key=lambda s: _ts(s.first_response_at)).wake_minutes)
+    return _mean(mins)
 
 
 def aggregate(sessions) -> UserStats:
@@ -138,7 +167,7 @@ def aggregate(sessions) -> UserStats:
         wake_success_rate=day_wake_success_rate(sessions),
         avg_rewake=_mean(s.rewake_count for s in sessions),
         avg_reaction_sec=_mean(s.reaction_sec for s in sessions),
-        avg_wake_minutes=_mean(s.wake_minutes for s in sessions),
+        avg_wake_minutes=day_wake_minutes(sessions),
         avg_talk_min=_mean(s.talk_minutes for s in sessions),
         routine_done=done, routine_total=total, routine_completion_rate=_ratio(done, total),
         skip_ratio=_ratio(skipped, done + skipped),
