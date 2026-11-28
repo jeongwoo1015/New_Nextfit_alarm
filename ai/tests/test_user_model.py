@@ -5,7 +5,7 @@ import pytest
 
 from ai.personalization.records import (DONE, KST, PENDING, SKIPPED, SessionRecord, StepRecord, build_sessions)
 from ai.personalization.reward import RewardConfig, session_reward
-from ai.personalization.user_model import (DEFAULT_STATS, MAX_GAP_DAYS, MIN_SESSIONS, clock_str, compute_stats,
+from ai.personalization.user_model import (DEFAULT_STATS, MAX_GAP_DAYS, MIN_SESSIONS, aggregate, clock_str, compute_stats,
                                            compute_streaks, day_summary, period_series)
 
 TODAY = date(2026, 11, 10)   # 화요일
@@ -180,9 +180,12 @@ def test_streak_skips_days_without_sessions_within_gap():
     assert compute_streaks([sess(1), sess(1 + MAX_GAP_DAYS + 1)]) == (1, 1)    # 간격이 길면 끊긴다
 
 
-def test_streak_any_success_in_day_counts_and_upto_cuts_future():
-    two_alarms = [sess(5, ok=False), sess(5, ok=True), sess(6, ok=True)]
-    assert compute_streaks(two_alarms) == (2, 2)
+def test_streak_uses_first_alarm_of_day_and_upto_cuts_future():
+    # 11/28 서버 요청: 그날 가장 먼저 울린 세션 하나로 달성 여부를 정한다. 첫 알람 실패 뒤 낮잠 알람만 마친 날은 끊긴다
+    nap_only = [sess(5, ok=False, alarm_rang_at=at(5, 7, 0)), sess(5, ok=True, alarm_rang_at=at(5, 14, 0)), sess(6, ok=True, alarm_rang_at=at(6, 7, 0))]
+    assert compute_streaks(nap_only) == (1, 1)
+    first_ok = [sess(5, ok=True, alarm_rang_at=at(5, 7, 0)), sess(5, ok=False, alarm_rang_at=at(5, 14, 0)), sess(6, ok=True, alarm_rang_at=at(6, 7, 0))]
+    assert compute_streaks(first_ok) == (2, 2)
     assert compute_streaks([sess(5), sess(6), sess(9)], upto=date(2026, 11, 6)) == (2, 2)
     assert compute_streaks([sess(1)], upto=date(2026, 11, 20))[0] == 0     # 마지막 세션이 너무 오래 전이면 현재 연속은 0
 
@@ -261,3 +264,25 @@ def test_skipped_coaching_day_steps_are_not_counted():
     assert s.routine_total == 1 and s.routine_done == 1 and s.routine_completion_rate == 1.0        # 브리핑만 한 날이 못 한 날로 잡히지 않는다
     assert session_reward(brief_only) == 1.0                                                        # 기상 성공만 본다
     assert session_reward(sess(9, ok=True, steps=[step(PENDING)])) == 0.5                           # 코칭을 한 날은 단계가 반영된다
+
+
+def test_daily_stats_use_first_alarm_and_earliest_response():
+    """11/28 서버 요청: 하루에 모닝콜을 여러 번 받아도 날마다 하나로 센다."""
+    # 11/5: 7시 알람 실패, 14시 낮잠 알람만 끝까지 마침 → 그날은 실패. 기상 시각은 7:03(가장 이른 첫 응답)
+    # 11/6: 7시 알람 성공(울린 순서는 거꾸로 들어와도 울린 시각으로 고른다). 낮잠 알람은 기상 시각에서 빠진다
+    ss = [sess(5, ok=True, alarm_rang_at=at(5, 14, 0), resp=at(5, 14, 1)), sess(5, ok=False, alarm_rang_at=at(5, 7, 0), resp=at(5, 7, 3)),
+          sess(6, ok=False, alarm_rang_at=at(6, 14, 0), resp=at(6, 14, 2)), sess(6, ok=True, alarm_rang_at=at(6, 7, 0), resp=at(6, 7, 1))]
+    st = aggregate(ss)
+    assert st.n_sessions == 4 and st.wake_success_rate == 0.5           # 세션 평균이면 0.5지만 '아무거나 성공'이면 1.0이었다
+    assert st.avg_wake_clock == "07:02"                                   # (7:03 + 7:01) / 2. 세션 평균이면 10시 반쯤
+    # 첫 알람을 놓치고(응답 없음) 다음 알람에서 일어난 날: 성공 여부는 첫 알람, 기상 시각은 다음 알람의 첫 응답
+    missed = [sess(7, ok=False, alarm_rang_at=at(7, 7, 0)), sess(7, ok=True, alarm_rang_at=at(7, 7, 30), resp=at(7, 7, 31))]
+    m = aggregate(missed)
+    assert m.wake_success_rate == 0.0 and m.avg_wake_clock == "07:31"
+    # 울린 시각이 없으면 첫 응답 시각으로 첫 알람을 고른다
+    no_rang = [sess(8, ok=False, resp=at(8, 14, 0)), sess(8, ok=True, resp=at(8, 7, 0))]
+    assert aggregate(no_rang).wake_success_rate == 1.0
+    # 그래프 칸·하루 요약도 같은 기준
+    assert day_summary(ss, date(2026, 11, 5)).wake_success_rate == 0.0 and day_summary(ss, date(2026, 11, 5)).avg_wake_clock == "07:03"
+    week = period_series(ss, "week", date(2026, 11, 5))
+    assert sum(b.wake_success_rate or 0 for b in week) == 1.0

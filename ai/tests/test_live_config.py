@@ -32,7 +32,7 @@ def test_verdicts_match_spec():
 
 def test_tools_per_kind():
     names = lambda k: [d["name"] for d in tools_for(k)[0]["functionDeclarations"]]
-    assert names("night") == ["update_setting", "end_session"] and names("briefing") == ["start_routine", "reschedule_alarm", "update_setting", "end_session"]
+    assert names("night") == ["update_setting", "end_session"] and names("briefing") == ["start_routine", "reschedule_alarm", "report_bedtime", "update_setting", "end_session"]
     assert names("coaching") == ["report_step_result", "adjust_step_time", "reschedule_alarm", "end_session"]
 
 
@@ -232,13 +232,13 @@ def test_step_numbers_continue_across_sessions():
 def test_tools_follow_the_session_plan():
     q = (Step(1, "퀴즈 1번", 60, "SPEECH", "문제: Q\n정답: A"),)
     names = lambda kind, inp: [d["name"] for d in tools_for(kind, inp)[0]["functionDeclarations"]]
-    assert names("briefing", BriefingInput()) == ["start_routine", "reschedule_alarm", "update_setting", "end_session"]                          # 기본 루틴이 이어짐
-    assert names("briefing", BriefingInput(content_name="퀴즈")) == ["start_routine", "reschedule_alarm", "update_setting", "end_session"]        # 콘텐츠 세션이 이어짐
-    assert names("briefing", BriefingInput(coaching_skipped=True, content_name="퀴즈")) == ["reschedule_alarm", "update_setting", "end_session"]  # 코칭 안 하는 날
-    assert names("briefing", BriefingInput(coaching_skipped=True)) == ["reschedule_alarm", "update_setting", "end_session"]
+    assert names("briefing", BriefingInput()) == ["start_routine", "reschedule_alarm", "report_bedtime", "update_setting", "end_session"]                          # 기본 루틴이 이어짐
+    assert names("briefing", BriefingInput(content_name="퀴즈")) == ["start_routine", "reschedule_alarm", "report_bedtime", "update_setting", "end_session"]        # 콘텐츠 세션이 이어짐
+    assert names("briefing", BriefingInput(coaching_skipped=True, content_name="퀴즈")) == ["reschedule_alarm", "report_bedtime", "update_setting", "end_session"]  # 코칭 안 하는 날
+    assert names("briefing", BriefingInput(coaching_skipped=True)) == ["reschedule_alarm", "report_bedtime", "update_setting", "end_session"]
     assert names("coaching", CoachingInput(steps=q)) == ["report_step_result", "adjust_step_time", "reschedule_alarm", "end_session"]   # 루틴 세션: 오늘 시간 변경 가능
     assert names("coaching", CoachingInput(morning_call_type="CONTENT", steps=q)) == ["report_step_result", "reschedule_alarm", "end_session"]   # 콘텐츠는 고정 시간
-    assert [d["name"] for d in build_setup("briefing", BriefingInput(content_name="퀴즈"))["tools"][0]["functionDeclarations"]] == ["start_routine", "reschedule_alarm", "update_setting", "end_session"]
+    assert [d["name"] for d in build_setup("briefing", BriefingInput(content_name="퀴즈"))["tools"][0]["functionDeclarations"]] == ["start_routine", "reschedule_alarm", "report_bedtime", "update_setting", "end_session"]
 
 
 def test_time_words_rule_is_in_every_conversation():
