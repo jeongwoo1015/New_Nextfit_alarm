@@ -70,14 +70,14 @@ ADJUST_STEP_TIME = {
 
 # 모닝콜 말로 미루기(11/20 회의 1, 11/24 확대): 전화를 받은 뒤 "~분 뒤에 다시 울려 줘", "9시에 다시 맞춰 줘"라고 하면 오늘만 알람을 다시 맞춘다.
 # 브리핑뿐 아니라 루틴·콘텐츠(코칭) 통화에도 둔다. 미루면 언제든 그날 기상은 실패로 센다(서버 몫, B21). 포춘(읽고 멈추는 세션)은 함수를 부르지 않으므로 뺀다.
-# 앱은 end_session처럼 응답하지 않고 안내 음성이 끝나면 연결을 닫고 알람을 다시 예약한다(사용자가 지금 울리는 알람은 직접 종료한다).
+# 앱은 end_session처럼 응답하지 않고 안내 음성이 끝나면 통화를 저절로 끝내고 알람을 다시 예약한다(11/27 앱 요청: 사용자에게 직접 종료하라고 안내하지 않는다).
 SNOOZE_MAX_MINUTES = 60
-SNOOZE_MAX_PER_DAY = 3
+SNOOZE_MAX_PER_ALARM = 3            # 알람(세션)마다 미룰 수 있는 횟수(11/26 회의: 하루 합계가 아니라 알람마다). 서버는 그 알람의 미룬 횟수를 snoozes_today 칸에 넣는다
 RESCHEDULE_ALARM = {
     "name": "reschedule_alarm",
     "description": ("전화를 받은 뒤 사용자가 오늘만 알람을 미루고 싶다고 분명히 말했을 때(예: '10분 뒤에 다시 울려 줘', '9시에 다시 맞춰 줘') 호출한다. "
                     "minutes_later(지금부터 몇 분 뒤, 1~60)와 at_time(오늘 몇 시, 'HH:MM') 중 사용자가 말한 쪽 하나만 넣는다. "
-                    "시간을 말하지 않았으면 먼저 한 번 묻고, 말한 뒤에 호출한다. 단순히 졸리다는 말은 미루는 요청이 아니다. 같은 응답에서 다시 맞췄다고 안내하고 직접 종료하도록 먼저 말한 뒤, 그 응답의 맨 끝에서 호출한다(호출하면 앱이 응답 없이 안내 음성이 끝나면 연결을 닫으므로, 호출한 뒤에는 어떤 말도 하지 않는다)."),
+                    "시간을 말하지 않았으면 먼저 한 번 묻고, 말한 뒤에 호출한다. 단순히 졸리다는 말은 미루는 요청이 아니다. 같은 응답에서 다시 맞췄다고 먼저 안내한 뒤, 그 응답의 맨 끝에서 호출한다(호출하면 앱이 응답 없이 안내 음성이 끝나면 연결을 닫으므로, 호출한 뒤에는 어떤 말도 하지 않는다)."),
     "parameters": {
         "type": "OBJECT",
         "properties": {
@@ -130,10 +130,10 @@ def tools_for(kind: str, inp=None) -> list[dict]:
     if kind == "briefing" and inp is not None:
         from .prompts.common import resolve_plan      # 순서표에 코칭이 있는 날에만 start_routine (코칭 안 하는 날·이미 다 마친 날은 end_session으로 넘긴다)
         follows = COACHING in resolve_plan(inp, BRIEFING)
-        can_snooze = int(getattr(inp, "snoozes_today", 0) or 0) < SNOOZE_MAX_PER_DAY      # 하루 한도를 넘은 날은 함수를 빼서 호출할 수 없게 한다
+        can_snooze = int(getattr(inp, "snoozes_today", 0) or 0) < SNOOZE_MAX_PER_ALARM    # 이 알람의 한도를 넘으면 함수를 빼서 호출할 수 없게 한다
         return [{"functionDeclarations": ([START_ROUTINE] if follows else []) + ([RESCHEDULE_ALARM] if can_snooze else []) + [UPDATE_SETTING, END_SESSION]}]
     if kind == "coaching":
-        snooze = [RESCHEDULE_ALARM] if int(getattr(inp, "snoozes_today", 0) or 0) < SNOOZE_MAX_PER_DAY else []   # 코칭 통화에서도 하루 한도를 넘은 날은 함수를 뺀다
+        snooze = [RESCHEDULE_ALARM] if int(getattr(inp, "snoozes_today", 0) or 0) < SNOOZE_MAX_PER_ALARM else []   # 코칭 통화에서도 이 알람의 한도를 넘으면 함수를 뺀다
         if getattr(inp, "morning_call_type", "ROUTINE") == "CONTENT":
             report = REPORT_STEP_RESULT_QUIZ if content_kind(inp) == "QUIZ" else REPORT_STEP_RESULT
             area = [SELECT_STRETCH_AREA] if content_kind(inp) == "STRETCH" and getattr(inp, "stretch_routines", ()) else []

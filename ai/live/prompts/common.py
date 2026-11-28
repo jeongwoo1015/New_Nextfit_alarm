@@ -164,19 +164,19 @@ def persona_block(p: Persona) -> str:
 def snooze_block(inp, in_steps: bool = False) -> str:
     """'말로 알람 미루기' 규칙(11/20 회의 1). 전화를 받은 뒤 사용자가 오늘만 알람을 미루고 싶다고 하면 reschedule_alarm을 부른다.
     브리핑과 코칭(루틴·콘텐츠) 통화에 붙는다. in_steps=True면 단계 진행 중이라는 설명이 더 붙는다(11/24 시연: 영어 통화에서 미루기가 안 됐다)."""
-    from ..tools import SNOOZE_MAX_MINUTES, SNOOZE_MAX_PER_DAY
+    from ..tools import SNOOZE_MAX_MINUTES, SNOOZE_MAX_PER_ALARM
     casual = inp.persona.tone == "CASUAL"
     used = max(0, int(getattr(inp, "snoozes_today", 0) or 0))
-    done = "알람을 ○분 뒤에 다시 맞췄어. 지금 울리는 알람은 직접 종료해 줘." if casual else "알람을 ○분 뒤에 다시 맞췄어요. 지금 울리는 알람은 직접 종료해 주세요."
-    done_at = "알람을 ○시 ○분에 다시 맞췄어. 지금 울리는 알람은 직접 종료해 줘." if casual else "알람을 ○시 ○분에 다시 맞췄어요. 지금 울리는 알람은 직접 종료해 주세요."
+    done = "알람을 ○분 뒤에 다시 맞췄어." if casual else "알람을 ○분 뒤에 다시 맞췄어요."
+    done_at = "알람을 ○시 ○분에 다시 맞췄어." if casual else "알람을 ○시 ○분에 다시 맞췄어요."
     ask = "몇 분 뒤에 다시 울려 줄까?" if casual else "몇 분 뒤에 다시 울려 드릴까요?"
-    stop = "오늘은 이미 ○번 미뤘어. 이제 일어나 보자." if casual else "오늘은 이미 ○번 미루셨어요. 이제 일어나 볼까요?"
+    stop = "이 알람은 이미 ○번 미뤘어. 이제 일어나 보자." if casual else "이 알람은 이미 ○번 미루셨어요. 이제 일어나 볼까요?"
     over = "한 번에 최대 60분까지만 미룰 수 있어. 60분으로 할까?" if casual else "한 번에 최대 60분까지만 미룰 수 있어요. 60분으로 할까요?"
-    if used >= SNOOZE_MAX_PER_DAY:         # 하루 한도를 넘은 날은 미루기 함수가 없다. 다시 맞췄다고 거짓으로 말하지 않게 규칙을 이것만 둔다
-        return ("[알람 미루기 불가(오늘은 한도 초과)]\n"
-                f"- 오늘 이미 {used}번 미뤘으므로 더 미룰 수 없다. 사용자가 알람을 미루고 싶다고 하면 알람을 다시 맞출 수 없다고 부드럽게 말하고 \"{stop}\"처럼 일어나도록 권한다(○에 {used}를 넣는다). "
+    if used >= SNOOZE_MAX_PER_ALARM:       # 이 알람의 한도를 넘으면 미루기 함수가 없다. 다시 맞췄다고 거짓으로 말하지 않게 규칙을 이것만 둔다
+        return ("[알람 미루기 불가(이 알람은 한도 초과)]\n"
+                f"- 이 알람은 이미 {used}번 미뤘으므로 더 미룰 수 없다. 사용자가 알람을 미루고 싶다고 하면 알람을 다시 맞출 수 없다고 부드럽게 말하고 \"{stop}\"처럼 일어나도록 권한다(○에 {used}를 넣는다). "
                 "알람을 다시 맞췄다거나 미뤘다고는 절대 말하지 않는다. 졸리다는 말만 한 경우는 평소처럼 반응한다.")
-    used_line = f"오늘 이미 {used}번 미뤘다(남은 횟수 {SNOOZE_MAX_PER_DAY - used}번)."
+    used_line = f"이 알람은 이미 {used}번 미뤘다(남은 횟수 {SNOOZE_MAX_PER_ALARM - used}번)."
     steps_note = ("\n- 단계를 진행하는 중이어도 사용자가 알람을 미루고 싶다고 분명히 말하면 같은 규칙으로 reschedule_alarm을 부른다. 이때 현재 단계의 판정(report_step_result)·단계 시간 조정·부위 선택 같은 함수는 같은 응답에서 부르지 않는다(현재 단계는 끝내지 않은 채 남는다). "
                   "단계에서 요구한 대답(영어 문장 따라 말하기, 퀴즈 정답, 끝말잇기 단어, 따라 하는 동작)이나 \"잠깐만\", \"다시 한 번 말해 줘\"는 미루는 요청이 아니다. 알람을 다시 울려 달라는 뜻이 분명하지 않으면 먼저 한 번 묻는다." if in_steps else "")
     return ("[말로 알람 미루기(오늘만)]\n"
@@ -184,7 +184,7 @@ def snooze_block(inp, in_steps: bool = False) -> str:
             "몇 분 뒤인지 또는 몇 시인지 말했으면 되묻지 않고 바로 호출한다(\"10분 뒤\"는 minutes_later=10, \"9시\"는 at_time=\"09:00\").\n"
             "- 졸리다는 말만으로는 미루는 요청이 아니다(\"아직 졸려요\", \"피곤해요\"). 이때는 평소처럼 반응하고 일어나도록 권한다. "
             f"미루겠다는 뜻은 있는데 시간이 없으면(\"조금만 더 잘래\", \"나중에 깨워 줘\") 한 번만 \"{ask}\"라고 묻고 답을 들은 뒤에 호출한다.\n"
-            f"- 한 번에 최대 {SNOOZE_MAX_MINUTES}분까지, 하루 최대 {SNOOZE_MAX_PER_DAY}번까지 미룰 수 있다. {SNOOZE_MAX_MINUTES}분을 넘는 시간을 말하면 \"{over}\"처럼 알리고 답을 들은 뒤에 호출한다. "
+            f"- 한 번에 최대 {SNOOZE_MAX_MINUTES}분까지, 알람마다 최대 {SNOOZE_MAX_PER_ALARM}번까지 미룰 수 있다. {SNOOZE_MAX_MINUTES}분을 넘는 시간을 말하면 \"{over}\"처럼 알리고 답을 들은 뒤에 호출한다. "
             "[현재 시각]이 있으면 시각으로 말한 요청이 지금보다 뒤이고 60분 안인지 확인하고, 아니면 다시 묻는다. " + used_line + "\n"
             f"- 다시 맞췄다고 알리는 한 문장을 먼저 말하고, 그 응답의 맨 끝에서 reschedule_alarm을 호출한다(호출한 뒤에는 어떤 말도 하지 않는다). 분으로 말했으면 \"{done}\", 시각으로 말했으면 \"{done_at}\"처럼 말한다. "
             "이 안내 뒤에는 브리핑·루틴·콘텐츠를 이어 하지 않고, 다음 순서로 넘기는 함수나 end_session도 부르지 않는다. 미루기는 오늘만이고 기본 알람 설정은 그대로다." + steps_note)

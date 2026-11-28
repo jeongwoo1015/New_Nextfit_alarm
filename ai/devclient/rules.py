@@ -169,7 +169,7 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
             add("미루기: reschedule_alarm을 한 번 호출", HARD, len(calls) == 1, f"호출 {len(calls)}번")
             got = calls[0]["args"] if calls else {}
             add("미루기: 시간 값이 기대와 같음", HARD, got == want, f"실제={got} 기대={want}")
-            add("미루기: 호출한 응답에서 다시 맞췄다고 알리고 직접 종료를 안내함", HARD, "맞췄" in said and "종료" in said, said[:140])
+            add("미루기: 호출한 응답에서 다시 맞췄다고 알림(앱이 통화를 저절로 끝내므로 직접 종료하라고 하지 않음)", HARD, "맞췄" in said and "종료" not in said, said[:140])
             add("미루기: 안내 뒤 다른 종료·시작 함수를 부르지 않음", HARD, not any(n in ("end_session", "start_routine") for t in turns for n in _names(t)), "")
             if kind == "coaching":                   # 단계 진행 중 미루기: 같은 응답에서 단계 판정·시간 조정 함수를 부르지 않는다
                 add("미루기: 같은 응답에서 단계 판정·조정 함수를 부르지 않음", HARD,

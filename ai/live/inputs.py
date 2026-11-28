@@ -105,7 +105,7 @@ class BriefingInput:
     plan: tuple[str, ...] = ()         # 모닝콜 순서표(ai.tasks.morning_plan). 비어 있으면 지금 앱 순서(LEGACY_ORDER)를 one_liner_follows·coaching_skipped·already_done으로 만든다
     already_done: bool = False         # 오늘 루틴·콘텐츠를 이미 모두 마친 날(앱 재진입 등). 브리핑에서 루틴 안내·시작 질문 없이 짧게 칭찬만 한다
     settings: "SettingsView | None" = None   # 대화로 바꿀 수 있는 설정의 현재 값(update_setting)
-    snoozes_today: int = 0             # 오늘 이미 말로 미룬 횟수(11/20 회의 1). 하루 3번을 넘으면 더 미루지 않는다. 서버가 오늘 스누즈 횟수를 넘긴다
+    snoozes_today: int = 0             # 이 알람에서 이미 미룬 횟수(버튼·말 합산). 이름은 그대로지만 11/26부터 하루 합계가 아니라 알람(세션)마다 센다. 3번이면 더 미루지 않는다. 서버가 넘긴다
 
 
 @dataclass(frozen=True)
@@ -131,7 +131,7 @@ class CoachingInput:
     content_option: str = ""           # 콘텐츠 세부(알람의 content_option 또는 compose_content_steps 결과의 option)
     plan: tuple[str, ...] = ()         # 모닝콜 순서표. 첫 연결 문장(앞 단계)과 마무리(다음이 포춘이면 포춘으로 넘김)에 쓴다. 비어 있으면 지금 앱 순서(포춘 다음 코칭, 코칭이 마지막)
     stretch_routines: tuple = ()       # 스트레칭 부위별 루틴 ((부위, (Step, ...)), ...) = ai.tasks.stretch_sets.all_area_steps() (부위 12개, 루틴마다 4단계 180초). 있으면 AI가 "오늘 어디가 불편하세요?"로 부위를 묻고 select_stretch_area를 부른다. 없으면 steps 그대로 진행
-    snoozes_today: int = 0             # 오늘 이미 미룬 횟수(버튼·말 합산). 콘텐츠·루틴 통화에서도 말로 미룰 수 있어 한도 판단에 쓴다(B21). 서버가 넘긴다
+    snoozes_today: int = 0             # 이 알람에서 이미 미룬 횟수(버튼·말 합산, 11/26부터 알람마다). 콘텐츠·루틴 통화에서도 말로 미룰 수 있어 한도 판단에 쓴다(B21). 서버가 넘긴다
 
 
 def content_kind(inp) -> str:
