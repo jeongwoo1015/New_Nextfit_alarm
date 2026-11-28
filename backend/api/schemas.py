@@ -492,6 +492,7 @@ class ContentStepOut(BaseModel):
 
 class GameScoreIn(BaseModel):
     score: int = Field(ge=0, le=10_000)     # 제한 시간 안에 주고받은 횟수 (앱이 센다)
+    winner: Literal[codes.GAME_WINNERS] | None = None   # 끝말잇기 승패 USER / NEXTY (승패가 안 난 판은 보내지 않음, 11/28)
 
 
 class GameScoreOut(BaseModel):
@@ -499,6 +500,7 @@ class GameScoreOut(BaseModel):
     score: int
     best_score: int                         # 같은 게임(콘텐츠 세부)의 지금까지 최고 기록 (이번 기록 포함)
     is_best: bool                           # 이번이 최고 기록과 같거나 넘었는가 (새 기록 표시용)
+    user_wins: int | None = None            # 끝말잇기에서 넥스티를 이긴 누적 횟수 (끝말잇기가 아니면 null, 11/28)
 
 
 class ContentStepsOut(BaseModel):

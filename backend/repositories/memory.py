@@ -5,6 +5,7 @@ from datetime import date, datetime, time, timedelta
 
 from backend.core.errors import ValidationFailed
 from backend.core.timeutil import apply_date, now_kst, record_date
+from backend.domain import codes
 from backend.domain.models import (AiMusic, Alarm, AppConfig, DiaryPhoto, MorningSession, NightRaw, NightRecord, RecentRecords,
                                    RoutineTemplate, SessionStep, StrategyLog, TemplateItem, User, UserSetting)
 from backend.domain.routine_rules import build_routine
@@ -411,6 +412,19 @@ class MemorySessionRepository:
                   and (s := self.sessions.get(st.session_id)) and s.content_type == content_type
                   and (not content_option or s.content_option == content_option)]
         return max(scores, default=None)
+
+    def set_game_winner(self, user_id, session_id, step_order, winner):
+        if winner not in codes.GAME_WINNERS:
+            raise ValidationFailed("승패는 USER 또는 NEXTY예요")                  # CHECK game_winner
+        step = next((s for s in self.list_steps(user_id, session_id) if s.step_order == step_order), None)
+        if not step:
+            return None
+        self.steps[step.step_id] = replace(step, game_winner=winner)
+        return self.steps[step.step_id]
+
+    def count_user_wins(self, user_id, content_option="WORDCHAIN"):
+        return sum(1 for st in self.steps.values() if st.user_id == user_id and st.game_winner == "USER"
+                   and (s := self.sessions.get(st.session_id)) and s.content_type == "QUIZ" and s.content_option == content_option)
 
     def list_content_steps(self, user_id, content_type, since, until):
         rows = []
