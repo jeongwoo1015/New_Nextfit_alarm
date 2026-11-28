@@ -264,6 +264,19 @@ SCENARIOS.update({s.name: s for s in [
 ]})
 
 
+# ----- 모닝콜에서 말한 잠든 시각(11/27 앱 요청: report_bedtime) — 로컬 전용 -----
+SCENARIOS.update({s.name: s for s in [
+    Scenario("briefing_bedtime", "briefing",
+             BriefingInput(persona=Persona("예준"), morning_call_type="ROUTINE", program_name="현실 모닝루틴", now_hhmm="07:02", events_today=EVENTS, weather=WEATHER),
+             ("음 좀 졸려요. 어젯밤 열두 시 반쯤 잤어요", "네 준비됐어요"),       # 첫 대답에 잠든 시각을 넣는다(브리핑 시나리오는 대답 두 개)
+             expect={"bedtime": "00:30", "expect_start": True}),
+    Scenario("briefing_bedtime_unknown", "briefing",
+             BriefingInput(persona=Persona("예준"), morning_call_type="ROUTINE", program_name="현실 모닝루틴", now_hhmm="07:02", events_today=EVENTS, weather=WEATHER),
+             ("개운해요. 몇 시에 잤는지는 기억이 안 나요", "네 준비됐어요"),
+             expect={"bedtime": None, "expect_start": True}),
+]})
+
+
 # ----- 실제 앱 순서(코칭 → 포춘): 서버가 순서표를 넘기면 마지막 단계 뒤에 앱이 알아서 다음 순서로 넘어간다(작별 없음, end_session 안 부름) — 로컬 전용 -----
 # 위 tone_* 시나리오는 순서표를 안 넘겨 옛 순서(코칭이 마지막)로 돌았다. 서버는 코칭 세션에 순서표를 실제로 넘기므로(AI B15) 실제 앱과 같은 흐름은 이쪽이다.
 _PLAN_EXPECT = {**_TONE_EXPECT, "farewell": False, "no_farewell": True, "handoff_words": ["포춘"]}
