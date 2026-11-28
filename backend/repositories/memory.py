@@ -414,8 +414,8 @@ class MemorySessionRepository:
         return max(scores, default=None)
 
     def set_game_winner(self, user_id, session_id, step_order, winner):
-        if winner not in codes.GAME_WINNERS:
-            raise ValidationFailed("승패는 USER 또는 NEXTY예요")                  # CHECK game_winner
+        if winner is not None and winner not in codes.GAME_WINNERS:
+            raise ValidationFailed("승패는 USER 또는 NEXTY예요")                  # CHECK game_winner (None = 승패 비우기, supabase와 같음)
         step = next((s for s in self.list_steps(user_id, session_id) if s.step_order == step_order), None)
         if not step:
             return None
