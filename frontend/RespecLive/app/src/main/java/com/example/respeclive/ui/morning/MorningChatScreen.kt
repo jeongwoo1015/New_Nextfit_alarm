@@ -153,6 +153,8 @@ private fun morningPlan(view: JSONObject): List<String>? {
 private const val REWAKE_NOTICE = "(앱 알림: 재기상 음악 재생)"
 /** 말로 미룬 뒤 결과 안내("7시 10분에 다시 울려요.")를 보여 주고 통화를 저절로 끝내기까지 */
 private const val SNOOZE_CLOSE_MS = 2_000L
+/** 모닝콜을 끝까지 마친 뒤 완료 기록(POST /complete) 응답을 기다리는 최대 시간 (넘으면 요청은 뒤에서 계속하고 화면은 넘어감) */
+private const val COMPLETE_WAIT_MS = 3_000L
 
 /** 판정 보고가 사용자 말 받아쓰기보다 먼저 올 때, 받아쓰기를 기다리는 시간 (B19) */
 private const val REPORT_SPEECH_WAIT_MS = 1_500L
@@ -822,11 +824,17 @@ fun MorningChatScreen(
 
         client.stop()
 
+        // 순서표를 끝까지 마침(포춘까지) → 서버에 완료 기록. 리포트 기상 성공은 이 기록이 있는 세션만 셈 (11/27 서버).
+        // 중간에 끝난 경우(통화 종료 버튼·말로 미루기·연결 끊김)는 여기까지 오지 않음.
+        // 화면을 벗어나도 요청은 끝까지 보내고, 다음 화면(모닝 리포트)이 반영된 값을 받도록 잠깐만 기다림
+        val completed = ApiClient.scope.async { RespecApi.completeMorning(sid) }
+
         if (!endedOnFortune) {
             stage = Stage.Finished
             notice = "좋은 하루 보내세요!"
             delay(1000)
         }
+        withTimeoutOrNull(COMPLETE_WAIT_MS) { completed.await() }
         finish()
     }
 

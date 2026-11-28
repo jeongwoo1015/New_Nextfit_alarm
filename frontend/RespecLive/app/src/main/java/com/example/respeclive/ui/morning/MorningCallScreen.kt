@@ -120,8 +120,9 @@ fun MorningCallScreen(
             // 사용자가 반응한 게 아니므로 받은 단계는 보고하지 않음 (null로 보내면 모든 단계 실패로 학습됨)
             autoAnswer = !snoozing && snoozesToday >= SnoozeCount.MAX_PER_ALARM,
             onAutoAnswer = { answered = true },
-            onDismiss = {
-                reportWake(null)        // 받지 않고 끔
+            onDismiss = { pressedLevel ->
+                // 받지 않고 끔: 끄기도 반응이라 누른 순간의 단계를 보고 (11/27 서버). null은 반응 없이 저절로 꺼졌을 때만
+                reportWake(pressedLevel)
                 onFinish()
             },
             snoozeLeft = SnoozeCount.left(snoozesToday),
@@ -160,7 +161,7 @@ fun MorningCallScreen(
 @Composable
 private fun MorningIncomingScreen(
     onAnswer: (receivedLevel: Int) -> Unit,
-    onDismiss: () -> Unit,
+    onDismiss: (pressedLevel: Int) -> Unit,
     onSnooze: (pressedLevel: Int) -> Unit,
     alarmLabel: String = "오전 6:00",
     snoozeLeft: Int = SnoozeCount.MAX_PER_ALARM,
@@ -213,7 +214,7 @@ private fun MorningIncomingScreen(
         onAutoAnswer()
     }
 
-    BackHandler(onBack = onDismiss) // 테스트용: 뒤로 가기 = 알람 끄기
+    BackHandler { onDismiss(level) }   // 뒤로 가기도 알람 끄기와 같음
 
     val infinite = rememberInfiniteTransition(label = "ring")
     val ringScale by infinite.animateFloat(
@@ -306,11 +307,18 @@ private fun MorningIncomingScreen(
             TextButton(onClick = { onSnooze(level) }, enabled = snoozeLeft > 0) {
                 Text(
                     if (snoozeLeft > 0) "${AlarmScheduler.SNOOZE_MINUTES}분 뒤 다시 울리기 · ${snoozeLeft}번 남음"
-                    else "오늘은 더 미룰 수 없어요",
+                    else "이 알람은 더 미룰 수 없어요",
                     color = if (snoozeLeft > 0) RespecColors.TextSub else RespecColors.TextSub.copy(alpha = 0.5f),
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold
                 )
+            }
+            // 받지 않고 알람 끄기: 바로 다시 잠들지 않도록 받기보다 작고 덜 눈에 띄게. 그날은 모닝콜 없이 끝남.
+            // 미루기를 다 써서 저절로 연결하는 중에는 숨김 (끄기로 빠져나가지 않게)
+            if (!autoAnswer) {
+                TextButton(onClick = { onDismiss(level) }) {
+                    Text("알람 끄기", color = RespecColors.TextSub.copy(alpha = 0.7f), fontSize = 13.sp)
+                }
             }
         }
     }
