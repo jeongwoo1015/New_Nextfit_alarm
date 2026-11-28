@@ -25,8 +25,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.respeclive.alarm.AlarmLaunch
-import com.example.respeclive.data.AlarmRepository
-import com.example.respeclive.data.AlarmType
+import com.example.respeclive.data.Alarm
+import java.util.Calendar
 import com.example.respeclive.data.RespecApi
 import com.example.respeclive.data.ServerAuth
 import com.example.respeclive.ui.login.LoginScreen
@@ -157,8 +157,8 @@ private fun MainNav(
             composable("home") {
                 HomeScreen(
                     onStartNightChat = {
-                        activeLabel = AlarmRepository.alarms
-                            .firstOrNull { it.type == AlarmType.BEDTIME }?.timeLabel() ?: ""
+                        // 버튼으로 직접 거는 통화라 알람 시각이 아니라 지금 시각
+                        activeLabel = nowLabel()
                         nav.navigate("nightCall")
                     },
                     onCreateAlarm = { nav.navigate("alarmEdit/-1") },
@@ -228,7 +228,7 @@ private fun MainNav(
             }
             composable("nightCall") {
                 NightCallScreen(
-                    bedtimeLabel = activeLabel.ifBlank { "오후 10:00" },
+                    bedtimeLabel = activeLabel.ifBlank { nowLabel() },
                     onAccept = {
                         nav.navigate("nightChat") {
                             popUpTo("nightCall") { inclusive = true }
@@ -292,3 +292,6 @@ private fun RespecBottomBar(currentRoute: String?, onSelect: (String) -> Unit) {
         }
     }
 }
+/** 지금 시각 ("오후 11:42") */
+private fun nowLabel(): String =
+    Calendar.getInstance().let { Alarm.timeLabelOf(it.get(Calendar.HOUR_OF_DAY), it.get(Calendar.MINUTE)) }
