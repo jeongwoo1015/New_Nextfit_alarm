@@ -24,6 +24,7 @@
 | (14) | `14_bedtime_alarm.sql` | 굿나잇콜 알람 서버 저장(RS_ALARM.ALARM_KIND), 굿나잇콜을 모닝콜 세션·하루 한정 변경에 못 쓰게 막는 트리거. 01을 이 변경 전에 실행한 DB에만 적용 |
 | (15) | `15_wake_volume.sql` | 기상 볼륨 기록 테이블(RS_WAKE_LOG), 사용자 기상 볼륨 상한·다음 한 번, 학습 상태 wake 키, 미루기 다시 울릴 시각, 게임 기록(score). 01·02를 이 변경 전에 실행한 DB에만 적용 |
 | (16) | `16_session_flow.sql` | 모닝 세션에 모닝콜에서 말한 잠든 시각(reported_bedtime), 자동 연결 여부(auto_connected), 포춘까지 마친 시각(flow_completed_at). 01을 이 변경 전에 실행한 DB에만 적용 |
+| (17) | `17_game_winner.sql` | 단계에 끝말잇기 승패(game_winner: USER / NEXTY). 01을 이 변경 전에 실행한 DB에만 적용 |
 
 ## 구조 요약
 - 앱은 DB에 직접 접근하지 않고 FastAPI 서버를 거칩니다. 서버는 service_role 키를 쓰고, 로그인 토큰의 user_id를 코드에서 확인합니다.

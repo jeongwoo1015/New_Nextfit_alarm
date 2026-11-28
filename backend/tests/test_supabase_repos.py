@@ -408,7 +408,7 @@ def test_wake_volume_log(repos, uid, other):
 
 
 def test_game_score_and_content(repos, uid, other):
-    """게임 기록(주고받은 횟수)의 최고 기록, 콘텐츠 화면용 단계 모아 보기, 미루기 다시 울릴 시각."""
+    """게임 기록(주고받은 횟수)의 최고 기록과 끝말잇기 승패, 콘텐츠 화면용 단계 모아 보기, 미루기 다시 울릴 시각."""
     today = now_kst().date()
     made = []
 
@@ -434,6 +434,23 @@ def test_game_score_and_content(repos, uid, other):
     assert repos.sessions.set_step_score(other, g1.session_id, 1, 99) is None
     with pytest.raises(ValidationFailed):
         repos.sessions.set_step_score(uid, g1.session_id, 1, -1)
+
+    step_winner = lambda s: (repos.users.db.table("rs_session_step").select("game_winner")
+                             .eq("session_id", s.session_id).eq("step_order", 1).execute().data[0]["game_winner"])
+    assert step_winner(g1) is None and repos.sessions.count_user_wins(uid) == 0
+    assert repos.sessions.set_game_winner(uid, g1.session_id, 1, "USER") is not None
+    repos.sessions.set_game_winner(uid, g2.session_id, 1, "NEXTY")
+    assert (step_winner(g1), step_winner(g2), repos.sessions.count_user_wins(uid)) == ("USER", "NEXTY", 1)
+    repos.sessions.set_game_winner(uid, g2.session_id, 1, "USER")
+    assert repos.sessions.count_user_wins(uid) == 2 and repos.sessions.count_user_wins(uid, "PERSON") == 0
+    assert repos.sessions.count_user_wins(other) == 0
+    assert repos.sessions.set_game_winner(other, g1.session_id, 1, "NEXTY") is None
+    assert repos.sessions.set_game_winner(uid, g1.session_id, 9, "NEXTY") is None
+    assert step_winner(g1) == "USER"
+    with pytest.raises(ValidationFailed):
+        repos.sessions.set_game_winner(uid, g1.session_id, 1, "DRAW")
+    repos.sessions.set_game_winner(uid, g2.session_id, 1, None)
+    assert step_winner(g2) is None and repos.sessions.count_user_wins(uid) == 1
 
     stretch = session("EXERCISE", "STRETCH", "NECK", [("턱 당기기", {"area": "NECK", "script": "턱을 살짝 당겨요"})])
     rows = [r for r in repos.sessions.list_content_steps(uid, "EXERCISE", today, today) if r["session_id"] == stretch.session_id]
