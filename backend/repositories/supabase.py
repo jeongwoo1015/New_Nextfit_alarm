@@ -509,6 +509,23 @@ class SupabaseSessionRepository(_Base):
         row = _first(self._run(q.order("score", desc=True).limit(1)))
         return row["score"] if row else None
 
+    def set_game_winner(self, user_id, session_id, step_order, winner):
+        """끝말잇기 승패(USER / NEXTY, 안 났으면 None). 다시 보내면 새 값으로 바꾼다. 남의 세션이거나 없는 단계면 None."""
+        if not _is_uuid(session_id):
+            return None
+        q = (self.db.table("rs_session_step").update({"game_winner": winner})
+             .eq("session_id", session_id).eq("user_id", user_id).eq("step_order", step_order))
+        return _model(SessionStep, _first(self._run(q)))
+
+    def count_user_wins(self, user_id, content_option="WORDCHAIN"):
+        """퀴즈 세션 중 콘텐츠 세부가 content_option이고 사용자가 이긴 단계 수."""
+        def query():
+            return (self._select("rs_session_step", "step_id, rs_morning_session!inner(content_type, content_option)")
+                    .eq("user_id", user_id).eq("game_winner", "USER")
+                    .eq("rs_morning_session.content_type", "QUIZ").eq("rs_morning_session.content_option", content_option)
+                    .order("step_id"))
+        return len(self._run_all(query))
+
     def list_content_steps(self, user_id, content_type, since, until):
         """콘텐츠 화면(스트레칭 동작, 영어 문장 정리)용. 그 기간 같은 종류 세션의 단계를 날짜·순서대로.
         각 행은 단계 칸 + session_date·content_option·stretch_area (동작 설명·영어 문장은 step_detail.script)."""

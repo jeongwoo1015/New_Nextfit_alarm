@@ -362,6 +362,7 @@ create table if not exists rs_session_step (
   ai_verdict            varchar(20)
                         check (ai_verdict in ('done', 'not_done', 'skipped', 'ambiguous', 'other')),
   score                 int check (score is null or score >= 0),   -- 게임 기록: 제한 시간 안에 주고받은 횟수
+  game_winner           varchar(5) check (game_winner in ('USER', 'NEXTY')),   -- 끝말잇기 승패. 승패가 안 난 판은 비움
   unique (session_id, step_order),
   constraint rs_step_status_time check ((step_status = 'PENDING') = (checked_at is null))
 );
