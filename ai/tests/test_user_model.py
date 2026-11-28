@@ -5,7 +5,7 @@ import pytest
 
 from ai.personalization.records import (DONE, KST, PENDING, SKIPPED, SessionRecord, StepRecord, build_sessions)
 from ai.personalization.reward import RewardConfig, session_reward
-from ai.personalization.user_model import (DEFAULT_STATS, MAX_GAP_DAYS, MIN_SESSIONS, clock_str, compute_stats,
+from ai.personalization.user_model import (DEFAULT_STATS, MAX_GAP_DAYS, MIN_SESSIONS, aggregate, clock_str, compute_stats,
                                            compute_streaks, day_summary, period_series)
 
 TODAY = date(2026, 11, 10)   # 화요일
@@ -261,3 +261,12 @@ def test_skipped_coaching_day_steps_are_not_counted():
     assert s.routine_total == 1 and s.routine_done == 1 and s.routine_completion_rate == 1.0        # 브리핑만 한 날이 못 한 날로 잡히지 않는다
     assert session_reward(brief_only) == 1.0                                                        # 기상 성공만 본다
     assert session_reward(sess(9, ok=True, steps=[step(PENDING)])) == 0.5                           # 코칭을 한 날은 단계가 반영된다
+
+
+def test_wake_success_rate_counts_days_not_sessions():
+    """11/26 개선안 4-6: 하루에 하나라도 끝까지 마쳤으면 그날은 성공. 세션 평균이 아니라 날 평균."""
+    d1, d2 = date(2026, 11, 2), date(2026, 11, 3)
+    ss = [SessionRecord(session_date=d1, wake_success=False), SessionRecord(session_date=d1, wake_success=True),
+          SessionRecord(session_date=d1, wake_success=False), SessionRecord(session_date=d2, wake_success=False)]
+    s = aggregate(ss)
+    assert s.n_sessions == 4 and s.wake_success_rate == 0.5          # 세션 평균이면 0.25

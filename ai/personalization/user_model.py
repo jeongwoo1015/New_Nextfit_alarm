@@ -39,7 +39,7 @@ def _ratio(num: int, den: int) -> float | None:
 @dataclass(frozen=True)
 class UserStats:
     n_sessions: int = 0
-    wake_success_rate: float | None = None      # 0~1, 기록이 없으면 None
+    wake_success_rate: float | None = None      # 0~1, 날 기준(하루에 하나라도 성공이면 성공, 11/26). 기록이 없으면 None
     avg_rewake: float | None = None
     avg_reaction_sec: float | None = None       # 알람이 울린 시각을 알 수 있을 때만
     avg_wake_minutes: float | None = None       # 평균 기상 시각(자정부터의 분)
@@ -112,6 +112,16 @@ def compute_streaks(sessions, upto: date | None = None) -> tuple[int, int]:
     return current, best
 
 
+def day_wake_success_rate(sessions) -> float | None:
+    """기상 성공률을 날 기준으로 센다(11/26 개선안 4-6, DB 칸 설명): 그날 세션 중 하나라도 성공이면 그날은 성공. 성공한 날 ÷ 기록이 있는 날.
+    세션 하나하나의 성공(wake_success)은 서버가 정해 넘긴다(리포트는 포춘까지 끝까지 마친 세션)."""
+    by_day: dict[date, bool] = {}
+    for s in sessions or []:
+        if s.session_date is not None:
+            by_day[s.session_date] = by_day.get(s.session_date, False) or bool(s.wake_success)
+    return _mean(1.0 if ok else 0.0 for ok in by_day.values())
+
+
 def aggregate(sessions) -> UserStats:
     """주어진 세션 전부로 통계를 만든다(기간 선택은 호출하는 쪽). 연속 달성일은 compute_stats가 따로 채운다."""
     sessions = sorted([s for s in (sessions or []) if s.session_date is not None], key=lambda s: s.session_date)
@@ -125,7 +135,7 @@ def aggregate(sessions) -> UserStats:
                 per_item.setdefault(st.item_key, []).append(1 if st.status == DONE else 0)
     return UserStats(
         n_sessions=len(sessions),
-        wake_success_rate=_mean(1.0 if s.wake_success else 0.0 for s in sessions),
+        wake_success_rate=day_wake_success_rate(sessions),
         avg_rewake=_mean(s.rewake_count for s in sessions),
         avg_reaction_sec=_mean(s.reaction_sec for s in sessions),
         avg_wake_minutes=_mean(s.wake_minutes for s in sessions),
