@@ -83,7 +83,7 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
     add("마크다운 없음", HARD, not re.search(r"\*\*|^#|`|^\s*[-*]\s", all_ai, re.M), "마크다운 기호가 있음")
     eng = re.search(r"(?:[A-Za-z]{3,}[ ,.!]+){3,}", all_ai) if not e.get("allow_english") else None
     add("영어 덧붙임 없음", HARD, not eng, eng.group(0) if eng else "")
-    known = ("end_session", "report_step_result", "start_routine", "adjust_step_time", "reschedule_alarm", "select_stretch_area", "update_setting")
+    known = ("end_session", "report_step_result", "start_routine", "adjust_step_time", "reschedule_alarm", "select_stretch_area", "update_setting", "report_bedtime")
 
     def _bad_setting(a):            # field·value는 허용 값, scope는 ALWAYS/TODAY(없으면 ALWAYS)
         return a.get("field") not in SETTING_VALUES or str(a.get("value")) not in SETTING_VALUES.get(a.get("field"), ()) or a.get("scope", "ALWAYS") not in SETTING_SCOPES
@@ -94,6 +94,7 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
             return True
         return not (isinstance(ml, int) and 1 <= ml <= 60) if ml is not None else not (isinstance(at, str) and re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", at))
     bad_calls = [c for c in log.calls() if c["name"] not in known or (c["name"] == "reschedule_alarm" and _bad_reschedule(c["args"])) or (c["name"] == "update_setting" and _bad_setting(c["args"]))
+                 or (c["name"] == "report_bedtime" and not (isinstance(c["args"].get("time"), str) and re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", c["args"]["time"])))
                  or (c["name"] == "report_step_result" and (c["args"].get("verdict") not in VERDICTS or not isinstance(c["args"].get("step_order"), int)
                                                              or ("answer_correct" in c["args"] and not isinstance(c["args"]["answer_correct"], bool))))
                  or (c["name"] == "adjust_step_time" and not (isinstance(c["args"].get("step_order"), int) and isinstance(c["args"].get("seconds"), int)
@@ -285,6 +286,16 @@ def check(log, scn, extra: dict | None = None) -> list[Result]:
                 if e.get(key):
                     add(f"브리핑: {label} 언급", SOFT, any(w in brief for w in e[key]), brief)
             add("브리핑: 수면·기상 단정 없음", SOFT, not re.search(r"잘 (잤|주무|일어났)|푹 (잤|주무)", brief), brief)
+        if "bedtime" in e:                         # 잠든 시각을 말하면 report_bedtime으로 서버에 넘긴다(11/27). None이면 모른다고 한 날이라 부르지 않는다
+            bed = [c["args"].get("time") for c in log.calls("report_bedtime")]
+            if e["bedtime"]:
+                add("브리핑: 잠든 시각을 report_bedtime으로 한 번 넘김", HARD, bed == [e["bedtime"]], f"실제={bed} 기대={[e['bedtime']]}")
+                add("브리핑: 저장했다는 말을 하지 않음", SOFT, not re.search(r"저장|기록해", all_ai), all_ai[:160])
+                closers = ("start_routine", "end_session", "reschedule_alarm")
+                add("브리핑: report_bedtime은 통화를 끝내는 함수와 같은 응답에서 부름", HARD,
+                    all(any(n in closers for n in _names(t)) for t in turns if "report_bedtime" in _names(t)), str([_names(t) for t in turns]))
+            else:
+                add("브리핑: 잠든 시각을 모르면 report_bedtime을 부르지 않음", HARD, not bed, str(bed))
         add("브리핑: 단계 판정은 하지 않음(콘텐츠·루틴 진행은 다음 세션)", HARD, not log.calls("report_step_result"), str(log.calls("report_step_result")))
         if e.get("ready_words") and brief.strip():
             add("브리핑: 다음 세션 시작 준비를 물음", SOFT, any(w in sentences(brief)[-1] for w in e["ready_words"]), brief)

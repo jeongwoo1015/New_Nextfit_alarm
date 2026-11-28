@@ -87,6 +87,24 @@ RESCHEDULE_ALARM = {
     },
 }
 
+# 모닝콜에서 말한 잠든 시각(11/26 회의, 11/27 앱 요청): 브리핑에서 사용자가 어젯밤 잠든 시각을 말하면 부른다.
+# 11/28 실제 모델 시험: 잠든 시각을 들은 응답에서 부르면 함수 응답 뒤 AI가 브리핑을 되풀이하고 다음 순서로 넘기지 못했다(5번 중 4번).
+# 그래서 통화를 끝내는 함수(start_routine·end_session·reschedule_alarm)와 같은 응답에서 함께 부르게 한다.
+# 앱은 {"result":"ok"}를 바로 돌려주고 서버(PUT /morning/sessions/{id}/bedtime)에 저장한다. 서버가 날짜를 붙이고 리포트 취침 시각을 이 값으로 덮어쓴다.
+REPORT_BEDTIME = {
+    "name": "report_bedtime",
+    "description": ("사용자가 어젯밤 잠든 시각을 말했으면, 다음 순서로 넘기거나 통화를 끝내는 함수(알람 미루기 포함)를 부르는 응답에서 그 함수 바로 앞에 한 번 함께 호출한다. 잠든 시각을 들은 응답에서 따로 부르지 않는다. time은 24시간 'HH:MM'이다(새벽 2시는 '02:00', 밤 11시 반은 '23:30', 자정은 '00:00'). "
+                    "잠든 시각은 지금보다 앞선 12시간 안쪽으로 해석한다. 모르겠다거나 기억이 안 난다고 하면 호출하지 않고, 사용자가 말하지 않은 시각을 지어내지 않는다. "
+                    "사용자가 잠든 시각을 고쳐 말하면 고친 값으로 한 번 더 호출한다. 호출했다는 것이나 저장했다는 말은 하지 않는다."),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "time": {"type": "STRING", "description": "어젯밤 잠든 시각 'HH:MM'(24시간)"},
+        },
+        "required": ["time"],
+    },
+}
+
 # 대화로 설정 바꾸기(11/20 회의 4): 굿나잇콜·모닝콜(브리핑)에서 AI 음악·성격·강도·기상 볼륨만 바꾼다. 어조·호칭 등 다른 설정은 바꾸지 않는다.
 # 앱은 평소처럼 {"result":"ok"}로 응답하고 서버 설정을 바꾼다(성격·강도·음악은 다음 모닝콜부터, 기상 볼륨은 scope에 따라 다음 알람 한 번 또는 앞으로의 상한).
 SETTING_VALUES = {
@@ -115,7 +133,7 @@ UPDATE_SETTING = {
 
 _BY_KIND = {
     "night": [UPDATE_SETTING, END_SESSION],
-    "briefing": [START_ROUTINE, RESCHEDULE_ALARM, UPDATE_SETTING, END_SESSION],
+    "briefing": [START_ROUTINE, RESCHEDULE_ALARM, REPORT_BEDTIME, UPDATE_SETTING, END_SESSION],
     "fortune": [END_SESSION],        # 읽고 멈추는 세션이라 사용자가 끝내겠다고 할 때만 쓴다. 앱이 음성이 끝나면 다음 단계로 넘어간다
     "coaching": [REPORT_STEP_RESULT, ADJUST_STEP_TIME, END_SESSION],
 }
@@ -131,7 +149,7 @@ def tools_for(kind: str, inp=None) -> list[dict]:
         from .prompts.common import resolve_plan      # 순서표에 코칭이 있는 날에만 start_routine (코칭 안 하는 날·이미 다 마친 날은 end_session으로 넘긴다)
         follows = COACHING in resolve_plan(inp, BRIEFING)
         can_snooze = int(getattr(inp, "snoozes_today", 0) or 0) < SNOOZE_MAX_PER_ALARM    # 이 알람의 한도를 넘으면 함수를 빼서 호출할 수 없게 한다
-        return [{"functionDeclarations": ([START_ROUTINE] if follows else []) + ([RESCHEDULE_ALARM] if can_snooze else []) + [UPDATE_SETTING, END_SESSION]}]
+        return [{"functionDeclarations": ([START_ROUTINE] if follows else []) + ([RESCHEDULE_ALARM] if can_snooze else []) + [REPORT_BEDTIME, UPDATE_SETTING, END_SESSION]}]
     if kind == "coaching":
         snooze = [RESCHEDULE_ALARM] if int(getattr(inp, "snoozes_today", 0) or 0) < SNOOZE_MAX_PER_ALARM else []   # 코칭 통화에서도 이 알람의 한도를 넘으면 함수를 뺀다
         if getattr(inp, "morning_call_type", "ROUTINE") == "CONTENT":

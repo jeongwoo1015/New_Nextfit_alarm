@@ -109,3 +109,14 @@ def test_unrequested_snooze_and_false_claim_are_caught():
     r = _run("snooze_daily_limit", [START, _turn("10분만 더", "알람을 10분 뒤에 다시 맞췄어요.")], "turnComplete")
     assert not by(r, "미루기: 함수 없이 다시 맞췄다고 거짓으로 말하지 않음").passed
 
+
+def test_report_bedtime_only_in_briefing():
+    from ai.live.tools import REPORT_BEDTIME
+    assert "report_bedtime" in names("briefing", BriefingInput())
+    assert "report_bedtime" in names("briefing", BriefingInput(snoozes_today=SNOOZE_MAX_PER_ALARM))     # 미루기 한도와 상관없다
+    for kind, inp in (("night", None), ("fortune", None), ("coaching", CoachingInput())):
+        assert "report_bedtime" not in names(kind, inp)
+    assert REPORT_BEDTIME["parameters"]["required"] == ["time"]
+    p = briefing_prompt(BriefingInput())
+    assert "잠든 시각을 들은 응답에서는 함수를 부르지 않는다" in p and "그 함수 바로 앞에 report_bedtime을 한 번 함께 부른다" in p
+    assert "잠든 시각을 들은 응답에서 따로 부르지 않는다" in REPORT_BEDTIME["description"]
