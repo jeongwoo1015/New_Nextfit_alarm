@@ -531,10 +531,14 @@ alter table rs_morning_session add constraint rs_morning_session_stretch_area_ch
 - **서버가 할 일:** `PUT /morning/sessions/{id}/bedtime`(이미 있음). 날짜 붙이기와 `avg_bed_clock` 덮어쓰기도 이미 반영됨.
 - **확인:** 실제 모델 6번 모두 `"00:30"`을 넘기고 다음 순서로 넘어감. 6번 중 1번은 잠든 시각을 들은 응답에서 일찍 불러 함수 응답 뒤에 영어 한 문장이 섞였다. 모른다고 한 날 3번은 모두 부르지 않음.
 
-### B34. 기상 성공률을 날 기준으로 (11/26 개선안 4-6, 11/27 서버 요청, 11/28 AI 반영 완료)
-- **AI가 바꾼 것:** `user_model.aggregate`의 `wake_success_rate`를 세션 평균에서 **날 평균**으로 바꿨다. 그날 세션 중 하나라도 성공이면 그날은 성공, 성공한 날 ÷ 기록이 있는 날(`day_wake_success_rate`). 세션 하나하나의 성공 여부는 지금처럼 서버가 정해 넘긴다(리포트는 포춘까지 끝까지 마친 세션, `flow_completed_at`).
-- **영향:** 리포트의 기간 합계·전체 누적·그래프 칸(`period_series`)이 모두 날 기준이 된다. 코칭 규칙 R1(기상 성공률이 낮으면)도 같은 값을 쓰므로 날 기준이 된다. 코칭 강도 Bandit은 상황 칸이 '피곤'만이라(B27) 영향이 없다. `n_sessions`는 그대로 세션 수다.
-- **서버가 할 일:** 없음(같은 함수를 그대로 부르면 된다).
+### B34. 리포트 통계를 날마다 하나로: 기상 성공률은 첫 알람, 기상 시각은 가장 이른 첫 응답 (11/26 개선안 4-6, 11/28 서버 요청, 11/28 AI 반영 완료)
+- **문제:** 그날의 모든 세션을 섞어 계산해서, 하루에 모닝콜을 여러 번 받는 사람(낮잠 알람 등)은 평균 기상 시각이 7시와 14시 사이로 나오고 기상 성공률도 틀어졌다.
+- **기상 성공률(`wake_success_rate`):** 날마다 **가장 먼저 울린 세션**(`alarm_rang_at`이 가장 이른 세션, 없으면 `first_response_at`) **하나의** `wake_success`만 보고 그 날들의 평균을 낸다(`first_session`, `day_wake_success_rate`). 미루기·3번 미뤄 자동 연결은 같은 세션이라 끝까지 마쳤으면 성공이다. 첫 알람을 끄고 새 알람으로 일어난 날은 실패다. 세션이 없는 날은 분모에서 빠진다. 세션 하나하나의 성공 여부는 지금처럼 서버가 정해 넘긴다(리포트는 `flow_completed_at`).
+- **평균 기상 시각(`avg_wake_minutes`):** 날마다 **가장 이른 `first_response_at` 하나**를 그날 기상 시각으로 써서 평균한다(`day_wake_minutes`). 첫 알람을 놓치고 다음 알람에서 일어난 날은 그 시각이 잡히고, 뒤의 낮잠 알람은 빠진다.
+- **같은 기준을 쓰는 곳:** `aggregate`를 거치는 `period_series`(주·월·연 칸), `day_summary`, `compute_stats`, 그리고 연속 달성일 `compute_streaks`(그날 첫 알람 세션이 성공이면 달성).
+- **그대로인 것:** 루틴 완료율, `n_sessions`(세션 수), 반응 시간·대화 시간 등 나머지 평균.
+- **개인화 영향:** 코칭 규칙 R1(기상 성공률이 낮으면)도 같은 값을 쓰므로 날마다 첫 알람 기준이 된다. 코칭 강도 Bandit은 상황 칸이 '피곤'만이라(B27) 영향이 없다.
+- **서버가 할 일:** 없음(같은 함수를 그대로 부른다). 최신 서버 코드와 합쳐 서버 시험을 돌려 리포트·일기 시험은 모두 통과했다.
 
 ### B35. 목소리 매핑은 그대로 (11/27 앱 요청서 5번, 11/28 결정)
 - 같은 모델·같은 방식으로 후보 13개를 들어 보고 지금 매핑을 유지하기로 했다: `FEMALE→Kore`, `MALE→Puck`, `NEUTRAL→Zephyr`(`live.config.VOICES`).
@@ -591,4 +595,5 @@ alter table rs_morning_session add constraint rs_morning_session_stretch_area_ch
 16. **코칭 강도 사용자별 학습:** 서버가 코칭 강도 Bandit 상태를 `global` 대신 `user:{id}`로 읽고 저장한다. 상황은 2칸(B27).
 17. **밤에 말한 오늘 챙길 일:** 아침 브리핑이 캘린더와 별개로 반드시 리마인드한다. 서버·앱 변경 없음(B30).
 18. **`report_bedtime`(잠든 시각):** 브리핑에서 `start_routine`·`end_session`·`reschedule_alarm`과 같은 응답에 함께 온다. 앱은 먼저 서버에 저장하고 세션을 닫는다(B33).
-19. **기상 성공률:** `user_model`의 `wake_success_rate`가 날 기준이 됐다. 서버 변경 없음(B34).
+19. **리포트 통계 날마다 하나:** 기상 성공률은 날마다 첫 알람 세션, 평균 기상 시각은 날마다 가장 이른 첫 응답. 서버 변경 없음(B34).
+20. **서버 시험 2개 갱신 필요:** `backend/tests/test_ai_real.py`의 브리핑 함수 목록 검사(`test_briefing_token_routine_and_skip`, `test_briefing_token_content_alarm`)에 `report_bedtime`이 `reschedule_alarm`과 `update_setting` 사이에 들어가야 한다(B33). 목록만 바꾸면 서버 시험 271개가 모두 통과하는 것을 확인했다.
