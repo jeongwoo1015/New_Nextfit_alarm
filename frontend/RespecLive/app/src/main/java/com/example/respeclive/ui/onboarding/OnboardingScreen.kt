@@ -613,12 +613,66 @@ private fun Field(label: String, hint: String? = null, content: @Composable Colu
     }
 }
 
+/** 목소리 샘플 파일 위치: assets/voices/voice_female.ogg 처럼 넣는다 (AI 파트가 실제 통화 목소리로 만든 파일) */
+private const val VOICE_SAMPLE_DIR = "voices"
+private val VOICE_SAMPLE_EXTS = listOf("ogg", "m4a", "mp3", "wav")
+
+/** voice_type에 맞는 샘플 파일 경로. 아직 안 넣었으면 null */
+private fun voiceSamplePath(context: android.content.Context, voice: String): String? {
+    val base = "voice_" + when (voice) {
+        "MALE" -> "male"
+        "NEUTRAL" -> "neutral"
+        else -> "female"
+    }
+    val files = runCatching { context.assets.list(VOICE_SAMPLE_DIR) }.getOrNull().orEmpty().toSet()
+    return VOICE_SAMPLE_EXTS.map { "$base.$it" }.firstOrNull { it in files }?.let { "$VOICE_SAMPLE_DIR/$it" }
+}
+
 /**
- * 목소리 미리 듣기. 실제 통화 목소리(Gemini Live)는 서버 토큰으로만 들을 수 있어
- * 여기서는 기기 TTS의 음높이로 느낌만 보여 준다.
+ * 목소리 미리 듣기. 실제 통화 목소리로 녹음한 샘플 파일(assets/voices)이 있으면 그걸 틀고,
+ * 없으면 기기 TTS의 음높이로 느낌만 보여 준다. 샘플은 고정 문장이라 말투를 바꿔도 같다.
  */
 @Composable
 internal fun VoicePreview(voice: String, line: String) {
+    val context = LocalContext.current
+    val sample = remember(voice) { voiceSamplePath(context, voice) }
+    if (sample != null) VoiceSamplePreview(voice, sample) else VoiceTtsPreview(voice, line)
+}
+
+/** 샘플 파일 재생. 다시 누르거나 목소리를 바꾸면 멈춤 */
+@Composable
+private fun VoiceSamplePreview(voice: String, path: String) {
+    val context = LocalContext.current
+    var player by remember { mutableStateOf<MediaPlayer?>(null) }
+
+    fun stop() {
+        player?.runCatching { stop(); release() }
+        player = null
+    }
+    DisposableEffect(voice) { onDispose { stop() } }
+
+    fun play() {
+        if (player != null) { stop(); return }
+        val mp = MediaPlayer()
+        runCatching {
+            mp.setAudioAttributes(
+                AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
+            )
+            context.assets.openFd(path).use { mp.setDataSource(it.fileDescriptor, it.startOffset, it.length) }
+            mp.setOnCompletionListener { stop() }
+            mp.setOnErrorListener { p, _, _ -> p.release(); player = null; true }
+            mp.prepare()
+            mp.start()
+            player = mp
+        }.onFailure { mp.release() }
+    }
+
+    PreviewButton(playing = player != null, enabled = true, onClick = ::play)
+}
+
+/** 샘플 파일이 없을 때: 기기 TTS의 음높이로 흉내 */
+@Composable
+private fun VoiceTtsPreview(voice: String, line: String) {
     val context = LocalContext.current
     var ready by remember { mutableStateOf(false) }
     var speaking by remember { mutableStateOf(false) }
@@ -653,6 +707,12 @@ internal fun VoicePreview(voice: String, line: String) {
         tts.speak(ttsText(line), TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
     }
 
+    PreviewButton(playing = speaking, enabled = ready, onClick = ::play, showStop = false)
+}
+
+/** [▶ 미리 듣기] + 재생 중에 움직이는 파장 바 */
+@Composable
+private fun PreviewButton(playing: Boolean, enabled: Boolean, onClick: () -> Unit, showStop: Boolean = true) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         val shape = RoundedCornerShape(50)
         Row(
@@ -660,16 +720,16 @@ internal fun VoicePreview(voice: String, line: String) {
                 .clip(shape)
                 .background(RespecColors.MintDark)
                 .border(1.dp, RespecColors.Mint.copy(alpha = 0.4f), shape)
-                .clickable(enabled = ready) { play() }
+                .clickable(enabled = enabled) { onClick() }
                 .padding(horizontal = 22.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Filled.PlayArrow, null, tint = RespecColors.Mint)
+            Icon(if (showStop && playing) Icons.Filled.Stop else Icons.Filled.PlayArrow, null, tint = RespecColors.Mint)
             Spacer(Modifier.width(8.dp))
             Text("미리 듣기", color = RespecColors.Mint, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.width(16.dp))
-        Waveform(speaking)
+        Waveform(playing)
     }
 }
 
