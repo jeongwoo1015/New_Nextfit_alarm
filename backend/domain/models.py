@@ -225,6 +225,7 @@ class SessionStep:
     checked_at: datetime | None = None
     ai_verdict: str | None = None
     score: int | None = None               # 게임 기록: 제한 시간 안에 주고받은 횟수 (11/22, 0 이상)
+    game_winner: str | None = None         # 끝말잇기 승패 USER / NEXTY (11/28 앱 요청, 승패가 안 났으면 None)
 
 
 @dataclass(frozen=True)

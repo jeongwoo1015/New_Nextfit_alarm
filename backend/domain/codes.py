@@ -71,3 +71,6 @@ def normalize_stretch_area(area: str) -> str:
 def normalize_theme(theme: str) -> str:
     """예전 테마 값(SYSTEM)을 새 값(AUTO)으로."""
     return LEGACY_THEMES.get(theme, theme)
+
+# 끝말잇기 승패 (11/28 앱 요청, RS_SESSION_STEP.GAME_WINNER): 사용자 승 / 넥스티 승
+GAME_WINNERS = ("USER", "NEXTY")

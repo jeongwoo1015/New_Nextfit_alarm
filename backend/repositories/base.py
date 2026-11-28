@@ -103,6 +103,8 @@ class SessionRepository(Protocol):
     # 게임 기록·콘텐츠 화면 (11/22)
     def set_step_score(self, user_id: str, session_id: str, step_order: int, score: int) -> SessionStep | None: ...  # 주고받은 횟수(0 이상, 음수 ValidationFailed). 남의 세션·없는 단계 None
     def best_score(self, user_id: str, content_type: str = "QUIZ", content_option: str | None = None) -> int | None: ...  # 그 콘텐츠의 최고 기록, 없으면 None
+    def set_game_winner(self, user_id: str, session_id: str, step_order: int, winner: str) -> SessionStep | None: ...  # 끝말잇기 승패 USER/NEXTY (11/28). 다시 보내면 바꿈. 남의 세션·없는 단계 None
+    def count_user_wins(self, user_id: str, content_option: str = "WORDCHAIN") -> int: ...  # 그 게임에서 승패가 USER인 단계 수 (세션마다 단계 하나라 세션당 한 번)
     def list_content_steps(self, user_id: str, content_type: str, since: date, until: date) -> list[dict]: ...
     # 그 기간 같은 콘텐츠 종류 세션의 단계를 (session_date, session_id, step_order) 순으로.
     # 각 행 = 단계 칸 + session_date(ISO 문자열)·content_option·stretch_area. 동작 설명·영어 문장은 step_detail["script"]

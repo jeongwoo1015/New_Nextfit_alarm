@@ -68,10 +68,10 @@ def test_game_score_saved_with_best(client, clock):
     v = run(client, game)
     put = lambda view, order, score, user=USER_A: client.put(url(view, f"/steps/{order}/score"), json={"score": score},   # noqa: E731
                                                              headers=auth(user))
-    assert put(v, 1, 7).json() == {"step_order": 1, "score": 7, "best_score": 7, "is_best": True}
+    assert put(v, 1, 7).json() == {"step_order": 1, "score": 7, "best_score": 7, "is_best": True, "user_wins": 0}
     clock.now = datetime(2026, 11, 7, 6, 30, tzinfo=KST)
     w = run(client, game)
-    assert put(w, 1, 4).json() == {"step_order": 1, "score": 4, "best_score": 7, "is_best": False}
+    assert put(w, 1, 4).json() == {"step_order": 1, "score": 4, "best_score": 7, "is_best": False, "user_wins": 0}
     assert put(w, 1, 9).json()["is_best"] is True                                  # 이어 하기로 늘어남
     rows = client.get("/contents/steps?date=2026-11-07", headers=H).json()["steps"]
     assert (rows[0]["score"], rows[0]["words"]) == (9, [])                         # 단어는 저장하지 않는다
@@ -83,3 +83,27 @@ def test_game_score_saved_with_best(client, clock):
     clock.now = datetime(2026, 11, 7, 6, 45, tzinfo=KST)
     r = put(run(client, quiz), 1, 3)
     assert r.status_code == 422 and r.json()["error"]["code"] == "NOT_GAME_SESSION"
+
+
+def test_wordchain_winner_counts_user_wins(client, clock):
+    """11/28 앱 요청: 끝말잇기 점수와 함께 승패(winner)를 받아 저장하고, 넥스티를 이긴 누적 횟수(user_wins)를 돌려준다.
+    같은 세션을 다시 보내도 한 번만 세고, 승패를 안 보내면 이전 값을 그대로 둔다. 끝말잇기가 아니면 승패를 받지 않는다."""
+    onboard(client)
+    game = content_alarm(client, "06:30", "QUIZ", "WORDCHAIN")
+    put = lambda view, body: client.put(url(view, "/steps/1/score"), json=body, headers=H)   # noqa: E731
+    clock.now = datetime(2026, 11, 6, 6, 30, tzinfo=KST)
+    v = run(client, game)
+    assert put(v, {"score": 5, "winner": "USER"}).json()["user_wins"] == 1
+    assert put(v, {"score": 8, "winner": "USER"}).json()["user_wins"] == 1         # 같은 세션은 한 번만
+    assert put(v, {"score": 9}).json()["user_wins"] == 1                           # 승패 없이 이어 하기 → 그대로
+    clock.now = datetime(2026, 11, 7, 6, 30, tzinfo=KST)
+    w = run(client, game)
+    assert put(w, {"score": 3, "winner": "NEXTY"}).json()["user_wins"] == 1
+    assert put(w, {"score": 6, "winner": "USER"}).json()["user_wins"] == 2         # 이어 해서 이김
+    assert put(w, {"score": 6, "winner": "DRAW"}).status_code == 422
+    other = content_alarm(client, "06:45", "QUIZ", "PERSON")
+    clock.now = datetime(2026, 11, 7, 6, 45, tzinfo=KST)
+    q = run(client, other)
+    assert put(q, {"score": 2}).json()["user_wins"] is None                        # 끝말잇기가 아니면 null
+    r = put(q, {"score": 2, "winner": "USER"})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "NOT_WORDCHAIN"

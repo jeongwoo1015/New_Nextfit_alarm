@@ -141,9 +141,11 @@ def report_verdict(session_id: str, step_order: int, body: VerdictIn, user_id: s
 def save_game_score(session_id: str, step_order: int, body: GameScoreIn, user_id: str = Depends(current_user_id),
                     svc: MorningService = Depends(morning_service)):
     """게임 기록: 제한 시간 안에 주고받은 횟수를 앱이 세서 보낸다 (게임 세션만, 아니면 422 NOT_GAME_SESSION).
-    이어 하기로 다시 보내면 바꾼다. 말한 단어는 서버에 보내지 않는다. 응답의 best_score는 같은 게임의 최고 기록."""
-    step, best = svc.save_game_score(user_id, session_id, step_order, body.score)
-    return GameScoreOut(step_order=step.step_order, score=step.score, best_score=best, is_best=step.score >= best)
+    이어 하기로 다시 보내면 바꾼다. 말한 단어는 서버에 보내지 않는다. 응답의 best_score는 같은 게임의 최고 기록.
+    끝말잇기는 승패 winner("USER"/"NEXTY", 승패가 안 난 판은 보내지 않음)를 함께 받고, 응답 user_wins = 넥스티를 이긴 누적 횟수
+    (같은 세션은 한 번만, 11/28). 끝말잇기가 아닌데 winner를 보내면 422 NOT_WORDCHAIN."""
+    step, best, wins = svc.save_game_score(user_id, session_id, step_order, body.score, body.winner)
+    return GameScoreOut(step_order=step.step_order, score=step.score, best_score=best, is_best=step.score >= best, user_wins=wins)
 
 
 @router.patch("/sessions/{session_id}/steps/{step_order}", response_model=SessionViewOut)

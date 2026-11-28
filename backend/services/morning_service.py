@@ -493,19 +493,28 @@ class MorningService:
         self.r.sessions.save_step(user_id, step)
         return self.view(user_id, session_id)
 
-    def save_game_score(self, user_id: str, session_id: str, step_order: int, score: int) -> tuple[SessionStep, int]:
+    def save_game_score(self, user_id: str, session_id: str, step_order: int, score: int,
+                        winner: str | None = None) -> tuple[SessionStep, int, int | None]:
         """게임 기록 = 제한 시간 안에 주고받은 횟수(앱이 센다, 11/22 RS_SESSION_STEP.SCORE). 게임(QUIZ) 세션만.
         이어 하기로 다시 보내면 새 값으로 바꾼다. 말한 단어는 저장하지 않는다(기기에만, 팀 결정 11/23).
-        돌려주는 최고 기록은 같은 게임(콘텐츠 세부)끼리, 이번 기록 포함."""
+        돌려주는 최고 기록은 같은 게임(콘텐츠 세부)끼리, 이번 기록 포함.
+        winner(11/28 앱 요청): 끝말잇기 승패 USER/NEXTY. 승패가 안 난 판은 보내지 않는다(이전 값 유지).
+        이긴 횟수 = 승패가 USER인 끝말잇기 단계 수라 같은 세션을 다시 보내도 한 번만 센다. 끝말잇기가 아니면 None."""
         s = self._session(user_id, session_id)
         if s.content_type != "QUIZ":
             raise ValidationFailed("게임 콘텐츠 세션만 기록을 저장할 수 있어요", "NOT_GAME_SESSION")
+        wordchain = s.content_option == "WORDCHAIN"
+        if winner is not None and not wordchain:
+            raise ValidationFailed("승패는 끝말잇기에서만 저장할 수 있어요", "NOT_WORDCHAIN")
         self._step(user_id, session_id, step_order)
         step = self.r.sessions.set_step_score(user_id, session_id, step_order, score)
         if not step:
             raise NotFound("단계를 찾을 수 없어요", "STEP_NOT_FOUND")
+        if winner is not None:
+            step = self.r.sessions.set_game_winner(user_id, session_id, step_order, winner) or step
         best = self.r.sessions.best_score(user_id, "QUIZ", s.content_option)
-        return step, max(best or 0, score)
+        wins = self.r.sessions.count_user_wins(user_id, "WORDCHAIN") if wordchain else None
+        return step, max(best or 0, score), wins
 
     def mark_step(self, user_id: str, session_id: str, step_order: int, status: str) -> SessionView:
         """체크리스트에서 사용자가 직접 체크·해제."""

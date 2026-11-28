@@ -75,11 +75,11 @@ def test_briefing_token_routine_and_skip():
                                             program_name="현실 모닝루틴", strategy_block="[오늘의 전략]\n- 테스트"))
     body = tokens[-1][1]
     assert "07:02" in system_text(body) and "보고서 끝내기" in system_text(body) and "[오늘의 전략]" in system_text(body)
-    assert tool_names(body) == ["start_routine", "reschedule_alarm", "update_setting", "end_session"]   # 루틴이 이어진다, 말로 미루기(B21)
+    assert tool_names(body) == ["start_routine", "reschedule_alarm", "report_bedtime", "update_setting", "end_session"]   # 루틴이 이어진다, 말로 미루기(B21), 말한 잠든 시각(B33)
     gw.issue_briefing_token(BriefingContext(PERSONA, "07:02", night=NIGHT, program_name="현실 모닝루틴", coaching_skipped=True))
-    assert tool_names(tokens[-1][1]) == ["reschedule_alarm", "update_setting", "end_session"]   # 코칭 안 하는 날은 start_routine 없음
+    assert tool_names(tokens[-1][1]) == ["reschedule_alarm", "report_bedtime", "update_setting", "end_session"]   # 코칭 안 하는 날은 start_routine 없음
     gw.issue_briefing_token(BriefingContext(PERSONA, "07:02", night=NIGHT, program_name="현실 모닝루틴", snoozes_today=3))
-    assert tool_names(tokens[-1][1]) == ["start_routine", "update_setting", "end_session"]   # 하루 3번 미뤘으면 더 못 미룸
+    assert tool_names(tokens[-1][1]) == ["start_routine", "report_bedtime", "update_setting", "end_session"]   # 하루 3번 미뤘으면 더 못 미룸
 
 
 def test_briefing_token_weather():
@@ -95,7 +95,7 @@ def test_briefing_token_weather():
 def test_briefing_token_content_alarm():
     gw, tokens = gateway()
     gw.issue_briefing_token(BriefingContext(PERSONA, "06:31", content_name="퀴즈"))
-    assert "퀴즈" in system_text(tokens[-1][1]) and tool_names(tokens[-1][1]) == ["start_routine", "reschedule_alarm", "update_setting", "end_session"]
+    assert "퀴즈" in system_text(tokens[-1][1]) and tool_names(tokens[-1][1]) == ["start_routine", "reschedule_alarm", "report_bedtime", "update_setting", "end_session"]
 
 
 def test_coaching_token_has_no_following_session():
